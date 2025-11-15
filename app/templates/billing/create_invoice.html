@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Create Invoice</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('billing_dashboard') }}">Billing</a></li>
+                            <li class="breadcrumb-item active">Create Invoice</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-file-invoice mr-1"></i> New Invoice</h3>
+                    </div>
+                    <form method="POST" action="{{ url_for('create_invoice') }}">
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label for="patient_id">Patient ID</label>
+                                <input type="number" name="patient_id" id="patient_id" class="form-control" value="{{ patient.id if patient else '' }}" required>
+                                <small class="form-text text-muted">Enter the patient ID</small>
+                            </div>
+                            
+                            {% if encounter %}
+                            <div class="form-group">
+                                <label>Encounter</label>
+                                <p class="form-control-plaintext">Encounter #{{ encounter.id }} - {{ encounter.encounter_date.strftime('%Y-%m-%d') }}</p>
+                                <input type="hidden" name="encounter_id" value="{{ encounter.id }}">
+                            </div>
+                            {% else %}
+                            <div class="form-group">
+                                <label for="encounter_id">Encounter ID (Optional)</label>
+                                <input type="number" name="encounter_id" id="encounter_id" class="form-control">
+                            </div>
+                            {% endif %}
+
+                            <div class="form-group">
+                                <label for="appointment_id">Appointment ID (Optional)</label>
+                                <input type="number" name="appointment_id" id="appointment_id" class="form-control">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="payment_mechanism">Payment Mechanism</label>
+                                <select name="payment_mechanism" id="payment_mechanism" class="form-control">
+                                    <option value="">Select payment mechanism</option>
+                                    {% for pm in payment_methods %}
+                                    <option value="{{ pm }}">{{ pm.replace('_', ' ').title() }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="nhis_number">NHIS Number (Optional)</label>
+                                <input type="text" name="nhis_number" id="nhis_number" class="form-control">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="insurance_provider">Insurance Provider (Optional)</label>
+                                <input type="text" name="insurance_provider" id="insurance_provider" class="form-control">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="insurance_policy_number">Insurance Policy Number (Optional)</label>
+                                <input type="text" name="insurance_policy_number" id="insurance_policy_number" class="form-control">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="notes">Notes (Optional)</label>
+                                <textarea name="notes" id="notes" class="form-control" rows="3"></textarea>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> Create Invoice
+                            </button>
+                            <a href="{{ url_for('billing_dashboard') }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

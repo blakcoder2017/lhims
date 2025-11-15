@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Audit Logs</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Audit Logs</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                <!-- Filters -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Logs</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('audit_logs') }}">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Action</label>
+                                        <select name="action" class="form-control">
+                                            <option value="">All Actions</option>
+                                            <option value="create" {{ 'selected' if filters.action == 'create' else '' }}>Create</option>
+                                            <option value="update" {{ 'selected' if filters.action == 'update' else '' }}>Update</option>
+                                            <option value="delete" {{ 'selected' if filters.action == 'delete' else '' }}>Delete</option>
+                                            <option value="view" {{ 'selected' if filters.action == 'view' else '' }}>View</option>
+                                            <option value="login" {{ 'selected' if filters.action == 'login' else '' }}>Login</option>
+                                            <option value="export" {{ 'selected' if filters.action == 'export' else '' }}>Export</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Resource Type</label>
+                                        <input type="text" name="resource_type" class="form-control" value="{{ filters.resource_type or '' }}" placeholder="e.g., Patient, Invoice">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ filters.start_date or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ filters.end_date or '' }}">
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-filter"></i> Apply Filters
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Audit Logs Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-list mr-1"></i> Audit Logs</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if logs %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Date/Time</th>
+                                        <th>User</th>
+                                        <th>Action</th>
+                                        <th>Resource</th>
+                                        <th>Description</th>
+                                        <th>IP Address</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for log in logs %}
+                                    <tr>
+                                        <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                        <td>{{ log.username or 'N/A' }}</td>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if log.action.value == 'create' else 'info' if log.action.value == 'update' else 'danger' if log.action.value == 'delete' else 'secondary' }}">
+                                                {{ log.action.value.title() }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            {% if log.resource_type %}
+                                                {{ log.resource_type }}{% if log.resource_id %} #{{ log.resource_id }}{% endif %}
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ log.description or 'N/A' }}</td>
+                                        <td>{{ log.ip_address or 'N/A' }}</td>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if log.status == 'success' else 'danger' if log.status == 'failed' else 'secondary' }}">
+                                                {{ log.status or 'N/A' }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> No audit logs found.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

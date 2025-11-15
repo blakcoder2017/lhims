@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Lab Test Catalog</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('lab_dashboard') }}">Laboratory</a></li>
+                            <li class="breadcrumb-item active">Test Catalog</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                <!-- Quick Actions -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-plus-circle mr-1"></i> Quick Actions</h3>
+                    </div>
+                    <div class="card-body">
+                        <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#createTestModal">
+                            <i class="fas fa-plus mr-1"></i> Add New Test
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Search & Filter -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-search mr-1"></i> Search Tests</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('lab_tests_dashboard') }}">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <input type="text" name="search" class="form-control" placeholder="Search by name or code..." value="{{ search or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <select name="category" class="form-control">
+                                            <option value="">All Categories</option>
+                                            {% for cat in categories %}
+                                            <option value="{{ cat }}" {{ 'selected' if category == cat else '' }}>{{ cat }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <button type="submit" class="btn btn-primary btn-block">
+                                        <i class="fas fa-search"></i> Search
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Tests Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-list mr-1"></i> Lab Tests</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if tests %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Test Name</th>
+                                        <th>Code</th>
+                                        <th>Category</th>
+                                        <th>Type</th>
+                                        <th>Specimen</th>
+                                        <th>Cost</th>
+                                        <th>NHIS</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for test in tests %}
+                                    <tr>
+                                        <td><strong>{{ test.test_name }}</strong></td>
+                                        <td>{{ test.test_code or 'N/A' }}</td>
+                                        <td>{{ test.test_category or 'N/A' }}</td>
+                                        <td>{{ test.test_type or 'N/A' }}</td>
+                                        <td>{{ test.specimen_type or 'N/A' }}</td>
+                                        <td>GHS {{ "%.2f"|format(test.cost) if test.cost else 'N/A' }}</td>
+                                        <td>
+                                            {% if test.nhis_covered %}
+                                                <span class="badge badge-success">Yes</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">No</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('view_lab_test', test_id=test.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> No tests found. <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#createTestModal">Add Test</button>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+    <!-- Create Test Modal -->
+    <div class="modal fade" id="createTestModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <form method="POST" action="{{ url_for('create_lab_test') }}">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Add Lab Test</h5>
+                        <button type="button" class="close" data-dismiss="modal">
+                            <span>&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Test Name</label>
+                            <input type="text" name="test_name" class="form-control" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Test Code</label>
+                                    <input type="text" name="test_code" class="form-control">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Category</label>
+                                    <select name="test_category" class="form-control">
+                                        <option value="">Select category...</option>
+                                        <option value="Hematology">Hematology</option>
+                                        <option value="Chemistry">Chemistry</option>
+                                        <option value="Microbiology">Microbiology</option>
+                                        <option value="Immunology">Immunology</option>
+                                        <option value="Serology">Serology</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Specimen Type</label>
+                            <select name="specimen_type" class="form-control">
+                                <option value="">Select...</option>
+                                <option value="Blood">Blood</option>
+                                <option value="Urine">Urine</option>
+                                <option value="Stool">Stool</option>
+                                <option value="Sputum">Sputum</option>
+                                <option value="Swab">Swab</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea name="description" class="form-control" rows="3"></textarea>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Cost (GHS)</label>
+                                    <input type="number" name="cost" class="form-control" step="0.01" min="0">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>NHIS Covered</label>
+                                    <div class="form-check">
+                                        <input type="checkbox" name="nhis_covered" class="form-check-input" value="true">
+                                        <label class="form-check-label">Yes</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Add Test</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
+

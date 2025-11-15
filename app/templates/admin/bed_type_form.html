@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>
+                            <i class="fas fa-bed mr-2"></i>
+                            {% if bed_type %}Edit{% else %}Create{% endif %} Bed Type
+                        </h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('bed_types_list') }}">Bed Types</a></li>
+                            <li class="breadcrumb-item active">{% if bed_type %}Edit{% else %}Create{% endif %}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') == 'code_exists' %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    A bed type with this code already exists.
+                </div>
+                {% endif %}
+                {% if request.query_params.get('error') == 'name_exists' %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    A bed type with this name already exists.
+                </div>
+                {% endif %}
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-bed mr-1"></i>
+                            {% if bed_type %}Edit Bed Type{% else %}Create New Bed Type{% endif %}
+                        </h3>
+                    </div>
+                    <form method="POST" action="{% if bed_type %}{{ url_for('bed_type_update', bed_type_id=bed_type.id) }}{% else %}{{ url_for('bed_type_create') }}{% endif %}">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="name">Bed Type Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="name" name="name" 
+                                               value="{% if bed_type %}{{ bed_type.name }}{% endif %}" 
+                                               required placeholder="e.g., Standard, ICU, Private">
+                                        <small class="form-text text-muted">Unique name for this bed type</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="code">Bed Type Code</label>
+                                        <input type="text" class="form-control" id="code" name="code" 
+                                               value="{% if bed_type %}{{ bed_type.code }}{% endif %}" 
+                                               placeholder="e.g., STD, ICU, PRIV">
+                                        <small class="form-text text-muted">Short code for this bed type (optional, must be unique)</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="description">Description</label>
+                                        <textarea class="form-control" id="description" name="description" rows="3" 
+                                                  placeholder="Description of this bed type">{% if bed_type %}{{ bed_type.description }}{% endif %}</textarea>
+                                        <small class="form-text text-muted">Optional description of the bed type</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="default_charge_per_day">Default Charge per Day (GHS)</label>
+                                        <input type="text" class="form-control" id="default_charge_per_day" name="default_charge_per_day" 
+                                               value="{% if bed_type and bed_type.default_charge_per_day %}{{ bed_type.default_charge_per_day }}{% endif %}" 
+                                               placeholder="e.g., 50.00">
+                                        <small class="form-text text-muted">Default charge per day for this bed type (optional)</small>
+                                    </div>
+                                </div>
+                            </div>
+                            {% if bed_type %}
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" 
+                                                   {% if bed_type.is_active %}checked{% endif %}>
+                                            <label class="form-check-label" for="is_active">
+                                                <strong>Active</strong>
+                                            </label>
+                                            <small class="form-text text-muted d-block">
+                                                Uncheck to deactivate this bed type (it will no longer appear in dropdowns)
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> {% if bed_type %}Update{% else %}Create{% endif %} Bed Type
+                            </button>
+                            <a href="{{ url_for('bed_types_list') }}" class="btn btn-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

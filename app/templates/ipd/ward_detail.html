@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-hospital mr-2"></i>Ward: {{ ward.name }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_wards_list') }}">Wards</a></li>
+                            <li class="breadcrumb-item active">{{ ward.name }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('status') == 'bed_created' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-check-circle"></i> Bed created successfully!
+                </div>
+                {% endif %}
+
+                <!-- Ward Information -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Ward Information</h3>
+                            </div>
+                            <div class="card-body">
+                                <dl class="row">
+                                    <dt class="col-sm-4">Ward Name:</dt>
+                                    <dd class="col-sm-8"><strong>{{ ward.name }}</strong></dd>
+                                    
+                                    <dt class="col-sm-4">Ward Number:</dt>
+                                    <dd class="col-sm-8">{{ ward.ward_number or 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-4">Ward Type:</dt>
+                                    <dd class="col-sm-8">{{ ward.ward_type or 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-4">Capacity:</dt>
+                                    <dd class="col-sm-8">{{ ward.capacity }} beds</dd>
+                                    
+                                    <dt class="col-sm-4">Occupied:</dt>
+                                    <dd class="col-sm-8"><span class="badge badge-warning">{{ ward.current_occupancy }}</span></dd>
+                                    
+                                    <dt class="col-sm-4">Available:</dt>
+                                    <dd class="col-sm-8"><span class="badge badge-success">{{ ward.capacity - ward.current_occupancy }}</span></dd>
+                                    
+                                    <dt class="col-sm-4">Occupancy Rate:</dt>
+                                    <dd class="col-sm-8">
+                                        {% set ward_occupancy = (ward.current_occupancy / ward.capacity * 100) if ward.capacity > 0 else 0 %}
+                                        <div class="progress" style="height: 25px;">
+                                            <div class="progress-bar {% if ward_occupancy > 80 %}bg-danger{% elif ward_occupancy > 60 %}bg-warning{% else %}bg-success{% endif %}" 
+                                                 style="width: {{ ward_occupancy }}%">
+                                                <strong>{{ "%.1f"|format(ward_occupancy) }}%</strong>
+                                            </div>
+                                        </div>
+                                    </dd>
+                                    
+                                    <dt class="col-sm-4">Status:</dt>
+                                    <dd class="col-sm-8">
+                                        {% if ward.status.value == 'active' %}
+                                            <span class="badge badge-success">Active</span>
+                                        {% elif ward.status.value == 'inactive' %}
+                                            <span class="badge badge-secondary">Inactive</span>
+                                        {% else %}
+                                            <span class="badge badge-warning">Maintenance</span>
+                                        {% endif %}
+                                    </dd>
+                                    
+                                    <dt class="col-sm-4">Floor:</dt>
+                                    <dd class="col-sm-8">{{ ward.floor or 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-4">Building:</dt>
+                                    <dd class="col-sm-8">{{ ward.building or 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-4">Charge per Day:</dt>
+                                    <dd class="col-sm-8">GHS {{ "%.2f"|format(ward.charge_per_day or 0) }}</dd>
+                                    
+                                    {% if ward.description %}
+                                    <dt class="col-sm-4">Description:</dt>
+                                    <dd class="col-sm-8">{{ ward.description }}</dd>
+                                    {% endif %}
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-bed mr-1"></i> Beds</h3>
+                                <div class="card-tools">
+                                    <a href="{{ url_for('ipd_bed_create_form') }}?ward_id={{ ward.id }}" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-plus mr-1"></i> Add Bed
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if beds %}
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Bed Number</th>
+                                                <th>Bed Name</th>
+                                                <th>Status</th>
+                                                <th>Type</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for bed in beds %}
+                                            <tr>
+                                                <td><strong>{{ bed.bed_number }}</strong></td>
+                                                <td>{{ bed.bed_name or 'N/A' }}</td>
+                                                <td>
+                                                    {% if bed.status.value == 'available' %}
+                                                        <span class="badge badge-success">Available</span>
+                                                    {% elif bed.status.value == 'occupied' %}
+                                                        <span class="badge badge-danger">Occupied</span>
+                                                    {% elif bed.status.value == 'reserved' %}
+                                                        <span class="badge badge-warning">Reserved</span>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">Maintenance</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>{{ bed.bed_type or 'N/A' }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> No beds in this ward. <a href="{{ url_for('ipd_bed_create_form') }}?ward_id={{ ward.id }}">Add a bed</a>.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Current Admissions -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-user-injured mr-1"></i> Current Admissions</h3>
+                            </div>
+                            <div class="card-body">
+                                {% if admissions %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Admission Number</th>
+                                                <th>Patient Name</th>
+                                                <th>Bed</th>
+                                                <th>Admission Date</th>
+                                                <th>Reason</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for admission in admissions %}
+                                            <tr>
+                                                <td><strong>{{ admission.admission_number }}</strong></td>
+                                                <td>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</td>
+                                                <td>{{ admission.bed.bed_number }}</td>
+                                                <td>{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>{{ admission.admission_reason or 'N/A' }}</td>
+                                                <td>
+                                                    <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-sm btn-primary">
+                                                        <i class="fas fa-eye"></i> View
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> No current admissions in this ward.
+                                </div>
+                                {% endif %}
+                                <div class="alert alert-warning mt-3">
+                                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                                    <strong>Note:</strong> When a patient is transferred to another hospital, the patient is automatically discharged, the bed is released, and the bed status is updated. Cash patients must pay before transfer. Health insurance (NHIS and Private Insurance) bills will be added to their claim file.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

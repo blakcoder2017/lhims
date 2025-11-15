@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-chart-line mr-2"></i>Financial Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Financial Report</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('financial_report') }}">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Service Type</label>
+                                        <select name="service_type" class="form-control">
+                                            <option value="">All Services</option>
+                                            <option value="consultation" {% if service_type == 'consultation' %}selected{% endif %}>Consultation</option>
+                                            <option value="lab_test" {% if service_type == 'lab_test' %}selected{% endif %}>Lab Test</option>
+                                            <option value="radiology" {% if service_type == 'radiology' %}selected{% endif %}>Radiology</option>
+                                            <option value="pharmacy" {% if service_type == 'pharmacy' %}selected{% endif %}>Pharmacy</option>
+                                            <option value="other" {% if service_type == 'other' %}selected{% endif %}>Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Payment Mechanism</label>
+                                        <select name="payment_mechanism" class="form-control">
+                                            <option value="">All</option>
+                                            <option value="cash" {% if payment_mechanism == 'cash' %}selected{% endif %}>Cash</option>
+                                            <option value="nhis" {% if payment_mechanism == 'nhis' %}selected{% endif %}>NHIS</option>
+                                            <option value="private_insurance" {% if payment_mechanism == 'private_insurance' %}selected{% endif %}>Private Insurance</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-search mr-1"></i> Apply Filters
+                                    </button>
+                                    <a href="{{ url_for('financial_report') }}?format=pdf{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if service_type %}&service_type={{ service_type }}{% endif %}{% if payment_mechanism %}&payment_mechanism={{ payment_mechanism }}{% endif %}" class="btn btn-danger">
+                                        <i class="fas fa-file-pdf mr-1"></i> Export PDF
+                                    </a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Summary Cards -->
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>GHS {{ "%.2f"|format(total_revenue) }}</h3>
+                                <p>Total Revenue</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-money-bill-wave"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>GHS {{ "%.2f"|format(total_paid) }}</h3>
+                                <p>Total Paid</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>GHS {{ "%.2f"|format(total_outstanding) }}</h3>
+                                <p>Outstanding</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-secondary">
+                            <div class="inner">
+                                <h3>{{ invoices|length }}</h3>
+                                <p>Total Invoices</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-file-invoice"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Service Breakdown -->
+                {% if service_breakdown %}
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-chart-pie mr-1"></i> Breakdown by Service Type</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Service Type</th>
+                                        <th>Count</th>
+                                        <th>Total Amount</th>
+                                        <th>Paid</th>
+                                        <th>Outstanding</th>
+                                        <th>% of Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for service_type, data in service_breakdown.items() %}
+                                    {% set outstanding = data.total - data.paid %}
+                                    {% set percentage = (data.total / total_revenue * 100) if total_revenue > 0 else 0 %}
+                                    <tr>
+                                        <td><strong>{{ service_type.replace('_', ' ').title() }}</strong></td>
+                                        <td>{{ data.count }}</td>
+                                        <td>GHS {{ "%.2f"|format(data.total) }}</td>
+                                        <td>GHS {{ "%.2f"|format(data.paid) }}</td>
+                                        <td>GHS {{ "%.2f"|format(outstanding) }}</td>
+                                        <td>
+                                            <div class="progress">
+                                                <div class="progress-bar" role="progressbar" style="width: {{ percentage }}%">
+                                                    {{ "%.1f"|format(percentage) }}%
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Payment Mechanism Breakdown -->
+                {% if payment_breakdown %}
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-credit-card mr-1"></i> Breakdown by Payment Mechanism</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Payment Mechanism</th>
+                                        <th>Count</th>
+                                        <th>Total Amount</th>
+                                        <th>Paid</th>
+                                        <th>Outstanding</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for pm, data in payment_breakdown.items() %}
+                                    {% set outstanding = data.total - data.paid %}
+                                    <tr>
+                                        <td><strong>{{ pm.replace('_', ' ').title() }}</strong></td>
+                                        <td>{{ data.count }}</td>
+                                        <td>GHS {{ "%.2f"|format(data.total) }}</td>
+                                        <td>GHS {{ "%.2f"|format(data.paid) }}</td>
+                                        <td>GHS {{ "%.2f"|format(outstanding) }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Recent Invoices -->
+                <div class="card card-success card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-file-invoice mr-1"></i> Recent Invoices</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Invoice Number</th>
+                                        <th>Date</th>
+                                        <th>Patient</th>
+                                        <th>Total Amount</th>
+                                        <th>Paid</th>
+                                        <th>Balance</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for invoice in invoices %}
+                                    <tr>
+                                        <td><a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}">{{ invoice.invoice_number }}</a></td>
+                                        <td>{{ invoice.invoice_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ invoice.patient.first_name }} {{ invoice.patient.last_name }}</td>
+                                        <td>GHS {{ "%.2f"|format(invoice.total_amount) }}</td>
+                                        <td>GHS {{ "%.2f"|format(invoice.paid_amount) }}</td>
+                                        <td>GHS {{ "%.2f"|format(invoice.balance) }}</td>
+                                        <td>
+                                            <span class="badge badge-{% if invoice.status.value == 'paid' %}success{% elif invoice.status.value == 'pending' %}warning{% else %}info{% endif %}">
+                                                {{ invoice.status.value.title() }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Report Footer -->
+                <div class="card">
+                    <div class="card-body">
+                        <p class="text-muted text-center">
+                            <small>Report Generated: {{ report_date.strftime('%Y-%m-%d %H:%M') }} | Generated by: {{ current_user.full_name }}</small>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}
+

@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-user-injured mr-2"></i>Admissions</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
+                            <li class="breadcrumb-item active">Admissions</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Quick Actions -->
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <a href="{{ url_for('ipd_admission_create_form') }}" class="btn btn-primary">
+                            <i class="fas fa-plus-circle mr-1"></i> Admit Patient
+                        </a>
+                        <a href="{{ url_for('ipd_dashboard') }}" class="btn btn-info">
+                            <i class="fas fa-tachometer-alt mr-1"></i> IPD Dashboard
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Search and Filter Form -->
+                <div class="card card-info card-outline collapsed-card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Search & Filters</h3>
+                        <div class="card-tools">
+                            <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('ipd_admissions_list') }}" id="searchForm">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label for="search">Search</label>
+                                        <input type="text" 
+                                               class="form-control" 
+                                               name="search" 
+                                               id="search" 
+                                               placeholder="Patient name, admission #, or patient #"
+                                               value="{{ search or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="status_filter">Status</label>
+                                        <select class="form-control" name="status_filter" id="status_filter">
+                                            <option value="">All Status</option>
+                                            {% for status in admission_statuses %}
+                                            <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>
+                                                {{ status.title() }}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="ward_id">Ward</label>
+                                        <select class="form-control" name="ward_id" id="ward_id">
+                                            <option value="">All Wards</option>
+                                            {% for ward in wards %}
+                                            <option value="{{ ward.id }}" {% if ward_id == ward.id %}selected{% endif %}>
+                                                {{ ward.name }}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="date_from">From Date</label>
+                                        <input type="date" 
+                                               class="form-control" 
+                                               name="date_from" 
+                                               id="date_from" 
+                                               value="{{ date_from or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="date_to">To Date</label>
+                                        <input type="date" 
+                                               class="form-control" 
+                                               name="date_to" 
+                                               id="date_to" 
+                                               value="{{ date_to or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-1">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <div>
+                                            <button type="submit" class="btn btn-primary btn-block">
+                                                <i class="fas fa-search mr-1"></i> Search
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% if search or status_filter or ward_id or date_from or date_to %}
+                            <div class="row">
+                                <div class="col-12">
+                                    <a href="{{ url_for('ipd_admissions_list') }}" class="btn btn-sm btn-secondary">
+                                        <i class="fas fa-times mr-1"></i> Clear Filters
+                                    </a>
+                                    <small class="text-muted ml-2">
+                                        {% if search %}<span class="badge badge-info">Search: {{ search }}</span>{% endif %}
+                                        {% if status_filter %}<span class="badge badge-info">Status: {{ status_filter }}</span>{% endif %}
+                                        {% if ward_id %}
+                                            {% for ward in wards %}
+                                                {% if ward.id|int == ward_id|int %}
+                                                <span class="badge badge-info">Ward: {{ ward.name }}</span>
+                                                {% endif %}
+                                            {% endfor %}
+                                        {% endif %}
+                                        {% if date_from or date_to %}<span class="badge badge-info">Date Range: {{ date_from or 'Any' }} to {{ date_to or 'Any' }}</span>{% endif %}
+                                    </small>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Admissions Table -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-list mr-1"></i> All Admissions
+                            {% if admissions %}
+                            <span class="badge badge-primary ml-2">{{ admissions|length }}</span>
+                            {% endif %}
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        {% if admissions %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Admission Number</th>
+                                        <th>Patient Name</th>
+                                        <th>Ward</th>
+                                        <th>Bed</th>
+                                        <th>Admission Date</th>
+                                        <th>Discharge Date</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for admission in admissions %}
+                                    <tr>
+                                        <td><strong>{{ admission.admission_number }}</strong></td>
+                                        <td>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</td>
+                                        <td>{{ admission.ward.name }}</td>
+                                        <td>{{ admission.bed.bed_number }}</td>
+                                        <td>{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>{{ admission.discharge_date.strftime('%Y-%m-%d %H:%M') if admission.discharge_date else 'N/A' }}</td>
+                                        <td>
+                                            {% if admission.status.value == 'admitted' %}
+                                                <span class="badge badge-success">Admitted</span>
+                                            {% elif admission.status.value == 'discharged' %}
+                                                <span class="badge badge-secondary">Discharged</span>
+                                            {% elif admission.status.value == 'transferred' %}
+                                                <span class="badge badge-info">Transferred</span>
+                                            {% else %}
+                                                <span class="badge badge-danger">Absconded</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> No Admissions</h5>
+                            No admissions found. <a href="{{ url_for('ipd_admission_create_form') }}">Admit a patient</a>.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

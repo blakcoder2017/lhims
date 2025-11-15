@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-user-nurse mr-2"></i>Nurse Dashboard</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Nurse Dashboard</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Statistics Row -->
+                <div class="row">
+                    <!-- Triage Queue Count -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ triage_queue_count }}</h3>
+                                <p>Patients Awaiting Vitals</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-heartbeat"></i>
+                            </div>
+                            <a href="{{ url_for('nurse_triage_queue') }}" class="small-box-footer">
+                                View Vitals Queue <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Completed Triages Today -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ completed_triages_today }}</h3>
+                                <p>Completed Vitals Today</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <a href="{{ url_for('nurse_triage_queue') }}?status_filter=completed" class="small-box-footer">
+                                View Completed <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- IPD Admissions -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ ipd_admissions_count }}</h3>
+                                <p>IPD Admissions</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-hospital"></i>
+                            </div>
+                            <a href="{{ url_for('ipd_admissions_list') }}" class="small-box-footer">
+                                View IPD <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3><i class="fas fa-bolt"></i></h3>
+                                <p>Quick Actions</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-tasks"></i>
+                            </div>
+                            <a href="{{ url_for('nurse_triage_queue') }}" class="small-box-footer">
+                                Start Vitals <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Triage Queue -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-warning card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-list mr-1"></i> Vitals Queue - Patients Awaiting Vital Signs</h3>
+                                <div class="card-tools">
+                                    <a href="{{ url_for('nurse_triage_queue') }}" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-list"></i> View Full Queue
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if triage_queue %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Queue #</th>
+                                                <th>Patient Name</th>
+                                                <th>Patient Number</th>
+                                                <th>Department</th>
+                                                <th>Dept Type</th>
+                                                <th>Scheduled Time</th>
+                                                <th>Chief Complaint</th>
+                                                <th>Priority</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for appointment in triage_queue[:10] %}
+                                            <tr>
+                                                <td><strong>{{ appointment.queue_number or 'N/A' }}</strong></td>
+                                                <td>{{ appointment.patient.first_name }} {{ appointment.patient.last_name }}</td>
+                                                <td><span class="badge badge-primary">{{ appointment.patient.patient_number or 'N/A' }}</span></td>
+                                                <td>{{ appointment.department }}</td>
+                                                <td>
+                                                    <span class="badge badge-{% if appointment.department_type == 'ipd' %}danger{% elif appointment.department_type == 'opd' %}success{% else %}secondary{% endif %}">
+                                                        {{ (appointment.department_type or 'opd').upper() }}
+                                                    </span>
+                                                </td>
+                                                <td>{{ appointment.scheduled_date.strftime('%H:%M') }}</td>
+                                                <td>{{ appointment.chief_complaint or 'N/A' }}</td>
+                                                <td>
+                                                    <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                        {{ appointment.priority }}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    {% if appointment.status.value == 'scheduled' %}
+                                                        <span class="badge badge-secondary">Scheduled</span>
+                                                    {% elif appointment.status.value == 'checked_in' %}
+                                                        <span class="badge badge-primary">Checked In</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <a href="/patients/{{ appointment.patient_id }}/triage?appointment_id={{ appointment.id }}" 
+                                                       class="btn btn-sm btn-warning">
+                                                        <i class="fas fa-heartbeat"></i> Record Vitals
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% if triage_queue|length > 10 %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Showing first 10 patients. <a href="{{ url_for('nurse_triage_queue') }}">View all {{ triage_queue_count }} patients</a>.
+                                </div>
+                                {% endif %}
+                                {% else %}
+                                <div class="alert alert-success">
+                                    <h5><i class="icon fas fa-check"></i> All Caught Up!</h5>
+                                    No patients awaiting vitals at this time.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IPD Admissions -->
+                {% if ipd_admissions %}
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-hospital mr-1"></i> IPD Admissions - Active Patients</h3>
+                                <div class="card-tools">
+                                    <a href="{{ url_for('ipd_admissions_list') }}" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-list"></i> View All Admissions
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Admission #</th>
+                                                <th>Patient Name</th>
+                                                <th>Ward</th>
+                                                <th>Bed</th>
+                                                <th>Admission Date</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for admission in ipd_admissions[:10] %}
+                                            <tr>
+                                                <td><strong>{{ admission.admission_number }}</strong></td>
+                                                <td>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</td>
+                                                <td>{{ admission.ward.name }}</td>
+                                                <td>{{ admission.bed.bed_number }}</td>
+                                                <td>{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>
+                                                    <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" 
+                                                       class="btn btn-sm btn-primary">
+                                                        <i class="fas fa-eye"></i> View
+                                                    </a>
+                                                    <a href="/patients/{{ admission.patient_id }}/triage" 
+                                                       class="btn btn-sm btn-info">
+                                                        <i class="fas fa-heartbeat"></i> Record Vitals
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% if ipd_admissions|length > 10 %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Showing first 10 admissions. <a href="{{ url_for('ipd_admissions_list') }}">View all</a>.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

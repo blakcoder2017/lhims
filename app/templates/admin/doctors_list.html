@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-user-md mr-2"></i>Doctors List</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Doctors List</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Search Form -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-search mr-1"></i> Search & Filter Doctors</h3>
+                        <div class="card-tools">
+                            <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                                <i class="fas fa-minus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('doctors_list') }}" id="searchForm">
+                            <div class="row">
+                                <div class="col-md-10">
+                                    <div class="form-group">
+                                        <label for="query">Search</label>
+                                        <input type="text" 
+                                               class="form-control" 
+                                               id="query" 
+                                               name="query" 
+                                               placeholder="Search by name, username, or email..." 
+                                               value="{{ search_query }}"
+                                               autofocus>
+                                        <small class="form-text text-muted">Search by name, username, or email</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="per_page">Per Page</label>
+                                        <select class="form-control" id="per_page" name="per_page" onchange="this.form.submit()">
+                                            <option value="20" {% if per_page == 20 %}selected{% endif %}>20</option>
+                                            <option value="50" {% if per_page == 50 %}selected{% endif %}>50</option>
+                                            <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+                                            <option value="200" {% if per_page == 200 %}selected{% endif %}>200</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-search mr-1"></i> Search
+                                    </button>
+                                    <a href="{{ url_for('doctors_list') }}" class="btn btn-secondary">
+                                        <i class="fas fa-redo mr-1"></i> Reset
+                                    </a>
+                                    <button type="button" class="btn btn-success" onclick="window.print()">
+                                        <i class="fas fa-print mr-1"></i> Print List
+                                    </button>
+                                    <button type="button" class="btn btn-info" onclick="exportToCSV()">
+                                        <i class="fas fa-download mr-1"></i> Export CSV
+                                    </button>
+                                </div>
+                            </div>
+                            <input type="hidden" name="page" value="1">
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Doctors Table -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-list mr-1"></i> Doctors 
+                            <span class="badge badge-info">{{ total_count }} total</span>
+                        </h3>
+                        <div class="card-tools">
+                            <span class="badge badge-primary">Page {{ page }} of {{ total_pages }}</span>
+                        </div>
+                    </div>
+                    <div class="card-body table-responsive p-0">
+                        {% if doctors %}
+                        <table class="table table-hover table-bordered table-striped" id="doctorsTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Username</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for doctor in doctors %}
+                                <tr>
+                                    <td>{{ doctor.id }}</td>
+                                    <td><strong>{{ doctor.full_name or 'N/A' }}</strong></td>
+                                    <td>{{ doctor.username }}</td>
+                                    <td>{{ doctor.email or 'N/A' }}</td>
+                                    <td>
+                                        <span class="badge badge-primary">{{ doctor.role.name if doctor.role else 'N/A' }}</span>
+                                    </td>
+                                    <td>
+                                        {% if doctor.is_active %}
+                                            <span class="badge badge-success">Active</span>
+                                        {% else %}
+                                            <span class="badge badge-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <a href="{{ url_for('doctor_dashboard') if doctor.id == current_user.id else '#' }}" 
+                                           class="btn btn-sm btn-primary" title="View Dashboard">
+                                            <i class="fas fa-tachometer-alt"></i>
+                                        </a>
+                                        {% if user_role == 'Admin' %}
+                                        <a href="/admin/users?search={{ doctor.username }}" 
+                                           class="btn btn-sm btn-info" title="View User">
+                                            <i class="fas fa-user"></i>
+                                        </a>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <div class="alert alert-info m-3">
+                            <h5><i class="icon fas fa-info"></i> No Doctors Found</h5>
+                            {% if search_query %}
+                                No doctors found matching "{{ search_query }}". Please try a different search term.
+                            {% else %}
+                                No doctors found in the system.
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% if total_pages > 1 %}
+                    <div class="card-footer">
+                        <div class="row">
+                            <div class="col-sm-12 col-md-5">
+                                <div class="dataTables_info">
+                                    Showing {{ ((page - 1) * per_page) + 1 }} to {{ [page * per_page, total_count]|min }} of {{ total_count }} entries
+                                </div>
+                            </div>
+                            <div class="col-sm-12 col-md-7">
+                                <div class="dataTables_paginate paging_simple_numbers">
+                                    <ul class="pagination pagination-sm m-0 float-right">
+                                        {% if page > 1 %}
+                                        <li class="paginate_button page-item previous">
+                                            <a href="{{ url_for('doctors_list', query=search_query, page=page-1, per_page=per_page) }}" class="page-link">Previous</a>
+                                        </li>
+                                        {% else %}
+                                        <li class="paginate_button page-item previous disabled">
+                                            <span class="page-link">Previous</span>
+                                        </li>
+                                        {% endif %}
+                                        
+                                        {% for p in range(1, total_pages + 1) %}
+                                            {% if p == page %}
+                                            <li class="paginate_button page-item active">
+                                                <span class="page-link">{{ p }}</span>
+                                            </li>
+                                            {% elif p <= 3 or p > total_pages - 3 or (p >= page - 1 and p <= page + 1) %}
+                                            <li class="paginate_button page-item">
+                                                <a href="{{ url_for('doctors_list', query=search_query, page=p, per_page=per_page) }}" class="page-link">{{ p }}</a>
+                                            </li>
+                                            {% elif p == 4 or p == total_pages - 3 %}
+                                            <li class="paginate_button page-item disabled">
+                                                <span class="page-link">...</span>
+                                            </li>
+                                            {% endif %}
+                                        {% endfor %}
+                                        
+                                        {% if page < total_pages %}
+                                        <li class="paginate_button page-item next">
+                                            <a href="{{ url_for('doctors_list', query=search_query, page=page+1, per_page=per_page) }}" class="page-link">Next</a>
+                                        </li>
+                                        {% else %}
+                                        <li class="paginate_button page-item next disabled">
+                                            <span class="page-link">Next</span>
+                                        </li>
+                                        {% endif %}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <style>
+        @media print {
+            .content-header, .card-header .card-tools, .card-footer, .btn, .sidebar, .navbar, .main-header {
+                display: none !important;
+            }
+            .card {
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .card-body {
+                padding: 0 !important;
+            }
+            table {
+                font-size: 10px;
+            }
+        }
+    </style>
+
+    <script>
+        function exportToCSV() {
+            const table = document.getElementById('doctorsTable');
+            let csv = [];
+            const rows = table.querySelectorAll('tr');
+            
+            for (let i = 0; i < rows.length; i++) {
+                const row = [], cols = rows[i].querySelectorAll('td, th');
+                for (let j = 0; j < cols.length - 1; j++) { // Exclude Actions column
+                    let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, '').replace(/"/g, '""');
+                    row.push('"' + data + '"');
+                }
+                csv.push(row.join(','));
+            }
+            
+            const csvFile = new Blob([csv.join('\n')], { type: 'text/csv' });
+            const downloadLink = document.createElement('a');
+            downloadLink.download = 'doctors_list_' + new Date().toISOString().split('T')[0] + '.csv';
+            downloadLink.href = window.URL.createObjectURL(csvFile);
+            downloadLink.style.display = 'none';
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+        }
+    </script>
+
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

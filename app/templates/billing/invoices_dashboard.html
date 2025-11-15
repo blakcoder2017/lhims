@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Billing & Invoices</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Billing</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                <!-- Actions -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-plus-circle mr-1"></i> Quick Actions</h3>
+                    </div>
+                    <div class="card-body">
+                        <a href="{{ url_for('create_invoice_page') }}" class="btn btn-primary">
+                            <i class="fas fa-file-invoice mr-1"></i> Create New Invoice
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Status Filter -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Invoices</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('billing_dashboard') }}" class="mb-3">
+                            {% if status_filter %}
+                                <input type="hidden" name="status_filter" value="{{ status_filter }}">
+                            {% endif %}
+                            {% if patient_id %}
+                                <input type="hidden" name="patient_id" value="{{ patient_id }}">
+                            {% endif %}
+                            <div class="form-row">
+                                <div class="col-md-8">
+                                    <div class="form-group mb-2">
+                                        <input type="text"
+                                               class="form-control"
+                                               name="patient_query"
+                                               placeholder="Search by patient name, number, or phone"
+                                               value="{{ patient_query }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <button type="submit" class="btn btn-primary btn-block mb-2">
+                                        <i class="fas fa-search mr-1"></i> Search
+                                    </button>
+                                </div>
+                                <div class="col-md-2">
+                                    <a href="{{ url_for('billing_dashboard') }}" class="btn btn-secondary btn-block mb-2">
+                                        <i class="fas fa-times mr-1"></i> Clear
+                                    </a>
+                                </div>
+                            </div>
+                            {% if patient_query %}
+                            <div>
+                                <span class="text-muted">Searching for: <strong>{{ patient_query }}</strong></span>
+                            </div>
+                            {% endif %}
+                        </form>
+                        <div class="btn-group" role="group">
+                            <a href="/billing/invoices" class="btn btn-sm btn-outline-primary {{ 'active' if not status_filter else '' }}">All</a>
+                            <a href="/billing/invoices?status_filter=draft" class="btn btn-sm btn-outline-secondary {{ 'active' if status_filter == 'draft' else '' }}">Draft</a>
+                            <a href="/billing/invoices?status_filter=pending" class="btn btn-sm btn-outline-warning {{ 'active' if status_filter == 'pending' else '' }}">Pending</a>
+                            <a href="/billing/invoices?status_filter=partially_paid" class="btn btn-sm btn-outline-info {{ 'active' if status_filter == 'partially_paid' else '' }}">Partially Paid</a>
+                            <a href="/billing/invoices?status_filter=paid" class="btn btn-sm btn-outline-success {{ 'active' if status_filter == 'paid' else '' }}">Paid</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Patient Billing Summary -->
+                <div class="card card-success card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-file-invoice-dollar mr-1"></i> Patient Billing Overview</h3>
+                        <div class="card-tools">
+                            <span class="badge badge-primary">
+                                {{ billing_totals.invoice_count }} invoice{{ 's' if billing_totals.invoice_count != 1 else '' }}
+                            </span>
+                            <span class="badge badge-warning ml-2">
+                                {{ billing_totals.open_invoices }} open
+                            </span>
+                            <span class="badge badge-success ml-2">
+                                Total Paid: GHS {{ "{:,.2f}".format(billing_totals.total_paid) }}
+                            </span>
+                            <span class="badge badge-danger ml-2">
+                                Outstanding: GHS {{ "{:,.2f}".format(billing_totals.total_balance) }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        {% if patient_summaries %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead class="thead-light">
+                                    <tr>
+                                        <th>Patient</th>
+                                        <th>Payment Mechanisms</th>
+                                        <th class="text-center">Invoices</th>
+                                        <th class="text-center">Open</th>
+                                        <th class="text-right">Total Billed (GHS)</th>
+                                        <th class="text-right">Total Paid (GHS)</th>
+                                        <th class="text-right">Outstanding (GHS)</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for summary in patient_summaries %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ summary.patient_name }}</strong><br>
+                                            <small class="text-muted">#{{ summary.patient_number }}</small>
+                                        </td>
+                                        <td>{{ summary.payment_label }}</td>
+                                        <td class="text-center">{{ summary.invoice_count }}</td>
+                                        <td class="text-center">
+                                            {% if summary.open_invoices > 0 %}
+                                            <span class="badge badge-warning">{{ summary.open_invoices }}</span>
+                                            {% else %}
+                                            <span class="badge badge-success">0</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-right">{{ "{:,.2f}".format(summary.total_billed) }}</td>
+                                        <td class="text-right text-success">{{ "{:,.2f}".format(summary.total_paid) }}</td>
+                                        <td class="text-right text-danger">{{ "{:,.2f}".format(summary.total_balance) }}</td>
+                                        <td>
+                                            {% for status in summary.status_list %}
+                                            <span class="badge badge-
+                                                {% if status.key == 'paid' %}success
+                                                {% elif status.key == 'partially_paid' %}info
+                                                {% elif status.key == 'pending' %}warning
+                                                {% else %}secondary{% endif %}
+                                            ">
+                                                {{ status.label }} ({{ status.count }})
+                                            </span>
+                                            {% endfor %}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group-vertical">
+                                                <a href="/billing/invoices?patient_id={{ summary.patient_id }}" class="btn btn-sm btn-primary">
+                                                    <i class="fas fa-list mr-1"></i> View Details
+                                                </a>
+                                                <a href="{{ url_for('view_patient_records', patient_id=summary.patient_id) }}" class="btn btn-sm btn-secondary">
+                                                    <i class="fas fa-user mr-1"></i> Patient File
+                                                </a>
+                                                {% if summary.total_balance > 0 and summary.payable_invoice_ids %}
+                                                <a href="{{ url_for('pay_selected_invoices_page') }}?invoice_ids={{ summary.payable_invoice_ids | join(',') }}" class="btn btn-sm btn-success">
+                                                    <i class="fas fa-credit-card mr-1"></i> Pay Outstanding
+                                                </a>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr class="font-weight-bold">
+                                        <td colspan="2">All Patients</td>
+                                        <td class="text-center">{{ billing_totals.invoice_count }}</td>
+                                        <td class="text-center">
+                                            {% if billing_totals.open_invoices > 0 %}
+                                            <span class="badge badge-warning">{{ billing_totals.open_invoices }}</span>
+                                            {% else %}
+                                            <span class="badge badge-success">0</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-right">{{ "{:,.2f}".format(billing_totals.total_billed) }}</td>
+                                        <td class="text-right text-success">{{ "{:,.2f}".format(billing_totals.total_paid) }}</td>
+                                        <td class="text-right text-danger">{{ "{:,.2f}".format(billing_totals.total_balance) }}</td>
+                                        <td colspan="2"></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        {% if request.query_params.get('status') == 'payment_success' %}
+                        <div class="alert alert-success mt-3 mb-0">
+                            <i class="fas fa-check-circle mr-1"></i>
+                            Payment of GHS {{ request.query_params.get('paid_amount') or '0.00' }} processed successfully.
+                        </div>
+                        {% endif %}
+                        {% else %}
+                        <div class="alert alert-info mb-0">
+                            <i class="fas fa-info-circle mr-1"></i> No invoices have been generated yet.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Detailed Invoices -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-receipt mr-1"></i> Detailed Invoices
+                            {% if patient_filter %}
+                                for {{ patient_filter.first_name }} {{ patient_filter.last_name }}
+                            {% elif patient_id %}
+                                for Patient #{{ patient_id }}
+                            {% else %}
+                                (latest {{ invoices|length }} records)
+                            {% endif %}
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="paySelectedForm" method="GET" action="{{ url_for('pay_selected_invoices_page') }}">
+                            <input type="hidden" name="invoice_ids" id="selected_invoice_ids">
+                        </form>
+                        <div class="mb-3 d-flex justify-content-between align-items-center">
+                            <div>
+                                <button type="button" class="btn btn-success btn-sm" id="paySelectedBtn">
+                                    <i class="fas fa-credit-card mr-1"></i> Pay Selected
+                                </button>
+                            </div>
+                            {% if patient_filter %}
+                            <span class="text-muted">Showing invoices for <strong>{{ patient_filter.first_name }} {{ patient_filter.last_name }}</strong></span>
+                            {% elif patient_id %}
+                            <span class="text-muted">Showing invoices for Patient #{{ patient_id }}</span>
+                            {% endif %}
+                        </div>
+                        {% if not patient_id %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Use the "View Details" button in the summary above to drill down into a specific patient's invoices.
+                        </div>
+                        {% endif %}
+                        {% if invoices %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 35px;">
+                                            <input type="checkbox" id="selectAllInvoices">
+                                        </th>
+                                        <th>Invoice #</th>
+                                        <th>Patient</th>
+                                        <th>Patient Number</th>
+                                        <th>Date</th>
+                                        <th>Total Amount</th>
+                                        <th>Paid Amount</th>
+                                        <th>Balance</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for invoice in invoices %}
+                                    <tr>
+                                        <td class="text-center align-middle">
+                                            {% set balance_value = invoice.balance if invoice.balance is not none else (invoice.total_amount - invoice.paid_amount) %}
+                                            <input type="checkbox" class="invoice-select-checkbox" value="{{ invoice.id }}"
+                                                   {% if balance_value <= 0 %}disabled{% endif %}>
+                                        </td>
+                                        <td><strong>{{ invoice.invoice_number }}</strong></td>
+                                        <td>{{ invoice.patient.first_name }} {{ invoice.patient.last_name }}</td>
+                                        <td><span class="badge badge-primary">{{ invoice.patient.patient_number or 'N/A' }}</span></td>
+                                        <td>{{ invoice.invoice_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>GHS {{ "%.2f"|format(invoice.total_amount) }}</td>
+                                        <td>GHS {{ "%.2f"|format(invoice.paid_amount) }}</td>
+                                        <td><strong>GHS {{ "%.2f"|format(invoice.balance) }}</strong></td>
+                                        <td>
+                                            {% set status_value = invoice.status.value if invoice.status else invoice.status %}
+                                            <span class="badge badge-{{ 'success' if status_value == 'paid' else 'info' if status_value == 'partially_paid' else 'warning' if status_value == 'pending' else 'secondary' }}">
+                                                {{ status_value.replace('_', ' ').title() }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> No invoices found.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const selectAll = document.getElementById('selectAllInvoices');
+            const checkboxes = document.querySelectorAll('.invoice-select-checkbox');
+            const payButton = document.getElementById('paySelectedBtn');
+            const hiddenField = document.getElementById('selected_invoice_ids');
+            const form = document.getElementById('paySelectedForm');
+
+            if (selectAll) {
+                selectAll.addEventListener('change', function() {
+                    checkboxes.forEach(cb => {
+                        if (!cb.disabled) {
+                            cb.checked = selectAll.checked;
+                        }
+                    });
+                });
+            }
+
+            if (payButton) {
+                payButton.addEventListener('click', function() {
+                    const selected = Array.from(checkboxes)
+                        .filter(cb => cb.checked && !cb.disabled)
+                        .map(cb => cb.value);
+                    if (!selected.length) {
+                        alert('Select at least one invoice with an outstanding balance to pay.');
+                        return;
+                    }
+                    hiddenField.value = selected.join(',');
+                    form.submit();
+                });
+            }
+        });
+    </script>
+
+{% endblock %}
+

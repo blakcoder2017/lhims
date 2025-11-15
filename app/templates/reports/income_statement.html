@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-chart-line mr-2"></i>Income Statement (Profit & Loss)</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">Income Statement</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters -->
+                <div class="card card-primary no-print">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('income_statement') }}" id="filterForm">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Period</label>
+                                        <select name="period" class="form-control" id="periodSelect" onchange="updateDateFields()">
+                                            <option value="day" {% if period == 'day' %}selected{% endif %}>Today</option>
+                                            <option value="month" {% if period == 'month' %}selected{% endif %}>This Month</option>
+                                            <option value="year" {% if period == 'year' %}selected{% endif %}>This Year</option>
+                                            <option value="custom" {% if period == 'custom' %}selected{% endif %}>Custom Period</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3" id="startDateGroup" {% if period != 'custom' %}style="display:none;"{% endif %}>
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" id="startDate" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3" id="endDateGroup" {% if period != 'custom' %}style="display:none;"{% endif %}>
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" id="endDate" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <div>
+                                            <button type="submit" class="btn btn-primary btn-block">
+                                                <i class="fas fa-search mr-1"></i> Generate Report
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="row mb-3 no-print">
+                    <div class="col-12">
+                        <button onclick="window.print()" class="btn btn-success">
+                            <i class="fas fa-print mr-1"></i> Print
+                        </button>
+                        <button onclick="exportToPDF()" class="btn btn-danger">
+                            <i class="fas fa-file-pdf mr-1"></i> Export PDF
+                        </button>
+                        <button onclick="exportToExcel()" class="btn btn-info">
+                            <i class="fas fa-file-excel mr-1"></i> Export Excel
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Income Statement Report -->
+                <div class="card card-primary" id="incomeStatement">
+                    <div class="card-body">
+                        <!-- Hospital Header -->
+                        <div class="text-center mb-4">
+                            {% if hospital_settings %}
+                            <h2 class="mb-1">{{ hospital_settings.hospital_name }}</h2>
+                            {% if hospital_settings.hospital_address %}
+                            <p class="mb-1">{{ hospital_settings.hospital_address }}</p>
+                            {% endif %}
+                            {% if hospital_settings.hospital_phone %}
+                            <p class="mb-1">Phone: {{ hospital_settings.hospital_phone }}</p>
+                            {% endif %}
+                            {% if hospital_settings.hospital_email %}
+                            <p class="mb-1">Email: {{ hospital_settings.hospital_email }}</p>
+                            {% endif %}
+                            {% if hospital_settings.hospital_website %}
+                            <p class="mb-1">Website: {{ hospital_settings.hospital_website }}</p>
+                            {% endif %}
+                            {% else %}
+                            <h2 class="mb-1">Hospital Name</h2>
+                            {% endif %}
+                            <hr>
+                            <h3 class="mb-0">INCOME STATEMENT (PROFIT & LOSS)</h3>
+                            <p class="mb-0"><strong>Period:</strong> {{ period_label }}</p>
+                            <p class="mb-0"><strong>Report Generated:</strong> {{ report_date.strftime('%B %d, %Y at %I:%M %p') }}</p>
+                        </div>
+
+                        <!-- Revenue Section -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h4 class="text-success"><i class="fas fa-arrow-up mr-1"></i> REVENUE</h4>
+                                <table class="table table-bordered">
+                                    <thead class="thead-light">
+                                        <tr>
+                                            <th>Description</th>
+                                            <th class="text-right">Amount (GHS)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for service_type, amount in revenue_by_service.items() %}
+                                        <tr>
+                                            <td>{{ service_type.replace('_', ' ').title() }}</td>
+                                            <td class="text-right">{{ "%.2f"|format(amount) }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                        <tr class="table-success font-weight-bold">
+                                            <td><strong>TOTAL REVENUE</strong></td>
+                                            <td class="text-right"><strong>{{ "%.2f"|format(total_revenue) }}</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Expenses Section -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h4 class="text-danger"><i class="fas fa-arrow-down mr-1"></i> EXPENSES</h4>
+                                <table class="table table-bordered">
+                                    <thead class="thead-light">
+                                        <tr>
+                                            <th>Category</th>
+                                            <th class="text-right">Amount (GHS)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for category, amount in expenses_by_category.items() %}
+                                        <tr>
+                                            <td>{{ category.replace('_', ' ').title() }}</td>
+                                            <td class="text-right">{{ "%.2f"|format(amount) }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                        <tr class="table-danger font-weight-bold">
+                                            <td><strong>TOTAL EXPENSES</strong></td>
+                                            <td class="text-right"><strong>{{ "%.2f"|format(total_expenses) }}</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Net Income Section -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <table class="table table-bordered">
+                                    <tbody>
+                                        <tr class="{% if net_income >= 0 %}table-success{% else %}table-danger{% endif %} font-weight-bold" style="font-size: 1.2em;">
+                                            <td><strong>NET INCOME (PROFIT/LOSS)</strong></td>
+                                            <td class="text-right"><strong>{{ "%.2f"|format(net_income) }}</strong></td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Profit Margin</strong></td>
+                                            <td class="text-right"><strong>{{ "%.2f"|format(profit_margin) }}%</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Revenue Breakdown by Payment Method -->
+                        {% if revenue_by_method %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5>Revenue by Payment Method</h5>
+                                <table class="table table-sm table-bordered">
+                                    <thead class="thead-light">
+                                        <tr>
+                                            <th>Payment Method</th>
+                                            <th class="text-right">Amount (GHS)</th>
+                                            <th class="text-right">Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for method, amount in revenue_by_method.items() %}
+                                        {% set percentage = (amount / total_revenue * 100) if total_revenue > 0 else 0 %}
+                                        <tr>
+                                            <td>{{ method.replace('_', ' ').title() }}</td>
+                                            <td class="text-right">{{ "%.2f"|format(amount) }}</td>
+                                            <td class="text-right">{{ "%.2f"|format(percentage) }}%</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <style>
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background: white;
+            }
+            .content-wrapper {
+                margin: 0;
+                padding: 0;
+            }
+            .card {
+                border: none;
+                box-shadow: none;
+            }
+            .table {
+                font-size: 12px;
+            }
+            h2, h3, h4, h5 {
+                page-break-after: avoid;
+            }
+            .table {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+
+    <script>
+        function updateDateFields() {
+            const period = document.getElementById('periodSelect').value;
+            const startDateGroup = document.getElementById('startDateGroup');
+            const endDateGroup = document.getElementById('endDateGroup');
+            
+            if (period === 'custom') {
+                startDateGroup.style.display = 'block';
+                endDateGroup.style.display = 'block';
+            } else {
+                startDateGroup.style.display = 'none';
+                endDateGroup.style.display = 'none';
+            }
+        }
+
+        function exportToPDF() {
+            // Get current URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const period = urlParams.get('period') || document.getElementById('periodSelect')?.value || 'custom';
+            const startDate = urlParams.get('start_date') || document.getElementById('startDate')?.value || '';
+            const endDate = urlParams.get('end_date') || document.getElementById('endDate')?.value || '';
+            
+            // Build download URL
+            let downloadUrl = '{{ url_for("income_statement") }}?format=pdf';
+            if (period) downloadUrl += '&period=' + encodeURIComponent(period);
+            if (startDate) downloadUrl += '&start_date=' + encodeURIComponent(startDate);
+            if (endDate) downloadUrl += '&end_date=' + encodeURIComponent(endDate);
+            
+            // Trigger download
+            window.location.href = downloadUrl;
+        }
+
+        function exportToExcel() {
+            // Get current URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const period = urlParams.get('period') || document.getElementById('periodSelect')?.value || 'custom';
+            const startDate = urlParams.get('start_date') || document.getElementById('startDate')?.value || '';
+            const endDate = urlParams.get('end_date') || document.getElementById('endDate')?.value || '';
+            
+            // Build download URL
+            let downloadUrl = '{{ url_for("income_statement") }}?format=excel';
+            if (period) downloadUrl += '&period=' + encodeURIComponent(period);
+            if (startDate) downloadUrl += '&start_date=' + encodeURIComponent(startDate);
+            if (endDate) downloadUrl += '&end_date=' + encodeURIComponent(endDate);
+            
+            // Trigger download
+            window.location.href = downloadUrl;
+        }
+    </script>
+{% endblock %}
+

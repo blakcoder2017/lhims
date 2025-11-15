@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-users mr-2"></i>Patients List</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Patients List</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Search and Filter Form -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-search mr-1"></i> Search & Filter Patients</h3>
+                        <div class="card-tools">
+                            <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                                <i class="fas fa-minus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('patients_list') }}" id="searchForm">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="query">Search</label>
+                                        <input type="text" 
+                                               class="form-control" 
+                                               id="query" 
+                                               name="query" 
+                                               placeholder="Search by name, patient number, phone, or ID..." 
+                                               value="{{ search_query }}"
+                                               autofocus>
+                                        <small class="form-text text-muted">Search by name, patient number, phone number, national ID, or patient ID</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="gender">Gender</label>
+                                        <select class="form-control" id="gender" name="gender">
+                                            <option value="">All</option>
+                                            {% for g in genders %}
+                                            <option value="{{ g }}" {% if gender_filter == g %}selected{% endif %}>{{ g }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="payment_mechanism">Payment Type</label>
+                                        <select class="form-control" id="payment_mechanism" name="payment_mechanism">
+                                            <option value="">All</option>
+                                            {% for pm in payment_mechanisms %}
+                                            <option value="{{ pm }}" {% if payment_mechanism_filter == pm %}selected{% endif %}>{{ pm.replace('_', ' ').title() }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="sort_by">Sort By</label>
+                                        <select class="form-control" id="sort_by" name="sort_by">
+                                            <option value="id" {% if sort_by == 'id' %}selected{% endif %}>ID</option>
+                                            <option value="name" {% if sort_by == 'name' %}selected{% endif %}>Name</option>
+                                            <option value="patient_number" {% if sort_by == 'patient_number' %}selected{% endif %}>Patient Number</option>
+                                            <option value="created_at" {% if sort_by == 'created_at' %}selected{% endif %}>Date Registered</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="sort_order">Order</label>
+                                        <select class="form-control" id="sort_order" name="sort_order">
+                                            <option value="desc" {% if sort_order == 'desc' %}selected{% endif %}>Descending</option>
+                                            <option value="asc" {% if sort_order == 'asc' %}selected{% endif %}>Ascending</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-search mr-1"></i> Search
+                                    </button>
+                                    <a href="{{ url_for('patients_list') }}" class="btn btn-secondary">
+                                        <i class="fas fa-redo mr-1"></i> Reset
+                                    </a>
+                                    <button type="button" class="btn btn-success" onclick="window.print()">
+                                        <i class="fas fa-print mr-1"></i> Print List
+                                    </button>
+                                    <button type="button" class="btn btn-info" onclick="exportToCSV()">
+                                        <i class="fas fa-download mr-1"></i> Export CSV
+                                    </button>
+                                </div>
+                            </div>
+                            <input type="hidden" name="page" value="1">
+                            <input type="hidden" name="per_page" value="{{ per_page }}">
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Patients Table -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-list mr-1"></i> Patients 
+                            <span class="badge badge-info">{{ total_count }} total</span>
+                        </h3>
+                        <div class="card-tools">
+                            <span class="badge badge-primary">Page {{ page }} of {{ total_pages }}</span>
+                        </div>
+                    </div>
+                    <div class="card-body table-responsive p-0">
+                        {% if patients %}
+                        <table class="table table-hover table-bordered table-striped" id="patientsTable">
+                            <thead>
+                                <tr>
+                                    <th>Patient Number</th>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Date of Birth</th>
+                                    <th>Gender</th>
+                                    <th>Phone Number</th>
+                                    <th>National ID</th>
+                                    <th>Payment Type</th>
+                                    <th>Registered</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for patient in patients %}
+                                <tr>
+                                    <td><strong>{{ patient.patient_number or 'N/A' }}</strong></td>
+                                    <td>{{ patient.id }}</td>
+                                    <td><strong>{{ patient.first_name }} {{ patient.last_name }}</strong></td>
+                                    <td>{{ patient.date_of_birth.strftime('%Y-%m-%d') }}</td>
+                                    <td>{{ patient.gender }}</td>
+                                    <td>{{ patient.phone_number or 'N/A' }}</td>
+                                    <td>{{ patient.national_id or 'N/A' }}</td>
+                                    <td>
+                                        {% if patient.payment_mechanism %}
+                                            <span class="badge badge-info">{{ patient.payment_mechanism.value.replace('_', ' ').title() }}</span>
+                                        {% else %}
+                                            <span class="badge badge-secondary">Not Set</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ patient.created_at.strftime('%Y-%m-%d') if patient.created_at else 'N/A' }}</td>
+                                    <td>
+                                        <a href="{{ url_for('view_patient_records', patient_id=patient.id) }}" 
+                                           class="btn btn-sm btn-primary" title="Patient File">
+                                            <i class="fas fa-file-medical"></i> Patient File
+                                        </a>
+                                        <a href="{{ url_for('patient_triage', patient_id=patient.id) }}" 
+                                           class="btn btn-sm btn-info" title="Vitals">
+                                            <i class="fas fa-heartbeat"></i>
+                                        </a>
+                                        {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
+                                        <a href="{{ url_for('new_encounter', patient_id=patient.id) }}" 
+                                           class="btn btn-sm btn-success" title="New Encounter">
+                                            <i class="fas fa-stethoscope"></i>
+                                        </a>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <div class="alert alert-info m-3">
+                            <h5><i class="icon fas fa-info"></i> No Patients Found</h5>
+                            {% if search_query %}
+                                No patients found matching "{{ search_query }}". Please try a different search term.
+                            {% else %}
+                                No patients found. <a href="{{ url_for('register_patient') }}">Register a new patient</a>.
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% if total_pages > 1 %}
+                    <div class="card-footer">
+                        <div class="row">
+                            <div class="col-sm-12 col-md-5">
+                                <div class="dataTables_info">
+                                    Showing {{ ((page - 1) * per_page) + 1 }} to {{ [page * per_page, total_count]|min }} of {{ total_count }} entries
+                                </div>
+                            </div>
+                            <div class="col-sm-12 col-md-7">
+                                <div class="dataTables_paginate paging_simple_numbers">
+                                    <ul class="pagination pagination-sm m-0 float-right">
+                                        {% if page > 1 %}
+                                        <li class="paginate_button page-item previous">
+                                            <a href="{{ url_for('patients_list', query=search_query, page=page-1, per_page=per_page, gender=gender_filter, payment_mechanism=payment_mechanism_filter, sort_by=sort_by, sort_order=sort_order) }}" class="page-link">Previous</a>
+                                        </li>
+                                        {% else %}
+                                        <li class="paginate_button page-item previous disabled">
+                                            <span class="page-link">Previous</span>
+                                        </li>
+                                        {% endif %}
+                                        
+                                        {% for p in range(1, total_pages + 1) %}
+                                            {% if p == page %}
+                                            <li class="paginate_button page-item active">
+                                                <span class="page-link">{{ p }}</span>
+                                            </li>
+                                            {% elif p <= 3 or p > total_pages - 3 or (p >= page - 1 and p <= page + 1) %}
+                                            <li class="paginate_button page-item">
+                                                <a href="{{ url_for('patients_list', query=search_query, page=p, per_page=per_page, gender=gender_filter, payment_mechanism=payment_mechanism_filter, sort_by=sort_by, sort_order=sort_order) }}" class="page-link">{{ p }}</a>
+                                            </li>
+                                            {% elif p == 4 or p == total_pages - 3 %}
+                                            <li class="paginate_button page-item disabled">
+                                                <span class="page-link">...</span>
+                                            </li>
+                                            {% endif %}
+                                        {% endfor %}
+                                        
+                                        {% if page < total_pages %}
+                                        <li class="paginate_button page-item next">
+                                            <a href="{{ url_for('patients_list', query=search_query, page=page+1, per_page=per_page, gender=gender_filter, payment_mechanism=payment_mechanism_filter, sort_by=sort_by, sort_order=sort_order) }}" class="page-link">Next</a>
+                                        </li>
+                                        {% else %}
+                                        <li class="paginate_button page-item next disabled">
+                                            <span class="page-link">Next</span>
+                                        </li>
+                                        {% endif %}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <style>
+        @media print {
+            .content-header, .card-header .card-tools, .card-footer, .btn, .sidebar, .navbar, .main-header {
+                display: none !important;
+            }
+            .card {
+                border: none !important;
+                box-shadow: none !important;
+            }
+            .card-body {
+                padding: 0 !important;
+            }
+            table {
+                font-size: 10px;
+            }
+        }
+    </style>
+
+    <script>
+        function exportToCSV() {
+            const table = document.getElementById('patientsTable');
+            let csv = [];
+            const rows = table.querySelectorAll('tr');
+            
+            for (let i = 0; i < rows.length; i++) {
+                const row = [], cols = rows[i].querySelectorAll('td, th');
+                for (let j = 0; j < cols.length - 1; j++) { // Exclude Actions column
+                    let data = cols[j].innerText.replace(/(\r\n|\n|\r)/gm, '').replace(/"/g, '""');
+                    row.push('"' + data + '"');
+                }
+                csv.push(row.join(','));
+            }
+            
+            const csvFile = new Blob([csv.join('\n')], { type: 'text/csv' });
+            const downloadLink = document.createElement('a');
+            downloadLink.download = 'patients_list_' + new Date().toISOString().split('T')[0] + '.csv';
+            downloadLink.href = window.URL.createObjectURL(csvFile);
+            downloadLink.style.display = 'none';
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+        }
+
+        // Update page number in form when pagination links are clicked
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('searchForm');
+            const pageInput = form.querySelector('input[name="page"]');
+            
+            // Handle pagination clicks
+            document.querySelectorAll('.pagination a').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const url = new URL(this.href);
+                    const page = url.searchParams.get('page');
+                    if (page) {
+                        pageInput.value = page;
+                        form.action = '{{ url_for("patients_list") }}';
+                        form.submit();
+                    }
+                });
+            });
+        });
+    </script>
+
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

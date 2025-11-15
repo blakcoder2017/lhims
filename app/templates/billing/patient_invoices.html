@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Invoices - {{ patient.first_name }} {{ patient.last_name }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('view_patient', patient_id=patient.id) }}">Patient</a></li>
+                            <li class="breadcrumb-item active">Invoices</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                <!-- Patient Information -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3"><strong>Patient:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
+                            <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
+                            <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-md-3"><strong>Phone:</strong> {{ patient.phone_number or 'N/A' }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Invoices Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-file-invoice-dollar mr-1"></i> Invoices</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if invoices %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Invoice #</th>
+                                        <th>Date</th>
+                                        <th>Total Amount</th>
+                                        <th>Paid Amount</th>
+                                        <th>Balance</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for invoice in invoices %}
+                                    <tr>
+                                        <td><strong>{{ invoice.invoice_number }}</strong></td>
+                                        <td>{{ invoice.invoice_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>GHS {{ "%.2f"|format(invoice.total_amount) }}</td>
+                                        <td>GHS {{ "%.2f"|format(invoice.paid_amount) }}</td>
+                                        <td><strong>GHS {{ "%.2f"|format(invoice.balance) }}</strong></td>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if invoice.status.value == 'paid' else 'info' if invoice.status.value == 'partially_paid' else 'warning' if invoice.status.value == 'pending' else 'secondary' }}">
+                                                {{ invoice.status.value.replace('_', ' ').title() }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> No invoices found for this patient.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

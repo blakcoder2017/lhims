@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-hospital mr-2"></i>{% if ward %}Edit{% else %}Create{% endif %} Ward</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_wards_list') }}">Wards</a></li>
+                            <li class="breadcrumb-item active">{% if ward %}Edit{% else %}Create{% endif %}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> Error: {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-{% if ward %}edit{% else %}plus-circle{% endif %} mr-1"></i> 
+                            {% if ward %}Edit{% else %}Create{% endif %} Ward Information
+                        </h3>
+                    </div>
+                    <form method="POST" action="{% if ward %}{{ url_for('ipd_ward_update', ward_id=ward.id) }}{% else %}{{ url_for('ipd_ward_create') }}{% endif %}">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="name">Ward Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="name" name="name" 
+                                               value="{% if ward %}{{ ward.name }}{% endif %}" 
+                                               required placeholder="e.g., General Ward A">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="ward_number">Ward Number</label>
+                                        <input type="text" class="form-control" id="ward_number" name="ward_number" 
+                                               value="{% if ward %}{{ ward.ward_number }}{% endif %}" 
+                                               placeholder="e.g., WARD-001">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="ward_type">Ward Type</label>
+                                        <select class="form-control" id="ward_type" name="ward_type">
+                                            <option value="">Select Ward Type (Optional)</option>
+                                            {% if ward_types %}
+                                            {% for wt in ward_types %}
+                                            <option value="{{ wt.name }}" {% if ward and ward.ward_type == wt.name %}selected{% endif %}>
+                                                {{ wt.name }}{% if wt.code %} ({{ wt.code }}){% endif %}
+                                            </option>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                        <small class="form-text text-muted">
+                                            {% if user_role == 'Admin' %}
+                                            <a href="{{ url_for('ward_types_list') }}" target="_blank">
+                                                <i class="fas fa-cog"></i> Manage Ward Types
+                                            </a>
+                                            {% else %}
+                                            Select a ward type from the list
+                                            {% endif %}
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="capacity">Capacity (Beds) <span class="text-danger">*</span></label>
+                                        <input type="number" class="form-control" id="capacity" name="capacity" 
+                                               value="{% if ward %}{{ ward.capacity }}{% else %}10{% endif %}" 
+                                               min="1" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="ward_status">Status <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="ward_status" name="ward_status" required>
+                                            {% for status in ward_statuses %}
+                                            <option value="{{ status }}" 
+                                                    {% if ward and ward.status.value == status %}selected
+                                                    {% elif not ward and status == 'active' %}selected{% endif %}>
+                                                {{ status.title() }}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="floor">Floor</label>
+                                        <input type="text" class="form-control" id="floor" name="floor" 
+                                               value="{% if ward %}{{ ward.floor }}{% endif %}" 
+                                               placeholder="e.g., 2nd Floor">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="building">Building</label>
+                                        <input type="text" class="form-control" id="building" name="building" 
+                                               value="{% if ward %}{{ ward.building }}{% endif %}" 
+                                               placeholder="e.g., Main Building">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="charge_per_day">Charge per Day (GHS) <span class="text-danger">*</span></label>
+                                        <input type="number" step="0.01" class="form-control" id="charge_per_day" name="charge_per_day" 
+                                               value="{% if ward and ward.charge_per_day %}{{ ward.charge_per_day }}{% else %}0.00{% endif %}" 
+                                               placeholder="0.00" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="description">Description</label>
+                                        <textarea class="form-control" id="description" name="description" rows="3" 
+                                                  placeholder="Additional notes about the ward">{% if ward %}{{ ward.description }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> {% if ward %}Update{% else %}Create{% endif %} Ward
+                            </button>
+                            <a href="{{ url_for('ipd_wards_list') }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

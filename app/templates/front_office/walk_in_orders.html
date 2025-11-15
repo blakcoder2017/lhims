@@ -1,0 +1,553 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-walking mr-2"></i>Walk-in Orders</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Walk-in Orders</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('status') %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-check-circle"></i> 
+                    {% if 'created' in request.query_params.get('status') %}
+                        Order created successfully!
+                    {% elif 'checked_in' in request.query_params.get('status') %}
+                        Order checked in successfully!
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> Error: {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <!-- Workflow Information -->
+                <div class="alert alert-info">
+                    <h5><i class="fas fa-info-circle mr-2"></i>Walk-in Orders Workflow</h5>
+                    <p class="mb-1"><strong>For walk-in patients who need lab tests, radiology studies, or procedures:</strong></p>
+                    <ol class="mb-0">
+                        <li>Search and select the patient</li>
+                        <li>Select the service from the dropdown (or type manually if not in list)</li>
+                        <li>Fill in additional details and click "Create Order"</li>
+                        <li>Once created, click "Check In" to mark the order as ready for processing</li>
+                    </ol>
+                </div>
+
+                <!-- Create Walk-in Order Buttons -->
+                <div class="row mb-3">
+                    <div class="col-md-12">
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#createLabOrderModal">
+                                <i class="fas fa-vial mr-1"></i> Create Walk-in Lab Order
+                            </button>
+                            <button type="button" class="btn btn-success" data-toggle="modal" data-target="#createRadiologyOrderModal">
+                                <i class="fas fa-x-ray mr-1"></i> Create Walk-in Radiology Order
+                            </button>
+                            <button type="button" class="btn btn-warning" data-toggle="modal" data-target="#createProcedureModal">
+                                <i class="fas fa-procedures mr-1"></i> Create Walk-in Procedure
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Walk-in Lab Orders -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-vial mr-1"></i> Walk-in Lab Orders (Pending Check-in)</h3>
+                                <div class="card-tools">
+                                    <span class="badge badge-primary">{{ walk_in_lab_orders|length }}</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if walk_in_lab_orders %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Order ID</th>
+                                                <th>Patient</th>
+                                                <th>Test Name</th>
+                                                <th>Test Code</th>
+                                                <th>Priority</th>
+                                                <th>Ordered By</th>
+                                                <th>Ordered At</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for order in walk_in_lab_orders %}
+                                            <tr>
+                                                <td>#{{ order.id }}</td>
+                                                <td>
+                                                    <strong>{{ order.patient.first_name }} {{ order.patient.last_name }}</strong><br>
+                                                    <small class="text-muted">{{ order.patient.patient_number or 'N/A' }}</small>
+                                                </td>
+                                                <td><strong>{{ order.test_name }}</strong></td>
+                                                <td>{{ order.test_code or 'N/A' }}</td>
+                                                <td>
+                                                    <span class="badge badge-{% if order.priority == 'stat' %}danger{% elif order.priority == 'urgent' %}warning{% else %}info{% endif %}">
+                                                        {{ order.priority|title }}
+                                                    </span>
+                                                </td>
+                                                <td>{{ order.ordered_by.full_name if order.ordered_by else 'N/A' }}</td>
+                                                <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>
+                                                    <form method="POST" action="{{ url_for('check_in_walk_in_lab_order', order_id=order.id) }}" style="display: inline;">
+                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Check in this lab order?');">
+                                                            <i class="fas fa-check mr-1"></i> Check In
+                                                        </button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> No pending walk-in lab orders.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Walk-in Radiology Orders -->
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-x-ray mr-1"></i> Walk-in Radiology Orders (Pending Check-in)</h3>
+                                <div class="card-tools">
+                                    <span class="badge badge-success">{{ walk_in_radiology_orders|length }}</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if walk_in_radiology_orders %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Order ID</th>
+                                                <th>Patient</th>
+                                                <th>Study Type</th>
+                                                <th>Body Part</th>
+                                                <th>Priority</th>
+                                                <th>Ordered By</th>
+                                                <th>Ordered At</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for order in walk_in_radiology_orders %}
+                                            <tr>
+                                                <td>#{{ order.id }}</td>
+                                                <td>
+                                                    <strong>{{ order.patient.first_name }} {{ order.patient.last_name }}</strong><br>
+                                                    <small class="text-muted">{{ order.patient.patient_number or 'N/A' }}</small>
+                                                </td>
+                                                <td><strong>{{ order.study_type }}</strong></td>
+                                                <td>{{ order.body_part or 'N/A' }}</td>
+                                                <td>
+                                                    <span class="badge badge-{% if order.priority == 'stat' %}danger{% elif order.priority == 'urgent' %}warning{% else %}info{% endif %}">
+                                                        {{ order.priority|title }}
+                                                    </span>
+                                                </td>
+                                                <td>{{ order.ordered_by.full_name if order.ordered_by else 'N/A' }}</td>
+                                                <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>
+                                                    <form method="POST" action="{{ url_for('check_in_walk_in_radiology_order', order_id=order.id) }}" style="display: inline;">
+                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Check in this radiology order?');">
+                                                            <i class="fas fa-check mr-1"></i> Check In
+                                                        </button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> No pending walk-in radiology orders.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Walk-in Procedures -->
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <div class="card card-warning card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> Walk-in Procedures (Pending Check-in)</h3>
+                                <div class="card-tools">
+                                    <span class="badge badge-warning">{{ walk_in_procedures|length }}</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if walk_in_procedures %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Procedure #</th>
+                                                <th>Patient</th>
+                                                <th>Procedure Name</th>
+                                                <th>Type</th>
+                                                <th>Location</th>
+                                                <th>Ordered By</th>
+                                                <th>Created At</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for procedure in walk_in_procedures %}
+                                            <tr>
+                                                <td>{{ procedure.procedure_number }}</td>
+                                                <td>
+                                                    <strong>{{ procedure.patient.first_name }} {{ procedure.patient.last_name }}</strong><br>
+                                                    <small class="text-muted">{{ procedure.patient.patient_number or 'N/A' }}</small>
+                                                </td>
+                                                <td><strong>{{ procedure.procedure_name }}</strong></td>
+                                                <td>
+                                                    <span class="badge badge-info">{{ procedure.procedure_type.value|title }}</span>
+                                                </td>
+                                                <td>{{ procedure.location or 'N/A' }}</td>
+                                                <td>{{ procedure.ordered_by.full_name if procedure.ordered_by else 'N/A' }}</td>
+                                                <td>{{ procedure.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>
+                                                    <form method="POST" action="{{ url_for('check_in_walk_in_procedure', procedure_id=procedure.id) }}" style="display: inline;">
+                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Check in this procedure?');">
+                                                            <i class="fas fa-check mr-1"></i> Check In
+                                                        </button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> No pending walk-in procedures.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Create Walk-in Lab Order Modal -->
+    <div class="modal fade" id="createLabOrderModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-vial mr-1"></i> Create Walk-in Lab Order</h5>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <form method="POST" action="{{ url_for('create_walk_in_lab_order') }}">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="patient_id_lab">Patient *</label>
+                            <input type="text" class="form-control" id="patient_search_lab" placeholder="Search patient..." autocomplete="off" required>
+                            <input type="hidden" name="patient_id" id="patient_id_lab" required>
+                            <small class="form-text text-muted">Start typing to search for patient</small>
+                            <div id="patient_search_results_lab" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto; width: 100%;"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="test_name">Test Name *</label>
+                            <select class="form-control" name="test_name" id="test_name" required>
+                                <option value="">-- Select Lab Test or Type Manually --</option>
+                                {% for lab_test in lab_tests %}
+                                <option value="{{ lab_test.service_name }}" data-code="{{ lab_test.service_code or '' }}">
+                                    {{ lab_test.service_name }}{% if lab_test.service_code %} ({{ lab_test.service_code }}){% endif %} - {{ lab_test.currency }} {{ lab_test.unit_price }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Select from list or type test name directly in the dropdown</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="test_code">Test Code</label>
+                            <input type="text" class="form-control" name="test_code" id="test_code" placeholder="Auto-filled from selection or enter manually">
+                        </div>
+                        <div class="form-group">
+                            <label for="priority">Priority</label>
+                            <select class="form-control" name="priority" id="priority">
+                                <option value="routine">Routine</option>
+                                <option value="urgent">Urgent</option>
+                                <option value="stat">Stat</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="instructions">Instructions</label>
+                            <textarea class="form-control" name="instructions" id="instructions" rows="2" placeholder="Special instructions"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Create Order</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Walk-in Radiology Order Modal -->
+    <div class="modal fade" id="createRadiologyOrderModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-x-ray mr-1"></i> Create Walk-in Radiology Order</h5>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <form method="POST" action="{{ url_for('create_walk_in_radiology_order') }}">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="patient_id_rad">Patient *</label>
+                            <input type="text" class="form-control" id="patient_search_rad" placeholder="Search patient..." autocomplete="off" required>
+                            <input type="hidden" name="patient_id" id="patient_id_rad" required>
+                            <small class="form-text text-muted">Start typing to search for patient</small>
+                            <div id="patient_search_results_rad" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto; width: 100%;"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="study_type">Study Type *</label>
+                            <select class="form-control" name="study_type" id="study_type" required>
+                                <option value="">-- Select Radiology Study or Type Manually --</option>
+                                {% for study in radiology_studies %}
+                                <option value="{{ study.service_name }}" data-code="{{ study.service_code or '' }}">
+                                    {{ study.service_name }}{% if study.service_code %} ({{ study.service_code }}){% endif %} - {{ study.currency }} {{ study.unit_price }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Select from list or type study type directly in the dropdown</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="study_code_rad">Study Code</label>
+                            <input type="text" class="form-control" name="study_code" id="study_code_rad" placeholder="Auto-filled from selection or enter manually">
+                        </div>
+                        <div class="form-group">
+                            <label for="body_part">Body Part</label>
+                            <input type="text" class="form-control" name="body_part" id="body_part" placeholder="e.g., Chest">
+                        </div>
+                        <div class="form-group">
+                            <label for="priority_rad">Priority</label>
+                            <select class="form-control" name="priority" id="priority_rad">
+                                <option value="routine">Routine</option>
+                                <option value="urgent">Urgent</option>
+                                <option value="stat">Stat</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="clinical_indication">Clinical Indication</label>
+                            <textarea class="form-control" name="clinical_indication" id="clinical_indication" rows="2" placeholder="Reason for the study"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="instructions_rad">Instructions</label>
+                            <textarea class="form-control" name="instructions" id="instructions_rad" rows="2" placeholder="Special instructions"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success">Create Order</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Walk-in Procedure Modal -->
+    <div class="modal fade" id="createProcedureModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-procedures mr-1"></i> Create Walk-in Procedure</h5>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <form method="POST" action="{{ url_for('create_walk_in_procedure') }}">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="patient_id_proc">Patient *</label>
+                            <input type="text" class="form-control" id="patient_search_proc" placeholder="Search patient..." autocomplete="off" required>
+                            <input type="hidden" name="patient_id" id="patient_id_proc" required>
+                            <small class="form-text text-muted">Start typing to search for patient</small>
+                            <div id="patient_search_results_proc" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto; width: 100%;"></div>
+                        </div>
+                        <div class="form-group">
+                            <label for="procedure_name">Procedure Name *</label>
+                            <select class="form-control" name="procedure_name" id="procedure_name" required>
+                                <option value="">-- Select Procedure or Type Manually --</option>
+                                {% for procedure in procedures %}
+                                <option value="{{ procedure.service_name }}" data-code="{{ procedure.service_code or '' }}">
+                                    {{ procedure.service_name }}{% if procedure.service_code %} ({{ procedure.service_code }}){% endif %} - {{ procedure.currency }} {{ procedure.unit_price }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Select from list or type procedure name directly in the dropdown</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="procedure_code_proc">Procedure Code</label>
+                            <input type="text" class="form-control" name="procedure_code" id="procedure_code_proc" placeholder="Auto-filled from selection or enter manually">
+                        </div>
+                        <div class="form-group">
+                            <label for="procedure_type">Procedure Type *</label>
+                            <select class="form-control" name="procedure_type" id="procedure_type" required>
+                                <option value="surgical">Surgical</option>
+                                <option value="non_surgical">Non-Surgical</option>
+                                <option value="diagnostic">Diagnostic</option>
+                                <option value="therapeutic">Therapeutic</option>
+                                <option value="minor">Minor</option>
+                                <option value="major">Major</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="indication">Indication</label>
+                            <textarea class="form-control" name="indication" id="indication" rows="2" placeholder="Clinical indication"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="description">Description</label>
+                            <textarea class="form-control" name="description" id="description" rows="2" placeholder="Detailed description"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="location">Location</label>
+                            <input type="text" class="form-control" name="location" id="location" placeholder="e.g., Operating Room 1">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-warning">Create Procedure</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Patient search functionality for all modals
+        function setupPatientSearch(searchInputId, resultsId, patientIdInputId) {
+            const searchInput = document.getElementById(searchInputId);
+            const resultsDiv = document.getElementById(resultsId);
+            const patientIdInput = document.getElementById(patientIdInputId);
+            
+            if (!searchInput || !resultsDiv || !patientIdInput) return;
+            
+            searchInput.addEventListener('input', function() {
+                const query = this.value.trim();
+                if (query.length < 2) {
+                    resultsDiv.style.display = 'none';
+                    return;
+                }
+                
+                fetch(`/api/v1/patients/search?query=${encodeURIComponent(query)}&limit=10`)
+                    .then(response => response.json())
+                    .then(data => {
+                        resultsDiv.innerHTML = '';
+                        if (data && data.length > 0) {
+                            data.forEach(patient => {
+                                const item = document.createElement('a');
+                                item.href = '#';
+                                item.className = 'list-group-item list-group-item-action';
+                                item.innerHTML = `
+                                    <strong>${patient.first_name} ${patient.last_name}</strong><br>
+                                    <small>${patient.patient_number || 'N/A'} | ${patient.phone_number || 'N/A'}</small>
+                                `;
+                                item.addEventListener('click', function(e) {
+                                    e.preventDefault();
+                                    searchInput.value = `${patient.first_name} ${patient.last_name}`;
+                                    patientIdInput.value = patient.id;
+                                    resultsDiv.style.display = 'none';
+                                });
+                                resultsDiv.appendChild(item);
+                            });
+                            resultsDiv.style.display = 'block';
+                        } else {
+                            resultsDiv.style.display = 'none';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error searching patients:', error);
+                        resultsDiv.style.display = 'none';
+                    });
+            });
+            
+            // Hide results when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!searchInput.contains(e.target) && !resultsDiv.contains(e.target)) {
+                    resultsDiv.style.display = 'none';
+                }
+            });
+        }
+        
+        // Setup patient search for all modals
+        setupPatientSearch('patient_search_lab', 'patient_search_results_lab', 'patient_id_lab');
+        setupPatientSearch('patient_search_rad', 'patient_search_results_rad', 'patient_id_rad');
+        setupPatientSearch('patient_search_proc', 'patient_search_results_proc', 'patient_id_proc');
+        
+        // Auto-fill code fields when service is selected
+        // Lab test
+        const testNameSelect = document.getElementById('test_name');
+        const testCodeInput = document.getElementById('test_code');
+        if (testNameSelect && testCodeInput) {
+            testNameSelect.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                if (selectedOption && selectedOption.dataset.code) {
+                    testCodeInput.value = selectedOption.dataset.code;
+                }
+            });
+        }
+        
+        // Radiology study
+        const studyTypeSelect = document.getElementById('study_type');
+        const studyCodeInput = document.getElementById('study_code_rad');
+        if (studyTypeSelect && studyCodeInput) {
+            studyTypeSelect.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                if (selectedOption && selectedOption.dataset.code) {
+                    studyCodeInput.value = selectedOption.dataset.code;
+                }
+            });
+        }
+        
+        // Procedure
+        const procedureNameSelect = document.getElementById('procedure_name');
+        const procedureCodeInput = document.getElementById('procedure_code_proc');
+        if (procedureNameSelect && procedureCodeInput) {
+            procedureNameSelect.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                if (selectedOption && selectedOption.dataset.code) {
+                    procedureCodeInput.value = selectedOption.dataset.code;
+                }
+            });
+        }
+    </script>
+
+{% endblock %}
+

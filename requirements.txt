@@ -1,0 +1,46 @@
+# LHIMS Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core Framework
+fastapi==0.121.0
+uvicorn[standard]==0.38.0
+python-multipart==0.0.20
+
+# Database
+sqlalchemy==2.0.44
+psycopg2-binary==2.9.11
+alembic==1.17.1
+
+# Data Validation
+pydantic==2.12.4
+pydantic-settings==2.11.0
+email-validator==2.3.0
+
+# Authentication & Security
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+
+# Templating
+jinja2==3.1.6
+
+# Configuration
+python-dotenv==1.2.1
+
+# HTTP Client (used by FastAPI and services)
+httpx==0.28.1
+requests==2.32.5
+
+# Optional: Email (for password reset)
+fastapi-mail==1.5.8
+
+# PDF Generation
+reportlab==4.0.7
+
+# Excel Generation
+openpyxl==3.1.2
+
+# Image Processing (for thumbnails)
+Pillow==10.2.0
+
+# Additional utilities
+typing-extensions==4.15.0

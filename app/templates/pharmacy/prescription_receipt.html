@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Prescription Receipt</title>
+    <style>
+        @media print {
+            @page {
+                size: 80mm auto;
+                margin: 0;
+            }
+            body {
+                margin: 0;
+                padding: 5mm;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+                width: 70mm;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+        @media screen {
+            body {
+                font-family: Arial, sans-serif;
+                padding: 20px;
+            }
+            .receipt-container {
+                max-width: 80mm;
+                margin: 0 auto;
+                border: 1px solid #ccc;
+                padding: 10px;
+            }
+        }
+        body {
+            margin: 0;
+            padding: 5mm;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            width: 70mm;
+        }
+        .receipt-container {
+            width: 100%;
+        }
+        .text-center {
+            text-align: center;
+        }
+        .text-left {
+            text-align: left;
+        }
+        .bold {
+            font-weight: bold;
+        }
+        .divider {
+            border-top: 1px dashed #000;
+            margin: 5px 0;
+        }
+        .divider-thick {
+            border-top: 2px solid #000;
+            margin: 8px 0;
+        }
+        p {
+            margin: 2px 0;
+            line-height: 1.3;
+        }
+        .section {
+            margin: 8px 0;
+        }
+        .warning-box {
+            border: 2px solid #000;
+            padding: 5px;
+            margin: 8px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="receipt-container">
+        <!-- Hospital Header -->
+        <div class="text-center section">
+            {% if hospital_settings and hospital_settings.logo_url %}
+            <img src="{{ hospital_settings.logo_url }}" alt="Logo" style="max-height: 30px; margin-bottom: 3px;">
+            {% endif %}
+            <p class="bold" style="font-size: 13px;">{{ hospital_settings.hospital_name if hospital_settings else 'LHIMS' }}</p>
+            {% if hospital_settings and hospital_settings.hospital_address %}
+            <p style="font-size: 9px;">{{ hospital_settings.hospital_address }}</p>
+            {% endif %}
+            {% if hospital_settings and hospital_settings.hospital_phone %}
+            <p style="font-size: 9px;">Tel: {{ hospital_settings.hospital_phone }}</p>
+            {% endif %}
+            <div class="divider"></div>
+            <p class="bold" style="font-size: 12px;">PRESCRIPTION</p>
+            <div class="divider"></div>
+        </div>
+
+        <!-- Prescription Details -->
+        <div class="section">
+            <p><span class="bold">Prescription #:</span> {{ prescription.id }}</p>
+            <p><span class="bold">Date:</span> {{ prescription.prescribed_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Patient Information -->
+        <div class="section">
+            <p class="bold">PATIENT INFORMATION</p>
+            <p><span class="bold">Name:</span> {{ patient.first_name }} {{ patient.last_name }}</p>
+            <p><span class="bold">Patient ID:</span> {{ patient.patient_number or patient.id }}</p>
+            <p><span class="bold">DOB:</span> {{ patient.date_of_birth }}</p>
+            {% if patient.phone_number %}
+            <p><span class="bold">Phone:</span> {{ patient.phone_number }}</p>
+            {% endif %}
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Medication Details -->
+        <div class="section">
+            <p class="bold">MEDICATION</p>
+            <p class="bold">{{ prescription.medication_name }}</p>
+            {% if prescription.medication_code %}
+            <p>Code: {{ prescription.medication_code }}</p>
+            {% endif %}
+            <p><span class="bold">Dosage:</span> {{ prescription.dosage }}</p>
+            <p><span class="bold">Frequency:</span> {{ prescription.frequency }}</p>
+            <p><span class="bold">Duration:</span> {{ prescription.duration }}</p>
+            {% if prescription.quantity %}
+            <p><span class="bold">Quantity:</span> {{ prescription.quantity }}</p>
+            {% endif %}
+        </div>
+
+        <!-- Instructions -->
+        {% if prescription.instructions %}
+        <div class="divider"></div>
+        <div class="section">
+            <p class="bold">INSTRUCTIONS</p>
+            <p style="white-space: pre-wrap; word-wrap: break-word;">{{ prescription.instructions }}</p>
+        </div>
+        {% endif %}
+
+        <div class="divider"></div>
+
+        <!-- Prescribing Doctor -->
+        <div class="section">
+            <p><span class="bold">Prescribed By:</span> {{ prescription.prescribed_by.full_name or prescription.prescribed_by.username }}</p>
+            <p><span class="bold">Date:</span> {{ prescription.prescribed_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+
+        <!-- Stock Status (if out of stock) -->
+        {% if stock_check and stock_check.out_of_stock %}
+        <div class="divider-thick"></div>
+        <div class="warning-box">
+            <p class="bold" style="font-size: 12px;">⚠ OUT OF STOCK</p>
+            <p style="font-size: 9px;">This medication is currently</p>
+            <p style="font-size: 9px;">unavailable at our pharmacy.</p>
+            <p style="font-size: 9px;">Please visit another pharmacy</p>
+            <p style="font-size: 9px;">to fill this prescription.</p>
+        </div>
+        <div class="divider-thick"></div>
+        {% endif %}
+
+        <!-- Footer -->
+        <div class="divider"></div>
+        <div class="section text-center">
+            <p style="font-size: 9px;">Thank you for choosing</p>
+            <p style="font-size: 9px;">our pharmacy!</p>
+            <p style="font-size: 8px; margin-top: 5px;">Computer-generated prescription</p>
+            <p style="font-size: 8px;">Printed: {{ prescription.prescribed_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+    </div>
+
+    <!-- Print Controls (hidden when printing) -->
+    <div class="no-print" style="text-align: center; margin-top: 20px; padding: 20px;">
+        <button onclick="window.print()" style="padding: 10px 20px; font-size: 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
+            🖨️ Print Prescription
+        </button>
+        <a href="{{ url_for('view_prescription', prescription_id=prescription.id) }}" style="padding: 10px 20px; font-size: 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 4px; display: inline-block;">
+            ← Back to Prescription
+        </a>
+    </div>
+
+    <script>
+        // Auto-print when page loads (optional - can be enabled if needed)
+        // window.onload = function() {
+        //     window.print();
+        // }
+    </script>
+</body>
+</html>
+

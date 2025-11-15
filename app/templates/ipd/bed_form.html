@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-bed mr-2"></i>Create Bed</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_wards_list') }}">Wards</a></li>
+                            <li class="breadcrumb-item active">Create Bed</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> Error: {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-plus-circle mr-1"></i> Bed Information</h3>
+                    </div>
+                    <form method="POST" action="{{ url_for('ipd_bed_create') }}">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="ward_id">Ward <span class="text-danger">*</span></label>
+                                        {% if ward %}
+                                        <input type="hidden" name="ward_id" value="{{ ward.id }}">
+                                        <input type="text" class="form-control" value="{{ ward.name }}" readonly>
+                                        {% else %}
+                                        <select class="form-control" id="ward_id" name="ward_id" required>
+                                            <option value="">Select Ward</option>
+                                            {% for w in wards %}
+                                            <option value="{{ w.id }}">{{ w.name }} ({{ w.ward_number or 'N/A' }})</option>
+                                            {% endfor %}
+                                        </select>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="bed_number">Bed Number <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="bed_number" name="bed_number" required placeholder="e.g., BED-001">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="bed_name">Bed Name</label>
+                                        <input type="text" class="form-control" id="bed_name" name="bed_name" placeholder="e.g., Bed 1">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="bed_type">Bed Type</label>
+                                        <select class="form-control" id="bed_type" name="bed_type">
+                                            <option value="">Select Bed Type (Optional)</option>
+                                            {% if bed_types %}
+                                            {% for bt in bed_types %}
+                                            <option value="{{ bt.name }}" data-default-charge="{{ bt.default_charge_per_day or '0' }}">
+                                                {{ bt.name }}{% if bt.code %} ({{ bt.code }}){% endif %}
+                                            </option>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                        <small class="form-text text-muted">
+                                            {% if user_role == 'Admin' %}
+                                            <a href="/admin/bed-types" target="_blank">
+                                                <i class="fas fa-cog"></i> Manage Bed Types
+                                            </a>
+                                            {% else %}
+                                            Select a bed type from the list
+                                            {% endif %}
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="bed_status">Status <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="bed_status" name="bed_status" required>
+                                            {% for status in bed_statuses %}
+                                            <option value="{{ status }}" {% if status == 'available' %}selected{% endif %}>
+                                                {{ status.title() }}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="charge_per_day">Charge per Day (GHS) <span class="text-danger">*</span></label>
+                                        <input type="number" step="0.01" class="form-control" id="charge_per_day" name="charge_per_day" value="0.00" required placeholder="0.00">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="notes">Notes</label>
+                                        <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Additional notes about the bed"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> Create Bed
+                            </button>
+                            {% if ward %}
+                            <a href="{{ url_for('ipd_ward_detail', ward_id=ward.id) }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                            {% else %}
+                            <a href="{{ url_for('ipd_wards_list') }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+    <script>
+        // Handle bed type selection - auto-fill charge per day
+        document.getElementById('bed_type').addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const defaultCharge = selectedOption.getAttribute('data-default-charge');
+            
+            if (defaultCharge !== null && defaultCharge !== '' && defaultCharge !== '0') {
+                document.getElementById('charge_per_day').value = parseFloat(defaultCharge).toFixed(2);
+            }
+        });
+    </script>
+
+{% endblock %}
+

@@ -1,0 +1,490 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-user-injured mr-2"></i>Admission: {{ admission.admission_number }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admissions_list') }}">Admissions</a></li>
+                            <li class="breadcrumb-item active">{{ admission.admission_number }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('status') == 'discharged' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-check-circle"></i> Patient discharged successfully!
+                    {% if request.query_params.get('invoice_id') %}
+                    <br><a href="/billing/invoices/{{ request.query_params.get('invoice_id') }}" class="alert-link">View Invoice</a>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('status') == 'discharge_prepared' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-info-circle"></i> Discharge prepared successfully. Ward and bed charges have been updated.
+                    {% if request.query_params.get('invoice_id') %}
+                    <br><a href="/billing/invoices/{{ request.query_params.get('invoice_id') }}" class="alert-link">Review Billing Invoice</a>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                
+                {% if request.query_params.get('billing_warning') %}
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-triangle"></i> Billing Warning: {{ request.query_params.get('billing_warning') }}
+                </div>
+                {% endif %}
+
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> Error: {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                {% if request.query_params.get('medication_recorded') %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-check-circle"></i> Medication administration recorded successfully.
+                </div>
+                {% endif %}
+
+                <!-- Admission Information -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Admission Information</h3>
+                            </div>
+                            <div class="card-body">
+                                <dl class="row">
+                                    <dt class="col-sm-4">Admission Number:</dt>
+                                    <dd class="col-sm-8"><strong>{{ admission.admission_number }}</strong></dd>
+                                    
+                                    <dt class="col-sm-4">Patient:</dt>
+                                    <dd class="col-sm-8">
+                                        <strong>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</strong>
+                                        <br><small class="text-muted">{{ admission.patient.patient_number or 'N/A' }}</small>
+                                    </dd>
+                                    
+                                    <dt class="col-sm-4">Ward:</dt>
+                                    <dd class="col-sm-8">{{ admission.ward.name }} ({{ admission.ward.ward_number or 'N/A' }})</dd>
+                                    
+                                    <dt class="col-sm-4">Bed:</dt>
+                                    <dd class="col-sm-8">{{ admission.bed.bed_number }} - {{ admission.bed.bed_name or 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-4">Admission Date:</dt>
+                                    <dd class="col-sm-8">{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') }}</dd>
+                                    
+                                    <dt class="col-sm-4">Expected Discharge:</dt>
+                                    <dd class="col-sm-8">{{ admission.expected_discharge_date.strftime('%Y-%m-%d') if admission.expected_discharge_date else 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-4">Discharge Date:</dt>
+                                    <dd class="col-sm-8">{{ admission.discharge_date.strftime('%Y-%m-%d %H:%M') if admission.discharge_date else 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-4">Status:</dt>
+                                    <dd class="col-sm-8">
+                                        {% if admission.status.value == 'admitted' %}
+                                            <span class="badge badge-success">Admitted</span>
+                                        {% elif admission.status.value == 'discharged' %}
+                                            <span class="badge badge-secondary">Discharged</span>
+                                        {% elif admission.status.value == 'transferred' %}
+                                            <span class="badge badge-info">Transferred</span>
+                                        {% else %}
+                                            <span class="badge badge-danger">Absconded</span>
+                                        {% endif %}
+                                    </dd>
+                                    
+                                    <dt class="col-sm-4">Admitted By:</dt>
+                                    <dd class="col-sm-8">{{ admission.admitted_by.first_name }} {{ admission.admitted_by.last_name }}</dd>
+                                    
+                                    {% if admission.discharged_by %}
+                                    <dt class="col-sm-4">Discharged By:</dt>
+                                    <dd class="col-sm-8">{{ admission.discharged_by.first_name }} {{ admission.discharged_by.last_name }}</dd>
+                                    {% endif %}
+                                    
+                                    {% if admission.admission_reason %}
+                                    <dt class="col-sm-4">Admission Reason:</dt>
+                                    <dd class="col-sm-8">{{ admission.admission_reason }}</dd>
+                                    {% endif %}
+                                    
+                                    {% if admission.diagnosis %}
+                                    <dt class="col-sm-4">Diagnosis:</dt>
+                                    <dd class="col-sm-8">{{ admission.diagnosis }}</dd>
+                                    {% endif %}
+                                    
+                                    {% if admission.notes %}
+                                    <dt class="col-sm-4">Notes:</dt>
+                                    <dd class="col-sm-8">{{ admission.notes }}</dd>
+                                    {% endif %}
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-tools mr-1"></i> Actions</h3>
+                            </div>
+                            <div class="card-body">
+                                {% if admission.status.value == 'admitted' %}
+                                <div class="alert {% if ready_for_discharge %}alert-success{% else %}alert-info{% endif %}">
+                                    {% if ready_for_discharge %}
+                                    <i class="fas fa-check-circle"></i> Discharge prepared on 
+                                    {{ admission.ready_for_discharge_at.strftime('%Y-%m-%d %H:%M') if admission.ready_for_discharge_at else 'N/A' }}.
+                                    {% if invoice_summary %}
+                                    <br>Outstanding Balance: <strong>GHS {{ "{:,.2f}".format(invoice_summary.balance) }}</strong>
+                                    {% if invoice_summary.balance > 0 %}
+                                    <span class="text-danger"> (Settlement required before discharge)</span>
+                                    {% endif %}
+                                    {% endif %}
+                                    {% else %}
+                                    <i class="fas fa-info-circle"></i> Prepare discharge to calculate ward/bed charges and generate the final bill before completing discharge.
+                                    {% endif %}
+                                </div>
+                                
+                                <form method="POST" action="{{ url_for('ipd_admission_prepare_discharge', admission_id=admission.id) }}" class="mb-3">
+                                    <button type="submit" class="btn btn-block btn-outline-info btn-lg">
+                                        <i class="fas fa-calculator mr-2"></i> Prepare Discharge (Ward & Bed Fees)
+                                    </button>
+                                </form>
+                                
+                                <form method="POST" action="{{ url_for('ipd_admission_discharge', admission_id=admission.id) }}" onsubmit="return confirm('Are you sure you want to discharge this patient?');">
+                                    <button type="submit" class="btn btn-block btn-success btn-lg mb-3" {% if not ready_for_discharge %}disabled title="Prepare discharge before discharging this patient."{% endif %}>
+                                        <i class="fas fa-sign-out-alt mr-2"></i> Discharge Patient
+                                    </button>
+                                </form>
+                                
+                                <a href="{{ url_for('ipd_admission_transfer_form', admission_id=admission.id) }}" class="btn btn-block btn-warning mb-3">
+                                    <i class="fas fa-exchange-alt mr-2"></i> Transfer Patient
+                                </a>
+                                {% elif admission.status.value == 'transferred' %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Patient has been transferred.
+                                    {% if admission.transfer_reason and 'EXTERNAL TRANSFER' in admission.transfer_reason %}
+                                    <br><strong><i class="fas fa-hospital-alt"></i> External Transfer to Different Hospital</strong>
+                                    <div class="mt-2">
+                                        {{ admission.transfer_reason|replace('\n', '<br>')|safe }}
+                                    </div>
+                                    {% elif admission.transferred_from_ward_id and admission.transferred_to_ward_id %}
+                                    <br><strong>From:</strong> {{ admission.transferred_from_ward.name if admission.transferred_from_ward else 'N/A' }} 
+                                    → <strong>To:</strong> {{ admission.transferred_to_ward.name if admission.transferred_to_ward else 'N/A' }}
+                                    {% endif %}
+                                    {% if admission.transfer_reason and 'EXTERNAL TRANSFER' not in admission.transfer_reason %}
+                                    <br><strong>Reason:</strong> {{ admission.transfer_reason }}
+                                    {% endif %}
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Patient has been discharged.
+                                </div>
+                                {% endif %}
+                                
+                                {% if invoice_summary %}
+                                <div class="alert alert-light border mb-3">
+                                    <h5 class="mb-2"><i class="fas fa-file-invoice-dollar mr-1"></i> Admission Invoice</h5>
+                                    <p class="mb-1">
+                                        <strong>{{ invoice_summary.number }}</strong> 
+                                        <span class="badge badge-{% if invoice_summary.balance <= 0 %}success{% else %}warning{% endif %} ml-2">
+                                            {{ invoice_summary.status.replace('_', ' ').title() }}
+                                        </span>
+                                    </p>
+                                    <p class="mb-1">Total: <strong>GHS {{ "{:,.2f}".format(invoice_summary.total) }}</strong></p>
+                                    <p class="mb-1 text-success">Paid: GHS {{ "{:,.2f}".format(invoice_summary.paid) }}</p>
+                                    <p class="mb-2 text-danger">Balance: GHS {{ "{:,.2f}".format(invoice_summary.balance) }}</p>
+                                    <a href="{{ invoice_summary.url }}" class="btn btn-sm btn-outline-primary"><i class="fas fa-external-link-alt mr-1"></i> View Invoice</a>
+                                    <a href="/billing/invoices?patient_id={{ admission.patient_id }}" class="btn btn-sm btn-outline-secondary">Patient Billing</a>
+                                </div>
+                                {% endif %}
+                                
+                                <a href="/patients/{{ admission.patient_id }}/records" class="btn btn-block btn-primary mb-2">
+                                    <i class="fas fa-file-medical mr-2"></i> View Patient File
+                                </a>
+                                <a href="/patients/{{ admission.patient_id }}" class="btn btn-block btn-secondary">
+                                    <i class="fas fa-user mr-2"></i> View Patient Profile
+                                </a>
+                                
+                                {% if admission.encounter_id %}
+                                <a href="/encounters/{{ admission.encounter_id }}" class="btn btn-block btn-info mb-2">
+                                    <i class="fas fa-file-medical mr-2"></i> View Encounter
+                                </a>
+                                {% if user_role in ['Doctor', 'Clinician', 'Admin'] and admission.status.value == 'admitted' %}
+                                <a href="/encounters/{{ admission.encounter_id }}#prescriptions" class="btn btn-block btn-primary mb-2">
+                                    <i class="fas fa-prescription mr-2"></i> Prescribe Medication
+                                </a>
+                                <div class="alert alert-info small mb-0">
+                                    <i class="fas fa-info-circle"></i> <strong>Note:</strong> Medications must be prescribed by doctor and dispensed from pharmacy before administration.
+                                </div>
+                                {% endif %}
+                                {% endif %}
+                                
+                                <a href="{{ url_for('admission_report', admission_id=admission.id) }}" class="btn btn-block btn-danger">
+                                    <i class="fas fa-file-pdf mr-2"></i> Generate Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Prescribed Medications -->
+                {% if prescriptions %}
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-prescription mr-1"></i> Prescribed Medications</h3>
+                        <div class="card-tools">
+                            {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
+                            <a href="{{ url_for('ipd_record_drug_administration_form', admission_id=admission.id) }}" class="btn btn-sm btn-success mr-2">
+                                <i class="fas fa-syringe mr-1"></i> Record Administration
+                            </a>
+                            {% endif %}
+                            <span class="badge badge-info">{{ prescriptions|length }} Prescription(s)</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Medication</th>
+                                        <th>Dosage</th>
+                                        <th>Frequency</th>
+                                        <th>Duration</th>
+                                        <th>Quantity</th>
+                                        <th>Prescribed By</th>
+                                        <th>Status</th>
+                                        <th>Dispensed By</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for presc in prescriptions %}
+                                    <tr class="{% if presc.status.value == 'completed' %}table-success{% elif presc.status.value == 'pending' %}table-warning{% elif presc.status.value == 'cancelled' %}table-danger{% endif %}">
+                                        <td><strong>{{ presc.medication_name }}</strong>
+                                            {% if presc.medication_code %}<br><small class="text-muted">Code: {{ presc.medication_code }}</small>{% endif %}
+                                        </td>
+                                        <td>{{ presc.dosage }}</td>
+                                        <td>{{ presc.frequency }}</td>
+                                        <td>{{ presc.duration }}</td>
+                                        <td>{{ presc.quantity or 'N/A' }}</td>
+                                        <td>{{ presc.prescribed_by.full_name if presc.prescribed_by else 'N/A' }}<br>
+                                            <small class="text-muted">{{ presc.prescribed_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{% if presc.status.value == 'completed' %}success{% elif presc.status.value == 'pending' %}warning{% elif presc.status.value == 'cancelled' %}danger{% else %}info{% endif %}">
+                                                {{ presc.status.value.title() }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            {% if presc.dispensed_by %}
+                                                {{ presc.dispensed_by.full_name }}<br>
+                                                <small class="text-muted">{{ presc.dispensed_at.strftime('%Y-%m-%d %H:%M') if presc.dispensed_at else '' }}</small>
+                                            {% else %}
+                                                <span class="text-muted">Not dispensed</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if presc.status.value == 'cancelled' %}
+                                                <small class="text-muted"><i class="fas fa-info-circle"></i> Not in stock - obtain from another source</small>
+                                            {% elif presc.status.value == 'completed' %}
+                                                <span class="text-muted">Dispensed</span>
+                                            {% elif presc.status.value == 'pending' %}
+                                                {% if prescription_stock_status.get(presc.id, False) %}
+                                                    <span class="text-muted">Dispensed</span>
+                                                {% else %}
+                                                    <span class="text-muted">Pending dispense</span>
+                                                {% endif %}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    <!-- Administration History for this prescription -->
+                                    {% if administrations_by_prescription.get(presc.id) %}
+                                    <tr class="table-light">
+                                        <td colspan="9" style="padding: 0;">
+                                            <div class="p-3" style="background-color: #f8f9fa;">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <strong><i class="fas fa-history text-primary"></i> Administration History</strong>
+                                                    <span class="badge badge-info">{{ administrations_by_prescription[presc.id]|length }} Administration(s)</span>
+                                                </div>
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm table-bordered mb-0" style="background-color: white;">
+                                                        <thead class="thead-light">
+                                                            <tr>
+                                                                <th style="width: 20%;">Date/Time</th>
+                                                                <th style="width: 15%;">Dosage</th>
+                                                                <th style="width: 12%;">Route</th>
+                                                                <th style="width: 20%;">Administered By</th>
+                                                                <th style="width: 33%;">Notes</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {% for admin in administrations_by_prescription[presc.id] %}
+                                                            <tr>
+                                                                <td>
+                                                                    <small>{{ admin.administration_time.strftime('%Y-%m-%d') }}</small><br>
+                                                                    <strong>{{ admin.administration_time.strftime('%H:%M') }}</strong>
+                                                                </td>
+                                                                <td>{{ admin.dosage_given or presc.dosage }}</td>
+                                                                <td>
+                                                                    {% if admin.route %}
+                                                                        <span class="badge badge-secondary">{{ admin.route|upper }}</span>
+                                                                    {% else %}
+                                                                        <span class="text-muted">-</span>
+                                                                    {% endif %}
+                                                                </td>
+                                                                <td>
+                                                                    <strong>{{ admin.administered_by.full_name if admin.administered_by else 'N/A' }}</strong>
+                                                                </td>
+                                                                <td>
+                                                                    {% if admin.notes %}
+                                                                        <small class="text-muted">{{ admin.notes }}</small>
+                                                                    {% else %}
+                                                                        <span class="text-muted">-</span>
+                                                                    {% endif %}
+                                                                </td>
+                                                            </tr>
+                                                            {% endfor %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <i class="fas fa-info-circle"></i> 
+                                <strong>Note:</strong> Nurses can record medication administrations for any prescribed medication. 
+                                Administration history is displayed below each prescription showing who administered, when, and any notes. 
+                                Medications can be administered regardless of dispense status (may be obtained from external sources).
+                            </small>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-prescription mr-1"></i> Prescribed Medications</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> No medications have been prescribed for this patient yet.
+                            {% if user_role in ['Doctor', 'Clinician', 'Admin'] %}
+                            {% if admission.encounter_id %}
+                            <a href="/encounters/{{ admission.encounter_id }}#prescriptions" class="alert-link">Create prescription</a>
+                            {% else %}
+                            <a href="/patients/{{ admission.patient_id }}/encounters/new" class="alert-link">Create encounter and prescription</a>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+
+                <!-- Admission Notes -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-sticky-note mr-1"></i> Admission Notes</h3>
+                                {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
+                                <div class="card-tools">
+                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addNoteForm">
+                                        <i class="fas fa-plus"></i> Add Note
+                                    </button>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="card-body">
+                                {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
+                                <div id="addNoteForm" class="collapse mb-3">
+                                    <form method="POST" action="{{ url_for('add_admission_note', admission_id=admission.id) }}">
+                                        <div class="form-group">
+                                            <label for="note_type">Note Type</label>
+                                            <select class="form-control" name="note_type" id="note_type">
+                                                <option value="general">General</option>
+                                                <option value="nursing">Nursing</option>
+                                                <option value="doctor">Doctor</option>
+                                                <option value="vital_signs">Vital Signs</option>
+                                                <option value="medication">Medication</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="note">Note *</label>
+                                            <textarea class="form-control" name="note" id="note" rows="3" placeholder="Enter your note here..." required></textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="fas fa-save mr-1"></i> Save Note
+                                        </button>
+                                        <button type="button" class="btn btn-secondary" data-toggle="collapse" data-target="#addNoteForm">
+                                            Cancel
+                                        </button>
+                                    </form>
+                                    <hr>
+                                </div>
+                                {% endif %}
+                                
+                                {% if admission_notes %}
+                                <div class="timeline">
+                                    {% for note in admission_notes %}
+                                    <div class="time-label">
+                                        <span class="bg-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %}">
+                                            {{ note.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <i class="fas fa-{% if note.note_type == 'doctor' %}user-md{% elif note.note_type == 'nursing' %}user-nurse{% elif note.note_type == 'medication' %}pills{% elif note.note_type == 'vital_signs' %}heartbeat{% else %}sticky-note{% endif %} bg-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %}"></i>
+                                        <div class="timeline-item">
+                                            <span class="time">
+                                                <i class="fas fa-clock"></i> {{ note.created_at.strftime('%H:%M') }}
+                                            </span>
+                                            <h3 class="timeline-header">
+                                                <strong>{{ note.created_by.full_name if note.created_by else 'Unknown' }}</strong>
+                                                <span class="badge badge-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %} ml-2">
+                                                    {{ note.note_type|title }}
+                                                </span>
+                                            </h3>
+                                            <div class="timeline-body">
+                                                {{ note.note|replace('\n', '<br>')|safe }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> No notes have been added to this admission yet.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

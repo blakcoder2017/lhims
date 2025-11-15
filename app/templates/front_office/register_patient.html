@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Patient Registration</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Registration</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <div class="card card-primary card-outline">
+                    <div class="card-header patient-header">
+                        <h3 class="card-title"><i class="fas fa-user-plus mr-1"></i> New Patient Demographics</h3>
+                    </div>
+                    
+                    <form method="POST" action="/api/v1/patients/register"> 
+                        <div class="card-body">
+                            
+                            <!-- Emergency Case Alert -->
+                            <div class="alert alert-danger" id="emergencyAlert" style="display: none;">
+                                <h5><i class="icon fas fa-exclamation-triangle"></i> Emergency Case</h5>
+                                <p class="mb-0">Emergency cases will be fast-tracked and may bypass normal vitals procedures.</p>
+                            </div>
+                            
+                            <div id="alertContainer" class="mt-3">
+                                {% if request.query_params.get('error') == 'duplicate_id' %}
+                                <div class="alert alert-danger alert-dismissible"><button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button><h5><i class="icon fas fa-ban"></i> Registration Failed!</h5>Patient with that National ID is already registered.</div>
+                                {% elif request.query_params.get('error') == '1' %}
+                                <div class="alert alert-danger alert-dismissible"><button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button><h5><i class="icon fas fa-ban"></i> Validation Error!</h5>Please check the format of Date of Birth (YYYY-MM-DD).</div>
+                                {% endif %}
+                            </div>
+                            
+                            <!-- Emergency Case Toggle -->
+                            <div class="row mb-3">
+                                <div class="col-md-12">
+                                    <div class="form-check form-check-inline">
+                                        <input type="checkbox" class="form-check-input" id="is_emergency" name="is_emergency" value="yes" onchange="toggleEmergencyAlert()">
+                                        <label class="form-check-label text-danger" for="is_emergency">
+                                            <strong><i class="fas fa-exclamation-triangle mr-1"></i> Emergency Case</strong>
+                                        </label>
+                                    </div>
+                                    <small class="form-text text-muted d-block">Check this box for emergency cases that require immediate attention</small>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="firstName">First Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="firstName" name="first_name" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="lastName">Last Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="lastName" name="last_name" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="dob">Date of Birth <span class="text-danger">*</span></label>
+                                        <input type="date" class="form-control" id="dob" name="date_of_birth" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="gender">Gender <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="gender" name="gender" required>
+                                            <option value="">Select Gender</option>
+                                            <option value="Male">Male</option>
+                                            <option value="Female">Female</option>
+                                            <option value="Other">Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="nationalID">National ID / NHIS #</label>
+                                        <input type="text" class="form-control" id="nationalID" name="national_id" placeholder="Optional">
+                                        <small class="form-text text-muted">Not compulsory - can be left blank</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h5 class="mt-4 mb-2">Contact Information</h5>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="phone">Phone Number</label>
+                                        <input type="tel" class="form-control" id="phone" name="phone_number">
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <div class="form-group">
+                                        <label for="address">Address</label>
+                                        <input type="text" class="form-control" id="address" name="address">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row mt-2">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="languages_spoken">Languages Spoken (Optional)</label>
+                                        <input type="text" class="form-control" id="languages_spoken" name="languages_spoken" placeholder="e.g., English, Twi, Ga, Ewe (comma-separated)">
+                                        <small class="form-text text-muted">Enter languages the patient can speak, separated by commas</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h5 class="mt-4 mb-2">Financial Screening (Step 3)</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="paymentMechanism">Payment Mechanism</label>
+                                        <select class="form-control" id="paymentMechanism" name="payment_mechanism" onchange="toggleInsuranceFields()">
+                                            <option value="">Select Payment Method</option>
+                                            <option value="cash">Cash</option>
+                                            <option value="nhis">NHIS (National Health Insurance Scheme)</option>
+                                            <option value="private_insurance">Private Insurance</option>
+                                            <option value="self_pay">Self Pay</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- NHIS Fields (shown when NHIS is selected) -->
+                            <div id="nhisFields" style="display: none;">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="nhisNumber">NHIS Membership Number</label>
+                                            <input type="text" class="form-control" id="nhisNumber" name="nhis_number" placeholder="Enter NHIS number">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Private Insurance Fields (shown when Private Insurance is selected) -->
+                            <div id="insuranceFields" style="display: none;">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="insuranceProvider">Insurance Provider</label>
+                                            <select class="form-control" id="insuranceProvider" name="insurance_provider">
+                                                <option value="">Select Insurance Provider</option>
+                                                {% if insurance_providers %}
+                                                {% for provider in insurance_providers %}
+                                                <option value="{{ provider.name }}">{{ provider.name }}{% if provider.code %} ({{ provider.code }}){% endif %}</option>
+                                                {% endfor %}
+                                                {% endif %}
+                                            </select>
+                                            <small class="form-text text-muted">
+                                                {% if insurance_providers %}
+                                                    Select from registered insurance providers
+                                                {% else %}
+                                                    No insurance providers registered. <a href="{{ url_for('insurance_provider_create_form') if user_role in ['Admin', 'Finance'] else '#' }}">Register one</a> or enter manually below.
+                                                {% endif %}
+                                            </small>
+                                            {% if user_role in ['Admin', 'Finance'] %}
+                                            <small class="form-text">
+                                                <a href="{{ url_for('insurance_provider_create_form') }}" target="_blank">
+                                                    <i class="fas fa-plus-circle"></i> Add New Insurance Provider
+                                                </a>
+                                            </small>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="insurancePolicyNumber">Policy Number</label>
+                                            <input type="text" class="form-control" id="insurancePolicyNumber" name="insurance_policy_number" 
+                                                   placeholder="Enter policy number">
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Manual entry option (if no providers or user wants to enter custom) -->
+                                <div class="row">
+                                    <div class="col-md-12">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="manualInsuranceEntry" onchange="toggleManualInsuranceEntry()">
+                                            <label class="form-check-label" for="manualInsuranceEntry">
+                                                Enter insurance provider manually
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row" id="manualInsuranceEntryFields" style="display: none;">
+                                    <div class="col-md-12">
+                                        <div class="form-group">
+                                            <label for="insuranceProviderManual">Insurance Provider Name</label>
+                                            <input type="text" class="form-control" id="insuranceProviderManual" name="insurance_provider_manual" 
+                                                   placeholder="Enter insurance provider name">
+                                            <small class="form-text text-muted">Use this field if the provider is not in the list above</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <script>
+                                function toggleInsuranceFields() {
+                                    const paymentMechanism = document.getElementById('paymentMechanism').value;
+                                    const nhisFields = document.getElementById('nhisFields');
+                                    const insuranceFields = document.getElementById('insuranceFields');
+                                    
+                                    // Hide all fields first
+                                    nhisFields.style.display = 'none';
+                                    insuranceFields.style.display = 'none';
+                                    
+                                    // Show relevant fields based on selection
+                                    if (paymentMechanism === 'nhis') {
+                                        nhisFields.style.display = 'block';
+                                    } else if (paymentMechanism === 'private_insurance') {
+                                        insuranceFields.style.display = 'block';
+                                    }
+                                }
+                                
+                                function toggleManualInsuranceEntry() {
+                                    const manualCheckbox = document.getElementById('manualInsuranceEntry');
+                                    const manualFields = document.getElementById('manualInsuranceEntryFields');
+                                    const insuranceProvider = document.getElementById('insuranceProvider');
+                                    const insuranceProviderManual = document.getElementById('insuranceProviderManual');
+                                    
+                                    if (manualCheckbox && manualCheckbox.checked) {
+                                        if (manualFields) manualFields.style.display = 'block';
+                                        if (insuranceProvider) {
+                                            insuranceProvider.disabled = true;
+                                            insuranceProvider.value = '';
+                                        }
+                                        if (insuranceProviderManual) {
+                                            insuranceProviderManual.required = false;  // Optional for now
+                                        }
+                                    } else {
+                                        if (manualFields) manualFields.style.display = 'none';
+                                        if (insuranceProvider) {
+                                            insuranceProvider.disabled = false;
+                                        }
+                                        if (insuranceProviderManual) {
+                                            insuranceProviderManual.value = '';
+                                        }
+                                    }
+                                }
+                                
+                                // Emergency case toggle
+                                function toggleEmergencyAlert() {
+                                    const isEmergency = document.getElementById('is_emergency').checked;
+                                    const emergencyAlert = document.getElementById('emergencyAlert');
+                                    if (isEmergency) {
+                                        emergencyAlert.style.display = 'block';
+                                    } else {
+                                        emergencyAlert.style.display = 'none';
+                                    }
+                                }
+                                
+                                // Initialize on page load
+                                document.addEventListener('DOMContentLoaded', function() {
+                                    toggleInsuranceFields();
+                                    toggleEmergencyAlert();
+                                });
+                            </script>
+                            
+                            </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-action float-right"><i class="fas fa-save mr-1"></i> Register Patient</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+        </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}

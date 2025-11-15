@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-list mr-2"></i>Doctor Queue</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('doctor_dashboard') }}">Doctor Dashboard</a></li>
+                            <li class="breadcrumb-item active">Queue</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Queue</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('doctor_queue') }}">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label for="search">Search</label>
+                                        <input type="text" 
+                                               class="form-control" 
+                                               id="search" 
+                                               name="search" 
+                                               placeholder="Patient name or patient number"
+                                               value="{{ search or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label for="department">Department</label>
+                                        <select class="form-control" id="department" name="department">
+                                            <option value="">All Departments</option>
+                                            {% for dept in departments %}
+                                            <option value="{{ dept }}" {% if selected_department == dept %}selected{% endif %}>{{ dept }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label for="show_assigned_only">Filter</label>
+                                        <select class="form-control" id="show_assigned_only" name="show_assigned_only">
+                                            <option value="false" {% if not show_assigned_only %}selected{% endif %}>All Patients</option>
+                                            <option value="true" {% if show_assigned_only %}selected{% endif %}>My Assigned Only</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search mr-1"></i> Search
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <a href="{{ url_for('doctor_queue') }}" class="btn btn-secondary btn-block">Clear</a>
+                                    </div>
+                                </div>
+                            </div>
+                            {% if search %}
+                            <div class="row">
+                                <div class="col-12">
+                                    <small class="text-muted">
+                                        <span class="badge badge-info">Search: {{ search }}</span>
+                                    </small>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Doctor Queue Table -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-list mr-1"></i> Patient Queue - Ready to See Doctor</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if queue_items %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Queue #</th>
+                                        <th>Patient Name</th>
+                                        <th>Patient Number</th>
+                                        <th>Department</th>
+                                        <th>Dept Type</th>
+                                        <th>Scheduled Time</th>
+                                        <th>Chief Complaint</th>
+                                        <th>Priority</th>
+                                        <th>Status</th>
+                                        <th>Encounter</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in queue_items %}
+                                    {% set appointment = item.appointment %}
+                                    {% set patient = item.appointment.patient if item.appointment else item.encounter.patient %}
+                                    <tr class="{% if item.has_encounter %}table-info{% endif %} {% if item.type == 'encounter_only' %}table-warning{% endif %}">
+                                        <td>
+                                            {% if appointment %}
+                                            <strong>{{ appointment.queue_number or 'N/A' }}</strong>
+                                            {% else %}
+                                            <span class="badge badge-warning">No Queue #</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ patient.first_name }} {{ patient.last_name }}</td>
+                                        <td><span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></td>
+                                        <td>
+                                            {% if appointment %}
+                                                {{ appointment.department }}
+                                            {% elif item.encounter %}
+                                                N/A
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment %}
+                                            <span class="badge badge-{% if appointment.department_type == 'ipd' %}danger{% elif appointment.department_type == 'opd' %}success{% else %}secondary{% endif %}">
+                                                {{ (appointment.department_type or 'opd').upper() }}
+                                            </span>
+                                            {% else %}
+                                            <span class="badge badge-secondary">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment %}
+                                                {{ appointment.scheduled_date.strftime('%H:%M') }}
+                                            {% elif item.encounter %}
+                                                {{ item.encounter.encounter_date.strftime('%H:%M') }}
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment %}
+                                                {{ appointment.chief_complaint or 'N/A' }}
+                                            {% elif item.encounter %}
+                                                {{ item.encounter.chief_complaint or 'N/A' }}
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment %}
+                                            <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                {{ appointment.priority }}
+                                            </span>
+                                            {% else %}
+                                            <span class="badge badge-info">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment %}
+                                                {% if appointment.status.value == 'checked_in' %}
+                                                    <span class="badge badge-primary">Checked In</span>
+                                                {% elif appointment.status.value == 'in_progress' %}
+                                                    <span class="badge badge-warning">In Progress</span>
+                                                {% endif %}
+                                            {% elif item.encounter %}
+                                                {% if item.encounter.status.value == 'in_progress' %}
+                                                    <span class="badge badge-warning">In Progress</span>
+                                                {% elif item.encounter.status.value == 'detained' %}
+                                                    <span class="badge badge-warning">Detained</span>
+                                                {% endif %}
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if item.has_encounter %}
+                                                <span class="badge badge-info"><i class="fas fa-check"></i> Active</span>
+                                                <small class="d-block">#{{ item.encounter.id }}</small>
+                                            {% else %}
+                                                <span class="badge badge-secondary">None</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('view_patient_records', patient_id=patient.id) }}" 
+                                               class="btn btn-sm btn-primary" title="Patient File">
+                                                <i class="fas fa-file-medical"></i> Patient File
+                                            </a>
+                                            {% if item.has_encounter %}
+                                            <a href="{{ url_for('view_encounter', encounter_id=item.encounter.id) }}" 
+                                               class="btn btn-sm btn-info">
+                                                <i class="fas fa-notes-medical"></i> Continue
+                                            </a>
+                                            {% else %}
+                                            <a href="{{ url_for('new_encounter', patient_id=patient.id) }}{% if appointment %}?appointment_id={{ appointment.id }}{% endif %}" 
+                                               class="btn btn-sm btn-success" title="Start Encounter">
+                                                <i class="fas fa-stethoscope"></i> Start
+                                            </a>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> No Patients in Queue</h5>
+                            {% if show_assigned_only %}
+                                No patients assigned to you at this time.
+                            {% else %}
+                                No patients checked in and ready to see doctor at this time.
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

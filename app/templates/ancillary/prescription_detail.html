@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Prescription #{{ prescription.id }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_dashboard') }}">Pharmacy</a></li>
+                            <li class="breadcrumb-item active">Prescription #{{ prescription.id }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                {% if request.query_params.get('status') == 'dispensed' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Medication Dispensed!</h5>
+                    Prescription has been marked as dispensed.
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('status') == 'cancelled' %}
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-triangle"></i> Prescription Cancelled</h5>
+                    This prescription has been cancelled due to medication not being in stock. It will still appear in patient records for audit purposes.
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('status') == 'already_cancelled' %}
+                <div class="alert alert-info alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-info-circle"></i> Prescription Already Cancelled</h5>
+                    This prescription has already been cancelled.
+                </div>
+                {% endif %}
+
+                <!-- Patient Information -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3"><strong>Patient:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
+                            <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
+                            <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
+                            {% if patient.phone_number %}
+                            <div class="col-md-3"><strong>Phone:</strong> {{ patient.phone_number }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Prescription Details -->
+                <div class="card card-danger">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-pills mr-1"></i> Prescription Details</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <table class="table table-sm">
+                                    <tr>
+                                        <th>Medication:</th>
+                                        <td><strong>{{ prescription.medication_name }}</strong></td>
+                                    </tr>
+                                    <tr>
+                                        <th>Medication Code:</th>
+                                        <td>{{ prescription.medication_code or 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Dosage:</th>
+                                        <td>{{ prescription.dosage }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Frequency:</th>
+                                        <td>{{ prescription.frequency }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Duration:</th>
+                                        <td>{{ prescription.duration }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Quantity:</th>
+                                        <td>{{ prescription.quantity or 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Status:</th>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if prescription.status.value == 'completed' else 'warning' if prescription.status.value == 'in_progress' else 'danger' if prescription.status.value == 'cancelled' else 'info' }}">
+                                                {{ prescription.status.value.replace('_', ' ').title() }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <th>Prescribed By:</th>
+                                        <td>{{ prescription.prescribed_by.full_name or prescription.prescribed_by.username }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Prescribed At:</th>
+                                        <td>{{ prescription.prescribed_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                {% if prescription.instructions %}
+                                <div class="form-group">
+                                    <label><strong>Patient Instructions:</strong></label>
+                                    <p>{{ prescription.instructions }}</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventory & Compliance Checks -->
+                {% if medication %}
+                <!-- Stock Availability -->
+                {% if stock_check %}
+                <div class="card card-{{ 'danger' if stock_check.out_of_stock else 'warning' if stock_check.low_stock else 'info' }}">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-boxes mr-1"></i> Stock Availability</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <strong>Required:</strong> {{ prescription.quantity or 1 }} {{ medication.unit or 'units' }}
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Available:</strong> {{ stock_check.available_quantity }} {{ medication.unit or 'units' }}
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Status:</strong>
+                                {% if stock_check.out_of_stock %}
+                                    <span class="badge badge-danger">Out of Stock</span>
+                                {% elif stock_check.low_stock %}
+                                    <span class="badge badge-warning">Low Stock</span>
+                                {% else %}
+                                    <span class="badge badge-success">In Stock</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Formulary Compliance -->
+                {% if formulary_check %}
+                <div class="card card-{{ 'warning' if formulary_check.warnings else 'success' }}">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-clipboard-check mr-1"></i> Formulary Compliance</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>In Formulary:</strong>
+                                {% if formulary_check.is_formulary %}
+                                    <span class="badge badge-success">Yes</span>
+                                {% else %}
+                                    <span class="badge badge-warning">No</span>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6">
+                                <strong>NHIS Covered:</strong>
+                                {% if formulary_check.is_nhis_covered %}
+                                    <span class="badge badge-success">Yes</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">No</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% if formulary_check.warnings %}
+                        <div class="alert alert-warning mt-2">
+                            <strong>Warnings:</strong>
+                            <ul class="mb-0">
+                                {% for warning in formulary_check.warnings %}
+                                <li>{{ warning }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Drug Interactions -->
+                {% if interaction_check and interaction_check.has_interactions %}
+                <div class="card card-danger">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-exclamation-triangle mr-1"></i> Drug Interactions</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-danger">
+                            <strong>Warning:</strong> Potential drug interactions detected!
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Severity</th>
+                                        <th>Type</th>
+                                        <th>Description</th>
+                                        <th>Management</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for interaction in interaction_check.interactions %}
+                                    <tr>
+                                        <td>
+                                            <span class="badge badge-{{ 'danger' if interaction.severity == 'severe' else 'warning' if interaction.severity == 'moderate' else 'info' }}">
+                                                {{ interaction.severity.title() }}
+                                            </span>
+                                        </td>
+                                        <td>{{ interaction.interaction_type }}</td>
+                                        <td>{{ interaction.description }}</td>
+                                        <td>{{ interaction.management or 'N/A' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                {% endif %}
+
+                <!-- Dispensing -->
+                {% if prescription.status.value != 'completed' and prescription.status.value != 'cancelled' %}
+                <div class="card card-success">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-check-circle mr-1"></i> Dispense Medication</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if medication and stock_check and stock_check.is_available %}
+                        <p>Select the stock batch to dispense from:</p>
+                        <form method="POST" action="{{ url_for('dispense_prescription', prescription_id=prescription.id) }}">
+                            {% if stock_items %}
+                            <div class="form-group">
+                                <label>Select Stock Batch</label>
+                                <select name="stock_item_id" class="form-control" required>
+                                    <option value="">Select batch...</option>
+                                    {% for item in stock_items %}
+                                    {% if item.available_quantity > 0 and item.status.value != 'expired' %}
+                                    <option value="{{ item.id }}">
+                                        Batch: {{ item.batch_number or 'N/A' }} - 
+                                        Available: {{ item.available_quantity }} - 
+                                        Expiry: {{ item.expiry_date.strftime('%Y-%m-%d') if item.expiry_date else 'N/A' }}
+                                    </option>
+                                    {% endif %}
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            {% endif %}
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="fas fa-check mr-1"></i> Mark as Dispensed
+                            </button>
+                        </form>
+                        {% elif not medication or (medication and stock_check and stock_check.out_of_stock) %}
+                        <div class="alert alert-{{ 'danger' if medication and stock_check and stock_check.out_of_stock else 'warning' }}">
+                            <i class="fas fa-exclamation-triangle mr-1"></i> 
+                            <strong>{% if not medication %}Not in Inventory{% else %}Out of Stock{% endif %}:</strong> 
+                            {% if not medication %}
+                                This medication is not in the inventory system. Prescription will be printed for the patient to obtain from another pharmacy.
+                            {% else %}
+                                This medication is currently out of stock. Cannot dispense.
+                            {% endif %}
+                        </div>
+                        <div class="mt-3">
+                            <a href="{{ url_for('print_prescription', prescription_id=prescription.id) }}" class="btn btn-primary btn-lg" target="_blank">
+                                <i class="fas fa-print mr-1"></i> Print Prescription for Patient
+                            </a>
+                            {% if prescription.status.value != 'cancelled' %}
+                            <form method="POST" action="{{ url_for('cancel_prescription', prescription_id=prescription.id) }}" style="display: inline-block; margin-left: 10px;" onsubmit="return confirm('Are you sure you want to cancel this prescription? It will still appear in patient records for audit purposes.');">
+                                <button type="submit" class="btn btn-danger btn-lg">
+                                    <i class="fas fa-times-circle mr-1"></i> Cancel Prescription (Not in Stock)
+                                </button>
+                            </form>
+                            {% endif %}
+                            <p class="text-muted mt-2"><small>Print this prescription so the patient can obtain the medication from another pharmacy. If the medication is not available, you can cancel the prescription after printing.</small></p>
+                        </div>
+                        {% else %}
+                        <p>Review the prescription details above. Once the medication has been dispensed to the patient, click the button below to mark it as dispensed.</p>
+                        <form method="POST" action="{{ url_for('dispense_prescription', prescription_id=prescription.id) }}">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                <i class="fas fa-check mr-1"></i> Mark as Dispensed
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% elif prescription.status.value == 'completed' %}
+                <!-- Display Dispensing Information -->
+                <div class="card card-success">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-check-circle mr-1"></i> Dispensing Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle mr-1"></i> This prescription has been dispensed.
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>Dispensed By:</strong> {{ prescription.dispensed_by.full_name or prescription.dispensed_by.username if prescription.dispensed_by else 'N/A' }}
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Dispensed At:</strong> {{ prescription.dispensed_at.strftime('%Y-%m-%d %H:%M') if prescription.dispensed_at else 'N/A' }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% elif prescription.status.value == 'cancelled' %}
+                <!-- Display Cancellation Information -->
+                <div class="card card-danger">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-times-circle mr-1"></i> Prescription Cancelled</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle mr-1"></i> This prescription has been cancelled because the medication was not in stock.
+                            <br><small class="text-muted">This prescription will still appear in patient records for audit purposes.</small>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12">
+                                <strong>Cancelled At:</strong> {{ prescription.updated_at.strftime('%Y-%m-%d %H:%M') if prescription.updated_at else 'N/A' }}
+                            </div>
+                        </div>
+                        {% if prescription.instructions and '[CANCELLED' in prescription.instructions %}
+                        <div class="row mt-2">
+                            <div class="col-md-12">
+                                <strong>Cancellation Note:</strong>
+                                <p class="text-muted">{{ prescription.instructions.split('[CANCELLED')[1] if '[CANCELLED' in prescription.instructions else 'N/A' }}</p>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Actions -->
+                <div class="card">
+                    <div class="card-footer">
+                        <a href="{{ url_for('print_prescription', prescription_id=prescription.id) }}" class="btn btn-primary" target="_blank">
+                            <i class="fas fa-print mr-1"></i> Print Prescription
+                        </a>
+                        <a href="{{ url_for('pharmacy_dashboard') }}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left mr-1"></i> Back to Pharmacy Dashboard
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

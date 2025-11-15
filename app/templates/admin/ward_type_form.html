@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>
+                            <i class="fas fa-hospital mr-2"></i>
+                            {% if ward_type %}Edit{% else %}Create{% endif %} Ward Type
+                        </h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ward_types_list') }}">Ward Types</a></li>
+                            <li class="breadcrumb-item active">{% if ward_type %}Edit{% else %}Create{% endif %}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') == 'code_exists' %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    A ward type with this code already exists.
+                </div>
+                {% endif %}
+                {% if request.query_params.get('error') == 'name_exists' %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    A ward type with this name already exists.
+                </div>
+                {% endif %}
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-hospital mr-1"></i>
+                            {% if ward_type %}Edit Ward Type{% else %}Create New Ward Type{% endif %}
+                        </h3>
+                    </div>
+                    <form method="POST" action="{% if ward_type %}{{ url_for('ward_type_update', ward_type_id=ward_type.id) }}{% else %}{{ url_for('ward_type_create') }}{% endif %}">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="name">Ward Type Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="name" name="name" 
+                                               value="{% if ward_type %}{{ ward_type.name }}{% endif %}" 
+                                               required placeholder="e.g., General, ICU, Pediatric">
+                                        <small class="form-text text-muted">Unique name for this ward type</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="code">Ward Type Code</label>
+                                        <input type="text" class="form-control" id="code" name="code" 
+                                               value="{% if ward_type %}{{ ward_type.code }}{% endif %}" 
+                                               placeholder="e.g., GEN, ICU, PED">
+                                        <small class="form-text text-muted">Short code for this ward type (optional, must be unique)</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="description">Description</label>
+                                        <textarea class="form-control" id="description" name="description" rows="3" 
+                                                  placeholder="Description of this ward type">{% if ward_type %}{{ ward_type.description }}{% endif %}</textarea>
+                                        <small class="form-text text-muted">Optional description of the ward type</small>
+                                    </div>
+                                </div>
+                            </div>
+                            {% if ward_type %}
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" 
+                                                   {% if ward_type.is_active %}checked{% endif %}>
+                                            <label class="form-check-label" for="is_active">
+                                                <strong>Active</strong>
+                                            </label>
+                                            <small class="form-text text-muted d-block">
+                                                Uncheck to deactivate this ward type (it will no longer appear in dropdowns)
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> {% if ward_type %}Update{% else %}Create{% endif %} Ward Type
+                            </button>
+                            <a href="{{ url_for('ward_types_list') }}" class="btn btn-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

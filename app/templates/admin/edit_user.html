@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-user-edit mr-2"></i>Edit User{% if user %}: {{ user.username }}{% endif %}</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('users_management') }}">User Management</a></li>
+                        <li class="breadcrumb-item active">Edit User</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+            {% if errors %}
+            <div class="alert alert-danger alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                <h5><i class="icon fas fa-ban"></i> Error!</h5>
+                <ul class="mb-0">
+                    {% for error in errors %}
+                    <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card card-primary card-outline">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-user-edit mr-1"></i> User Information</h3>
+                        </div>
+                        {% if user %}
+                        <form method="POST" action="{{ url_for('update_user', user_id=user.id) }}">
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label for="username">Username *</label>
+                                    <input type="text" class="form-control" id="username" name="username" 
+                                           value="{{ user.username or '' }}" required minlength="3"
+                                           placeholder="Enter username (min 3 characters)">
+                                    <small class="form-text text-muted">Username must be unique and at least 3 characters long</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="full_name">Full Name</label>
+                                    <input type="text" class="form-control" id="full_name" name="full_name" 
+                                           value="{{ user.full_name or '' }}"
+                                           placeholder="Enter full name">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="email">Email</label>
+                                    <input type="email" class="form-control" id="email" name="email" 
+                                           value="{{ user.email or '' }}"
+                                           placeholder="Enter email address">
+                                    <small class="form-text text-muted">Email must be unique if provided</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="role_id">Role *</label>
+                                    <select class="form-control" id="role_id" name="role_id" required>
+                                        <option value="">Select a role</option>
+                                        {% for role in roles %}
+                                        <option value="{{ role.id }}" {% if user.role_id == role.id %}selected{% endif %}>
+                                            {{ role.name }} - {{ role.description or 'No description' }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="is_active" name="is_active" 
+                                               value="true" {% if user.is_active %}checked{% endif %}>
+                                        <label class="form-check-label" for="is_active">
+                                            Active Account
+                                        </label>
+                                    </div>
+                                    <small class="form-text text-muted">Inactive users cannot log in</small>
+                                </div>
+
+                                <hr>
+
+                                <h5>Change Password (Optional)</h5>
+                                <p class="text-muted">Leave blank to keep current password</p>
+
+                                <div class="form-group">
+                                    <label for="password">New Password</label>
+                                    <input type="password" class="form-control" id="password" name="password" 
+                                           minlength="6"
+                                           placeholder="Enter new password (min 6 characters)">
+                                    <small class="form-text text-muted">Leave blank to keep current password</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="confirm_password">Confirm New Password</label>
+                                    <input type="password" class="form-control" id="confirm_password" name="confirm_password" 
+                                           minlength="6"
+                                           placeholder="Confirm new password">
+                                </div>
+                            </div>
+                            <div class="card-footer">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save mr-1"></i> Update User
+                                </button>
+                                <a href="{{ url_for('users_management') }}" class="btn btn-secondary">
+                                    <i class="fas fa-times mr-1"></i> Cancel
+                                </a>
+                            </div>
+                        </form>
+                        {% else %}
+                        <div class="card-body">
+                            <div class="alert alert-danger">
+                                <strong>Error:</strong> User data not available. Please go back to <a href="{{ url_for('users_management') }}">User Management</a>.
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="card card-info card-outline">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Information</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted">
+                                <strong>Username:</strong> Can be changed, but must remain unique.
+                            </p>
+                            <p class="text-muted">
+                                <strong>Password:</strong> Leave blank to keep the current password. If changing, must be at least 6 characters.
+                            </p>
+                            <p class="text-muted">
+                                <strong>Role:</strong> Changing the role will immediately affect what the user can access.
+                            </p>
+                            <p class="text-muted">
+                                <strong>Active Status:</strong> Inactive users cannot log in to the system.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="card card-info card-outline">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-shield-alt mr-1"></i> Available Roles</h3>
+                        </div>
+                        <div class="card-body">
+                            <ul class="list-unstyled">
+                                {% for role in roles %}
+                                <li class="mb-2">
+                                    <strong>{{ role.name }}</strong>
+                                    {% if role.description %}
+                                    <br><small class="text-muted">{{ role.description }}</small>
+                                    {% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+    // Password confirmation validation (only if password is provided)
+    document.addEventListener('DOMContentLoaded', function() {
+        const passwordField = document.getElementById('password');
+        const confirmPasswordField = document.getElementById('confirm_password');
+        
+        if (passwordField && confirmPasswordField) {
+            function validatePassword() {
+                const password = passwordField.value;
+                const confirmPassword = confirmPasswordField.value;
+                
+                if (password && confirmPassword) {
+                    if (password !== confirmPassword) {
+                        confirmPasswordField.setCustomValidity('Passwords do not match');
+                    } else {
+                        confirmPasswordField.setCustomValidity('');
+                    }
+                } else {
+                    confirmPasswordField.setCustomValidity('');
+                }
+            }
+            
+            passwordField.addEventListener('input', validatePassword);
+            confirmPasswordField.addEventListener('input', validatePassword);
+        }
+    });
+</script>
+{% endblock %}

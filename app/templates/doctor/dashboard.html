@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-user-md mr-2"></i>Doctor Dashboard</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Doctor Dashboard</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Statistics Row -->
+                <div class="row">
+                    <!-- Assigned Appointments -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ assigned_count }}</h3>
+                                <p>Assigned Appointments</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-calendar-check"></i>
+                            </div>
+                            <a href="{{ url_for('doctor_queue') }}?show_assigned_only=true" class="small-box-footer">
+                                View Queue <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Pending Encounters -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ pending_encounters_count }}</h3>
+                                <p>Pending Encounters</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-notes-medical"></i>
+                            </div>
+                            <a href="/encounters/today" class="small-box-footer">
+                                View Encounters <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Completed Today -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ completed_encounters_today }}</h3>
+                                <p>Completed Today</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <a href="/encounters/today" class="small-box-footer">
+                                View All <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Doctor Queue -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-primary">
+                            <div class="inner">
+                                <h3><i class="fas fa-users"></i></h3>
+                                <p>Patient Queue</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-list"></i>
+                            </div>
+                            <a href="{{ url_for('doctor_queue') }}" class="small-box-footer">
+                                View Queue <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Assigned Appointments -->
+                {% if assigned_appointments %}
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-calendar-check mr-1"></i> My Assigned Appointments</h3>
+                                <div class="card-tools">
+                                    <a href="{{ url_for('doctor_queue') }}?show_assigned_only=true" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-list"></i> View All
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Queue #</th>
+                                                <th>Patient Name</th>
+                                                <th>Patient Number</th>
+                                                <th>Department</th>
+                                                <th>Scheduled Time</th>
+                                                <th>Chief Complaint</th>
+                                                <th>Priority</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for appointment in assigned_appointments[:10] %}
+                                            <tr>
+                                                <td><strong>{{ appointment.queue_number or 'N/A' }}</strong></td>
+                                                <td>{{ appointment.patient.first_name }} {{ appointment.patient.last_name }}</td>
+                                                <td><span class="badge badge-primary">{{ appointment.patient.patient_number or 'N/A' }}</span></td>
+                                                <td>{{ appointment.department }}</td>
+                                                <td>{{ appointment.scheduled_date.strftime('%H:%M') }}</td>
+                                                <td>{{ appointment.chief_complaint or 'N/A' }}</td>
+                                                <td>
+                                                    <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                        {{ appointment.priority }}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    {% if appointment.status.value == 'checked_in' %}
+                                                        <span class="badge badge-primary">Checked In</span>
+                                                    {% elif appointment.status.value == 'in_progress' %}
+                                                        <span class="badge badge-warning">In Progress</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <a href="{{ url_for('view_patient_records', patient_id=appointment.patient_id) }}" 
+                                                       class="btn btn-sm btn-primary">
+                                                        <i class="fas fa-file-medical"></i> View Records
+                                                    </a>
+                                                    {% if appointment.patient_id %}
+                                                    <a href="{{ url_for('view_patient_records', patient_id=appointment.patient_id) }}" 
+                                                       class="btn btn-sm btn-info">
+                                                        <i class="fas fa-stethoscope"></i> Start Encounter
+                                                    </a>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% if assigned_appointments|length > 10 %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Showing first 10 appointments. <a href="{{ url_for('doctor_queue') }}?show_assigned_only=true">View all {{ assigned_count }} appointments</a>.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Pending Encounters -->
+                {% if pending_encounters %}
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-warning card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-notes-medical mr-1"></i> Pending Encounters</h3>
+                                <div class="card-tools">
+                                    <a href="/encounters/today" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-list"></i> View All
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Encounter ID</th>
+                                                <th>Patient Name</th>
+                                                <th>Patient Number</th>
+                                                <th>Time</th>
+                                                <th>Chief Complaint</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for encounter in pending_encounters[:10] %}
+                                            <tr>
+                                                <td><strong>#{{ encounter.id }}</strong></td>
+                                                <td>{{ encounter.patient.first_name }} {{ encounter.patient.last_name }}</td>
+                                                <td><span class="badge badge-primary">{{ encounter.patient.patient_number or 'N/A' }}</span></td>
+                                                <td>{{ encounter.encounter_date.strftime('%H:%M') }}</td>
+                                                <td>{{ encounter.chief_complaint or 'N/A' }}</td>
+                                                <td>
+                                                    <a href="{{ url_for('view_encounter', encounter_id=encounter.id) }}" 
+                                                       class="btn btn-sm btn-primary">
+                                                        <i class="fas fa-eye"></i> View/Continue
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% if pending_encounters|length > 10 %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Showing first 10 encounters. <a href="/encounters/today">View all {{ pending_encounters_count }} encounters</a>.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

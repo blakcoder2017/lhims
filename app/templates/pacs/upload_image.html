@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-upload mr-2"></i>Upload Radiology Image</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Home</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('pacs_dashboard') }}">PACS</a></li>
+                        <li class="breadcrumb-item active">Upload</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+            {% if radiology_order %}
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle mr-2"></i>
+                Uploading image for Radiology Order #{{ radiology_order.id }}: <strong>{{ radiology_order.study_type }}</strong>
+            </div>
+            {% endif %}
+
+            <div class="card card-primary">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-upload mr-1"></i> Upload Image</h3>
+                </div>
+                <form method="POST" action="{{ url_for('upload_image') }}" enctype="multipart/form-data">
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="radiology_order_id">Radiology Order *</label>
+                            {% if radiology_order %}
+                            <input type="hidden" name="radiology_order_id" value="{{ radiology_order.id }}">
+                            <input type="text" class="form-control" value="Order #{{ radiology_order.id }}: {{ radiology_order.study_type }}" readonly>
+                            {% else %}
+                            <select name="radiology_order_id" id="radiology_order_id" class="form-control" required>
+                                <option value="">Select Radiology Order</option>
+                                {% for order in recent_orders %}
+                                <option value="{{ order.id }}">
+                                    Order #{{ order.id }}: {{ order.study_type }} - {{ order.encounter.patient.first_name }} {{ order.encounter.patient.last_name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% endif %}
+                        </div>
+
+                        <div class="form-group">
+                            <label for="image_type">Image Type *</label>
+                            <select name="image_type" id="image_type" class="form-control" required>
+                                <option value="xray">X-Ray</option>
+                                <option value="ct">CT Scan</option>
+                                <option value="mri">MRI</option>
+                                <option value="ultrasound">Ultrasound</option>
+                                <option value="mammography">Mammography</option>
+                                <option value="fluoroscopy">Fluoroscopy</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="file">Image File *</label>
+                            <div class="input-group">
+                                <div class="custom-file">
+                                    <input type="file" class="custom-file-input" id="file" name="file" accept=".dcm,.dicom,.jpg,.jpeg,.png,.tiff,.tif" required>
+                                    <label class="custom-file-label" for="file">Choose file</label>
+                                </div>
+                            </div>
+                            <small class="form-text text-muted">Supported formats: DICOM (.dcm, .dicom), JPEG, PNG, TIFF</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="body_part">Body Part</label>
+                            <input type="text" name="body_part" id="body_part" class="form-control" placeholder="e.g., Chest, Head, Abdomen">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="study_description">Study Description</label>
+                            <input type="text" name="study_description" id="study_description" class="form-control" placeholder="Study description">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="notes">Notes</label>
+                            <textarea name="notes" id="notes" class="form-control" rows="3" placeholder="Additional notes"></textarea>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-upload mr-1"></i> Upload Image
+                        </button>
+                        <a href="{{ url_for('pacs_dashboard') }}" class="btn btn-secondary">
+                            <i class="fas fa-times mr-1"></i> Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+    // Update file input label
+    document.getElementById('file').addEventListener('change', function(e) {
+        var fileName = e.target.files[0]?.name || 'Choose file';
+        e.target.nextElementSibling.textContent = fileName;
+    });
+</script>
+{% endblock %}
+

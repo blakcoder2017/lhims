@@ -1,0 +1,28 @@
+/* --- LHIMS Custom Stylesheet --- */
+
+/* Matches the orange action buttons */
+.btn-action {
+  background-color: #fd7e14; /* AdminLTE Orange */
+  border-color: #fd7e14;
+  color: #ffffff;
+}
+.btn-action:hover {
+  background-color: #e87311;
+  border-color: #e87311;
+  color: #ffffff;
+}
+
+/* Matches the blue panel headers for patient cards */
+.card-primary.card-outline {
+    border-top-color: #007bff; /* AdminLTE Primary Blue */
+}
+
+.card-header.patient-header {
+    background-color: #007bff;
+    color: #ffffff;
+}
+
+.card-header.patient-header .card-title {
+    color: #ffffff;
+    font-weight: 600;
+}

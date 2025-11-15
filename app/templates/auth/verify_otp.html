@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify OTP - LHIMS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f3f4f6; font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-md bg-white p-8 rounded-xl shadow-2xl">
+        <h2 class="text-3xl font-extrabold text-gray-900 text-center mb-6">
+            Verify OTP
+        </h2>
+        
+        <p class="text-sm text-gray-600 text-center mb-6">
+            We sent a 6-digit OTP to your phone number. Please enter it below to continue.
+        </p>
+        
+        {% if error %}
+        <div class="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+            <p class="text-sm text-red-800">{{ error }}</p>
+        </div>
+        {% endif %}
+        
+        <form method="POST" action="{{ request.url_for('verify_otp') }}" class="space-y-6">
+            <input type="hidden" name="user_id" value="{{ user_id }}">
+            
+            <div>
+                <label for="otp" class="block text-sm font-medium text-gray-700">Enter OTP</label>
+                <div class="mt-1">
+                    <input id="otp" name="otp" type="text" required maxlength="6" pattern="[0-9]{6}"
+                           class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-center text-2xl tracking-widest"
+                           placeholder="000000"
+                           autocomplete="off">
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Enter the 6-digit code sent to your phone</p>
+            </div>
+
+            <div>
+                <button type="submit"
+                        class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Verify OTP
+                </button>
+            </div>
+        </form>
+
+        <div class="mt-6 text-center space-y-2">
+            <p class="text-sm text-gray-600">Didn't receive the OTP?</p>
+            <a href="{{ request.url_for('forgot_password_page') }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                Request New OTP
+            </a>
+        </div>
+
+        <div class="mt-6 text-center">
+            <a href="{{ request.url_for('login') }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                ← Back to Login
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // Auto-focus and format OTP input
+        const otpInput = document.getElementById('otp');
+        otpInput.focus();
+        
+        otpInput.addEventListener('input', function() {
+            // Only allow numbers
+            this.value = this.value.replace(/[^0-9]/g, '');
+        });
+    </script>
+</body>
+</html>
+

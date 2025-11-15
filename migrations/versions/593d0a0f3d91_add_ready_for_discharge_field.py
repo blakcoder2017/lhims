@@ -1,0 +1,28 @@
+"""add_ready_for_discharge_field
+
+Revision ID: 593d0a0f3d91
+Revises: b03f0a2c1d23
+Create Date: 2025-11-14 07:05:00.000000
+"""
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = "593d0a0f3d91"
+down_revision = "b03f0a2c1d23"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.add_column(
+        "admissions",
+        sa.Column("ready_for_discharge_at", sa.DateTime(), nullable=True)
+    )
+
+
+def downgrade() -> None:
+    op.drop_column("admissions", "ready_for_discharge_at")
+

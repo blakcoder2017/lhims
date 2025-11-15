@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-12">
+                        <h1><i class="fas fa-exclamation-triangle mr-2"></i>Module Unavailable</h1>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <div class="error-page">
+                    <div class="error-content">
+                        <h3><i class="fas fa-info-circle text-info"></i> Module Not Available</h3>
+                        
+                        <p>
+                            The requested module or feature is currently not available.
+                        </p>
+                        
+                        {% if module_name %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> Module Information</h5>
+                            <p><strong>Module:</strong> {{ module_name }}</p>
+                            {% if reason %}
+                            <p><strong>Reason:</strong> {{ reason }}</p>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        
+                        <p>
+                            This could be due to:
+                            <ul>
+                                <li>The module is still under development</li>
+                                <li>The module has been temporarily disabled</li>
+                                <li>Your account does not have access to this module</li>
+                            </ul>
+                        </p>
+                        
+                        <p>
+                            <a href="{{ url_for('dashboard') }}" class="btn btn-primary mt-3">
+                                <i class="fas fa-home mr-1"></i> Return to Dashboard
+                            </a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

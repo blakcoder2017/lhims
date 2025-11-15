@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>
+                            <i class="fas fa-shield-alt mr-2"></i>
+                            {% if insurance_provider %}Edit{% else %}Create{% endif %} Insurance Provider
+                        </h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('insurance_providers_list') }}">Insurance Providers</a></li>
+                            <li class="breadcrumb-item active">{% if insurance_provider %}Edit{% else %}Create{% endif %}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') == 'code_exists' %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    An insurance provider with this code already exists.
+                </div>
+                {% endif %}
+                {% if request.query_params.get('error') == 'name_exists' %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    An insurance provider with this name already exists.
+                </div>
+                {% endif %}
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-circle"></i> Error!</h5>
+                    {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-shield-alt mr-1"></i>
+                            {% if insurance_provider %}Edit Insurance Provider{% else %}Create New Insurance Provider{% endif %}
+                        </h3>
+                    </div>
+                    <form method="POST" action="{% if insurance_provider %}{{ url_for('insurance_provider_update', insurance_provider_id=insurance_provider.id) }}{% else %}{{ url_for('insurance_provider_create') }}{% endif %}">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="name">Provider Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="name" name="name" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.name }}{% endif %}" 
+                                               required placeholder="e.g., National Insurance Company">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="code">Provider Code</label>
+                                        <input type="text" class="form-control" id="code" name="code" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.code }}{% endif %}" 
+                                               placeholder="e.g., NIC, VHIS">
+                                        <small class="form-text text-muted">Unique code for this provider (optional)</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h5 class="mt-4 mb-2">Contact Information</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="contact_person">Contact Person</label>
+                                        <input type="text" class="form-control" id="contact_person" name="contact_person" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.contact_person }}{% endif %}" 
+                                               placeholder="Contact person name">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="phone_number">Phone Number</label>
+                                        <input type="tel" class="form-control" id="phone_number" name="phone_number" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.phone_number }}{% endif %}" 
+                                               placeholder="Phone number">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="email">Email</label>
+                                        <input type="email" class="form-control" id="email" name="email" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.email }}{% endif %}" 
+                                               placeholder="Email address">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="address">Address</label>
+                                        <input type="text" class="form-control" id="address" name="address" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.address }}{% endif %}" 
+                                               placeholder="Address">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <h5 class="mt-4 mb-2">Billing Information</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="co_pay_rate">Co-Pay Rate</label>
+                                        <input type="text" class="form-control" id="co_pay_rate" name="co_pay_rate" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.co_pay_rate }}{% endif %}" 
+                                               placeholder="e.g., 10%, 20%">
+                                        <small class="form-text text-muted">Co-pay rate for this provider (optional)</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="billing_email">Billing Email</label>
+                                        <input type="email" class="form-control" id="billing_email" name="billing_email" 
+                                               value="{% if insurance_provider %}{{ insurance_provider.billing_email }}{% endif %}" 
+                                               placeholder="Billing email address">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="billing_address">Billing Address</label>
+                                        <textarea class="form-control" id="billing_address" name="billing_address" rows="3" 
+                                                  placeholder="Billing address">{% if insurance_provider %}{{ insurance_provider.billing_address }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {% if insurance_provider %}
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" 
+                                                   {% if insurance_provider.is_active %}checked{% endif %} value="true">
+                                            <label class="form-check-label" for="is_active">Active</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> {% if insurance_provider %}Update{% else %}Create{% endif %} Insurance Provider
+                            </button>
+                            <a href="{{ url_for('insurance_providers_list') }}" class="btn btn-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+

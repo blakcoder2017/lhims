@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-user-md mr-2"></i>Schedule Doctor Duty</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_doctor_duties_list') }}">Doctor Duties</a></li>
+                            <li class="breadcrumb-item active">Schedule</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> Error: {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-calendar-alt mr-1"></i> Doctor Duty Information</h3>
+                    </div>
+                    <form method="POST" action="{{ url_for('ipd_doctor_duty_create') }}">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="doctor_id">Doctor <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="doctor_id" name="doctor_id" required>
+                                            <option value="">Select Doctor</option>
+                                            {% for doctor in doctors %}
+                                            <option value="{{ doctor.id }}">
+                                                {{ doctor.first_name }} {{ doctor.last_name }} ({{ doctor.email }})
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="department">Department <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="department" name="department" required>
+                                            <option value="">Select Department</option>
+                                            {% if departments %}
+                                            {% for dept in departments %}
+                                            <option value="{{ dept.name }}">{{ dept.name }}{% if dept.code %} ({{ dept.code }}){% endif %}</option>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                        <small class="form-text text-muted">
+                                            {% if user_role == 'Admin' %}
+                                            <a href="{{ url_for('departments_list') }}" target="_blank">
+                                                <i class="fas fa-cog"></i> Manage Departments
+                                            </a>
+                                            {% else %}
+                                            Select a department from the list
+                                            {% endif %}
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="duty_date">Duty Date <span class="text-danger">*</span></label>
+                                        <input type="date" class="form-control" id="duty_date" name="duty_date" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="shift_start">Shift Start Time <span class="text-danger">*</span></label>
+                                        <input type="time" class="form-control" id="shift_start" name="shift_start" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="shift_end">Shift End Time <span class="text-danger">*</span></label>
+                                        <input type="time" class="form-control" id="shift_end" name="shift_end" required>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="shift_type">Shift Type</label>
+                                        <select class="form-control" id="shift_type" name="shift_type">
+                                            <option value="">Select Shift Type (Optional)</option>
+                                            {% if shift_types %}
+                                            {% for st in shift_types %}
+                                            <option value="{{ st.name }}" data-start-hour="{{ st.default_start_hour or '' }}" data-end-hour="{{ st.default_end_hour or '' }}">
+                                                {{ st.name }}{% if st.code %} ({{ st.code }}){% endif %}
+                                            </option>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                        <small class="form-text text-muted">
+                                            {% if user_role == 'Admin' %}
+                                            <a href="{{ url_for('shift_types_list') }}" target="_blank">
+                                                <i class="fas fa-cog"></i> Manage Shift Types
+                                            </a>
+                                            {% else %}
+                                            Select a shift type from the list
+                                            {% endif %}
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="is_on_duty">On Duty Status</label>
+                                        <select class="form-control" id="is_on_duty" name="is_on_duty">
+                                            <option value="true" selected>On Duty</option>
+                                            <option value="false">Off Duty</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="notes">Notes</label>
+                                        <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Additional notes about the duty"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> Schedule Duty
+                            </button>
+                            <a href="{{ url_for('ipd_doctor_duties_list') }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+    <script>
+        // Set default date to today
+        document.getElementById('duty_date').valueAsDate = new Date();
+        
+        // Handle shift type selection - auto-fill start/end times
+        document.getElementById('shift_type').addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const startHour = selectedOption.getAttribute('data-start-hour');
+            const endHour = selectedOption.getAttribute('data-end-hour');
+            
+            if (startHour !== null && startHour !== '') {
+                document.getElementById('shift_start').value = String(startHour).padStart(2, '0') + ':00';
+            }
+            if (endHour !== null && endHour !== '') {
+                document.getElementById('shift_end').value = String(endHour).padStart(2, '0') + ':00';
+            }
+        });
+        
+        // Handle overnight shifts - show warning if end time is before start time
+        function checkOvernightShift() {
+            const startTime = document.getElementById('shift_start').value;
+            const endTime = document.getElementById('shift_end').value;
+            const dutyDate = document.getElementById('duty_date').value;
+            
+            if (startTime && endTime && dutyDate) {
+                const start = new Date(dutyDate + 'T' + startTime);
+                const end = new Date(dutyDate + 'T' + endTime);
+                
+                // If end is before start, it's an overnight shift
+                if (end < start) {
+                    // Show info message
+                    let infoDiv = document.getElementById('overnight-info');
+                    if (!infoDiv) {
+                        infoDiv = document.createElement('div');
+                        infoDiv.id = 'overnight-info';
+                        infoDiv.className = 'alert alert-info mt-2';
+                        document.getElementById('shift_end').parentElement.appendChild(infoDiv);
+                    }
+                    infoDiv.innerHTML = '<i class="fas fa-info-circle"></i> <strong>Overnight Shift:</strong> This shift will end on the next day. The system will automatically handle the date adjustment.';
+                } else {
+                    // Remove info message if it exists
+                    const infoDiv = document.getElementById('overnight-info');
+                    if (infoDiv) {
+                        infoDiv.remove();
+                    }
+                }
+            }
+        }
+        
+        document.getElementById('shift_start').addEventListener('change', checkOvernightShift);
+        document.getElementById('shift_end').addEventListener('change', checkOvernightShift);
+        document.getElementById('duty_date').addEventListener('change', checkOvernightShift);
+    </script>
+
+{% endblock %}
+

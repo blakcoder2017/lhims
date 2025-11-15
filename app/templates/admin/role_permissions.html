@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-shield-alt mr-2"></i>Role Permissions Management</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Role Permissions</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('status') == 'updated' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-check-circle"></i> Role permissions updated successfully!
+                </div>
+                {% endif %}
+
+                <div class="row">
+                    <!-- Role Selection -->
+                    <div class="col-md-3">
+                        <div class="card card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-users mr-1"></i> Select Role</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="list-group">
+                                    <a href="/admin/roles/permissions" class="list-group-item list-group-item-action {{ 'active' if not selected_role else '' }}">
+                                        <i class="fas fa-info-circle mr-2"></i> All Roles
+                                    </a>
+                                    {% for role in roles %}
+                                    <a href="/admin/roles/permissions?role_id={{ role.id }}" class="list-group-item list-group-item-action {{ 'active' if selected_role and selected_role.id == role.id else '' }}">
+                                        <strong>{{ role.name }}</strong>
+                                        <br><small class="text-muted">{{ role.description or 'No description' }}</small>
+                                    </a>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Permissions Assignment -->
+                    <div class="col-md-9">
+                        {% if selected_role %}
+                        <div class="card card-warning">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-key mr-1"></i> Permissions for: <strong>{{ selected_role.name }}</strong></h3>
+                            </div>
+                            <form method="POST" action="{{ url_for('update_role_permissions', role_id=selected_role.id) }}">
+                                <div class="card-body">
+                                    <p class="text-muted">Select the permissions that users with the <strong>{{ selected_role.name }}</strong> role should have.</p>
+                                    
+                                    {% for module, permissions in permissions_by_module.items() %}
+                                    <div class="card card-outline card-secondary mb-3">
+                                        <div class="card-header">
+                                            <h4 class="card-title"><i class="fas fa-folder mr-1"></i>{{ module|title }}</h4>
+                                        </div>
+                                        <div class="card-body">
+                                            {% for permission in permissions %}
+                                            <div class="form-check mb-2">
+                                                <input type="checkbox" 
+                                                       class="form-check-input" 
+                                                       id="perm_{{ permission.id }}" 
+                                                       name="permission_ids" 
+                                                       value="{{ permission.id }}"
+                                                       {{ 'checked' if permission.id in role_permissions else '' }}>
+                                                <label class="form-check-label" for="perm_{{ permission.id }}">
+                                                    <strong>{{ permission.name|replace('_', ' ')|title }}</strong>
+                                                    {% if permission.description %}
+                                                    <br><small class="text-muted">{{ permission.description }}</small>
+                                                    {% endif %}
+                                                </label>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <div class="card-footer">
+                                    <button type="submit" class="btn btn-warning">
+                                        <i class="fas fa-save"></i> Save Permissions
+                                    </button>
+                                    <a href="/admin/roles/permissions" class="btn btn-secondary">
+                                        <i class="fas fa-times"></i> Cancel
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
+                        {% else %}
+                        <div class="card card-info">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Instructions</h3>
+                            </div>
+                            <div class="card-body">
+                                <p>Select a role from the left panel to manage its permissions.</p>
+                                <p>Permissions define what actions users with each role can perform in the system.</p>
+                                <hr>
+                                <h5>Available Modules:</h5>
+                                <ul>
+                                    {% for module in permissions_by_module.keys() %}
+                                    <li><strong>{{ module|title }}</strong> - {{ permissions_by_module[module]|length }} permission(s)</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

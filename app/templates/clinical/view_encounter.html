@@ -1,0 +1,1224 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Clinical Encounter #{{ encounter.id }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('search_patients') }}">Patients</a></li>
+                            <li class="breadcrumb-item active">Encounter</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                
+                <!-- Print Button -->
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <button onclick="window.print()" class="btn btn-primary">
+                            <i class="fas fa-print mr-1"></i> Print Encounter
+                        </button>
+                    </div>
+                </div>
+
+                {% if request.query_params.get('status') == 'encounter_created' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Encounter Created!</h5>
+                    Clinical encounter has been successfully created. You can now add orders below.
+                </div>
+                {% endif %}
+
+                <!-- Patient Demographics Card -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient: {{ patient.first_name }} {{ patient.last_name }}</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
+                            <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}
+                                {% if patient_age %}
+                                <span class="badge badge-info">(Age: {{ patient_age.display }})</span>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-md-3"><strong>Encounter Date:</strong> {{ encounter.encounter_date.strftime('%Y-%m-%d %H:%M') }}</div>
+                            <div class="col-md-3"><strong>Status:</strong> 
+                                {% if encounter.status.value == 'completed' %}
+                                <span class="badge badge-success">Completed</span>
+                                {% elif encounter.status.value == 'detained' %}
+                                <span class="badge badge-warning">Detained (Under Observation)</span>
+                                {% elif encounter.status.value == 'cancelled' %}
+                                <span class="badge badge-danger">Cancelled</span>
+                                {% else %}
+                                <span class="badge badge-info">In Progress</span>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-3"><strong>Clinician:</strong> {{ encounter.clinician.full_name or encounter.clinician.username }}</div>
+                            {% if encounter.appointment %}
+                            <div class="col-md-3"><strong>Appointment:</strong> #{{ encounter.appointment.id }} - {{ encounter.appointment.department }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Clinical Documentation -->
+                <div class="card card-info">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-stethoscope mr-1"></i> Clinical Documentation</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if encounter.chief_complaint %}
+                        <div class="form-group">
+                            <label><strong>Chief Complaint:</strong></label>
+                            <p>{{ encounter.chief_complaint }}</p>
+                        </div>
+                        {% endif %}
+                        {% if encounter.history_of_present_illness %}
+                        <div class="form-group">
+                            <label><strong>History of Present Illness:</strong></label>
+                            <p>{{ encounter.history_of_present_illness }}</p>
+                        </div>
+                        {% endif %}
+                        {% if encounter.past_medical_history %}
+                        <div class="form-group">
+                            <label><strong>Past Medical History:</strong></label>
+                            <p>{{ encounter.past_medical_history }}</p>
+                        </div>
+                        {% endif %}
+                        {% if encounter.allergies %}
+                        <div class="form-group">
+                            <label><strong>Allergies:</strong></label>
+                            <p class="text-danger"><strong>{{ encounter.allergies }}</strong></p>
+                        </div>
+                        {% endif %}
+                        {% if encounter.medications %}
+                        <div class="form-group">
+                            <label><strong>Current Medications:</strong></label>
+                            <p>{{ encounter.medications }}</p>
+                        </div>
+                        {% endif %}
+                        {% if encounter.physical_examination %}
+                        <div class="form-group">
+                            <label><strong>Physical Examination:</strong></label>
+                            <p>{{ encounter.physical_examination }}</p>
+                        </div>
+                        {% endif %}
+                        {% if encounter.assessment %}
+                        <div class="form-group">
+                            <label><strong>Assessment:</strong></label>
+                            <p>{{ encounter.assessment }}</p>
+                        </div>
+                        {% endif %}
+                        <!-- Diagnosis Section -->
+                        {% if encounter.primary_diagnosis_code or secondary_diagnoses %}
+                        <div class="form-group">
+                            <label><strong>Diagnosis/Diagnoses:</strong></label>
+                            {% if encounter.primary_diagnosis_code %}
+                            <div class="mb-2">
+                                <span class="badge badge-primary">PRIMARY</span>
+                                <strong>{{ encounter.primary_diagnosis_code }}</strong> - {{ encounter.primary_diagnosis_description }}
+                            </div>
+                            {% endif %}
+                            {% if secondary_diagnoses %}
+                                {% for diagnosis in secondary_diagnoses %}
+                                <div class="mb-2">
+                                    <span class="badge badge-secondary">SECONDARY</span>
+                                    {% if diagnosis.get('code') %}<strong>{{ diagnosis.code }}</strong> - {% endif %}{{ diagnosis.get('description', diagnosis) }}
+                                </div>
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        {% if encounter.plan %}
+                        <div class="form-group">
+                            <label><strong>Treatment Plan:</strong></label>
+                            <p>{{ encounter.plan }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Patient Admission Information -->
+                {% if current_admission %}
+                <div class="card card-warning card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-hospital mr-1"></i> Patient Admission File</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <strong>Admission Date:</strong><br>
+                                {{ current_admission.admission_date.strftime('%Y-%m-%d %H:%M') }}
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Status:</strong><br>
+                                {% if current_admission.status.value == 'admitted' %}
+                                <span class="badge badge-success">Admitted</span>
+                                {% elif current_admission.status.value == 'discharged' %}
+                                <span class="badge badge-info">Discharged</span>
+                                {% elif current_admission.status.value == 'transferred' %}
+                                <span class="badge badge-warning">Transferred</span>
+                                {% else %}
+                                <span class="badge badge-secondary">{{ current_admission.status.value|title }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Ward:</strong><br>
+                                {% if current_admission.ward %}
+                                {{ current_admission.ward.name }} ({{ current_admission.ward.ward_type.value|title }})
+                                {% else %}
+                                <span class="text-muted">Not assigned</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% if current_admission.bed %}
+                        <div class="row mt-2">
+                            <div class="col-md-4">
+                                <strong>Bed:</strong><br>
+                                {{ current_admission.bed.bed_name }} ({{ current_admission.bed.bed_type.value|title }})
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Bed Status:</strong><br>
+                                {% if current_admission.bed.status.value == 'occupied' %}
+                                <span class="badge badge-success">Occupied</span>
+                                {% elif current_admission.bed.status.value == 'available' %}
+                                <span class="badge badge-info">Available</span>
+                                {% else %}
+                                <span class="badge badge-secondary">{{ current_admission.bed.status.value|title }}</span>
+                                {% endif %}
+                            </div>
+                            {% if current_admission.discharge_date %}
+                            <div class="col-md-4">
+                                <strong>Discharge Date:</strong><br>
+                                {{ current_admission.discharge_date.strftime('%Y-%m-%d %H:%M') }}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        {% if current_admission.admission_notes %}
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <strong>Admission Notes:</strong><br>
+                                <p class="text-muted">{{ current_admission.admission_notes }}</p>
+                            </div>
+                        </div>
+                        {% endif %}
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <a href="{{ url_for('ipd_admission_detail', admission_id=current_admission.id) }}" class="btn btn-warning btn-sm" target="_blank">
+                                    <i class="fas fa-external-link-alt mr-1"></i> View Full Admission Details
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% elif is_admitted == False %}
+                <!-- Patient not currently admitted - show message -->
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Admission Status</h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-0">This patient is not currently admitted to the hospital.</p>
+                        {% if user_role in ['Doctor', 'Admin'] %}
+                        <div class="mt-2">
+                            <a href="{{ url_for('ipd_admission_create_form') }}?patient_id={{ patient.id }}&encounter_id={{ encounter.id }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-hospital mr-1"></i> Admit Patient
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Results Section - Show completed results prominently -->
+                {% set completed_lab_orders = encounter.lab_orders|selectattr('status.value', 'equalto', 'completed')|list if encounter.lab_orders else [] %}
+                {% set completed_radiology_orders = encounter.radiology_orders|selectattr('status.value', 'equalto', 'completed')|list if encounter.radiology_orders else [] %}
+                
+                {% if completed_lab_orders or completed_radiology_orders %}
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <div class="card card-success card-outline">
+                            <div class="card-header bg-success">
+                                <h3 class="card-title"><i class="fas fa-clipboard-check mr-1"></i> Test Results</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <!-- Completed Lab Results -->
+                                    {% if completed_lab_orders %}
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-vial mr-1"></i> Lab Results</h5>
+                                        {% for order in completed_lab_orders %}
+                                        <div class="card card-warning card-outline mb-3">
+                                            <div class="card-header">
+                                                <h6 class="card-title mb-0">
+                                                    <strong>{{ order.test_name }}</strong>
+                                                    {% if order.test_code %}
+                                                    <span class="badge badge-info ml-2">{{ order.test_code }}</span>
+                                                    {% endif %}
+                                                </h6>
+                                                <small class="text-muted">
+                                                    Ordered: {{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}
+                                                    {% if order.result_entered_at %}
+                                                    | Result: {{ order.result_entered_at.strftime('%Y-%m-%d %H:%M') }}
+                                                    {% endif %}
+                                                </small>
+                                            </div>
+                                            <div class="card-body">
+                                                {% if order.result %}
+                                                <div class="alert alert-light">
+                                                    <strong>Result:</strong>
+                                                    <p class="mb-0" style="white-space: pre-wrap;">{{ order.result }}</p>
+                                                </div>
+                                                {% endif %}
+                                                {% if order.result_entered_by %}
+                                                <small class="text-muted">
+                                                    <i class="fas fa-user"></i> Entered by: {{ order.result_entered_by.full_name or order.result_entered_by.username }}
+                                                </small>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <!-- Completed Radiology Results -->
+                                    {% if completed_radiology_orders %}
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-x-ray mr-1"></i> Radiology Results</h5>
+                                        {% for order in completed_radiology_orders %}
+                                        <div class="card card-success card-outline mb-3">
+                                            <div class="card-header">
+                                                <h6 class="card-title mb-0">
+                                                    <strong>{{ order.study_type }}</strong>
+                                                    {% if order.study_code %}
+                                                    <span class="badge badge-info ml-2">{{ order.study_code }}</span>
+                                                    {% endif %}
+                                                </h6>
+                                                <small class="text-muted">
+                                                    Ordered: {{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}
+                                                    {% if order.report_entered_at %}
+                                                    | Report: {{ order.report_entered_at.strftime('%Y-%m-%d %H:%M') }}
+                                                    {% endif %}
+                                                </small>
+                                            </div>
+                                            <div class="card-body">
+                                                {% if order.body_part %}
+                                                <p class="mb-1"><strong>Body Part:</strong> {{ order.body_part }}</p>
+                                                {% endif %}
+                                                {% if order.report %}
+                                                <div class="alert alert-light">
+                                                    <strong>Report:</strong>
+                                                    <p class="mb-0" style="white-space: pre-wrap;">{{ order.report }}</p>
+                                                </div>
+                                                {% endif %}
+                                                {% if order.report_entered_by %}
+                                                <small class="text-muted">
+                                                    <i class="fas fa-user"></i> Reported by: {{ order.report_entered_by.full_name or order.report_entered_by.username }}
+                                                </small>
+                                                {% endif %}
+                                                {% if order.images %}
+                                                {% set order_images = order.images|selectattr('is_active', 'equalto', True)|list %}
+                                                {% if order_images %}
+                                                <div class="mt-2">
+                                                    <strong><i class="fas fa-images mr-1"></i> Images ({{ order_images|length }}):</strong>
+                                                    <div class="row mt-2">
+                                                        {% for image in order_images[:4] %}
+                                                        <div class="col-6 col-md-3 mb-2">
+                                                            <a href="{{ url_for('view_image', image_id=image.id) }}" target="_blank" class="text-decoration-none">
+                                                                <div class="card">
+                                                                    <div class="card-body p-2 text-center">
+                                                                        {% if image.thumbnail_path %}
+                                                                        <img src="{{ url_for('static', path=image.thumbnail_path) }}" class="img-fluid" alt="{{ image.image_number }}" style="max-height: 60px;">
+                                                                        {% else %}
+                                                                        <div class="bg-secondary text-white p-2">
+                                                                            <i class="fas fa-image"></i>
+                                                                            <p class="mb-0 small">{{ image.file_format or 'DICOM' }}</p>
+                                                                        </div>
+                                                                        {% endif %}
+                                                                        <p class="mb-0 mt-1 small text-muted">{{ image.image_number }}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </a>
+                                                        </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                    {% if order_images|length > 4 %}
+                                                    <small class="text-muted">+ {{ order_images|length - 4 }} more images</small>
+                                                    {% endif %}
+                                                </div>
+                                                {% endif %}
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Orders Section -->
+                <div class="row">
+                    <!-- Lab Orders -->
+                    <div class="col-md-6">
+                        <div class="card card-warning card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-vial mr-1"></i> Lab Orders</h3>
+                                <div class="card-tools">
+                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addLabOrder">
+                                        <i class="fas fa-plus"></i> Add Order
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="addLabOrder" class="collapse">
+                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/lab-orders/create">
+                                        <div class="form-group">
+                                            <label>Lab Test <span class="text-danger">*</span></label>
+                                            <select class="form-control" id="labServiceSelect" name="service_pricing_id" required>
+                                                <option value="">-- Select Lab Test --</option>
+                                                {% for service in lab_services %}
+                                                <option value="{{ service.id }}"
+                                                        data-name="{{ service.service_name }}"
+                                                        data-code="{{ service.service_code or '' }}"
+                                                        data-price="{{ service.unit_price }}">
+                                                    {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
+                                                </option>
+                                                {% endfor %}
+                                            </select>
+                                            <small class="form-text text-muted" id="labSelectedPriceText">Select a lab test to see pricing.</small>
+                                        </div>
+                                        <input type="hidden" name="test_name" id="lab_test_name">
+                                        <input type="hidden" name="test_code" id="lab_test_code">
+                                        <div class="form-group">
+                                            <label>Priority</label>
+                                            <select class="form-control" name="priority">
+                                                <option value="routine">Routine</option>
+                                                <option value="urgent">Urgent</option>
+                                                <option value="stat">STAT</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Instructions (optional)</label>
+                                            <textarea class="form-control" name="instructions" rows="2" placeholder="Special instructions for lab staff"></textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-warning btn-sm">Add Lab Order</button>
+                                    </form>
+                                    <hr>
+                                </div>
+                                {% if encounter.lab_orders %}
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered">
+                                            <thead>
+                                                <tr>
+                                                    <th>Test Name</th>
+                                                    <th>Code</th>
+                                                    <th>Status</th>
+                                                    <th>Ordered</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for order in encounter.lab_orders %}
+                                                <tr class="{% if order.status.value == 'completed' %}table-success{% elif order.status.value == 'in_progress' %}table-warning{% endif %}">
+                                                    <td><strong>{{ order.test_name }}</strong></td>
+                                                    <td>{{ order.test_code or '-' }}</td>
+                                                    <td>
+                                                        <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">
+                                                            {{ order.status.value.replace('_', ' ').title() }}
+                                                        </span>
+                                                    </td>
+                                                    <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                    <td>
+                                                        <a href="/lab/orders/{{ order.id }}" class="btn btn-xs btn-primary" target="_blank">
+                                                            <i class="fas fa-eye"></i> View
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                {% else %}
+                                    <p class="text-muted">No lab orders</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Radiology Orders -->
+                    <div class="col-md-6">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-x-ray mr-1"></i> Radiology Orders</h3>
+                                <div class="card-tools">
+                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addRadiologyOrder">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="addRadiologyOrder" class="collapse">
+                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/radiology-orders/create">
+                                        <div class="form-group">
+                                            <label>Radiology Study <span class="text-danger">*</span></label>
+                                            <select class="form-control" id="radiologyServiceSelect" name="service_pricing_id" required>
+                                                <option value="">-- Select Radiology Study --</option>
+                                                {% for service in radiology_services %}
+                                                <option value="{{ service.id }}"
+                                                        data-name="{{ service.service_name }}"
+                                                        data-code="{{ service.service_code or '' }}"
+                                                        data-price="{{ service.unit_price }}">
+                                                    {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
+                                                </option>
+                                                {% endfor %}
+                                            </select>
+                                            <small class="form-text text-muted" id="radiologySelectedPriceText">Select a study to see pricing.</small>
+                                        </div>
+                                        <input type="hidden" name="study_type" id="radiology_study_name">
+                                        <input type="hidden" name="study_code" id="radiology_study_code">
+                                        <div class="form-group">
+                                            <label>Body Part (optional)</label>
+                                            <input type="text" class="form-control" name="body_part">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Priority</label>
+                                            <select class="form-control" name="priority">
+                                                <option value="routine">Routine</option>
+                                                <option value="urgent">Urgent</option>
+                                                <option value="stat">STAT</option>
+                                            </select>
+                                        </div>
+                                        <button type="submit" class="btn btn-success btn-sm">Add Radiology Order</button>
+                                    </form>
+                                    <hr>
+                                </div>
+                                {% if encounter.radiology_orders %}
+                                    {% for order in encounter.radiology_orders %}
+                                    <div class="callout callout-success mb-3">
+                                        <h5>{{ order.study_type }}</h5>
+                                        <p><small>Status: <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">{{ order.status.value|title }}</span></small></p>
+                                        {% if order.body_part %}
+                                        <p><small>Body Part: {{ order.body_part }}</small></p>
+                                        {% endif %}
+                                        {% if order.report %}
+                                        <p><strong>Report:</strong> {{ order.report[:100] }}{% if order.report|length > 100 %}...{% endif %}</p>
+                                        {% endif %}
+                                        
+                                        <!-- PACS Images for this order -->
+                                        {% set order_images = order.images|selectattr('is_active', 'equalto', True)|list %}
+                                        {% if order_images %}
+                                        <div class="mt-2">
+                                            <strong><i class="fas fa-images mr-1"></i> Images ({{ order_images|length }}):</strong>
+                                            <div class="row mt-2">
+                                                {% for image in order_images[:4] %}
+                                                <div class="col-6 col-md-3 mb-2">
+                                                    <div class="card">
+                                                        <div class="card-body p-2 text-center">
+                                                            {% if image.thumbnail_path %}
+                                                            <a href="{{ url_for('view_image', image_id=image.id) }}" target="_blank" title="View {{ image.image_number }}">
+                                                                <img src="{{ url_for('static', path=image.thumbnail_path) }}" class="img-fluid" alt="{{ image.image_number }}" style="max-height: 80px; cursor: pointer;">
+                                                            </a>
+                                                            {% else %}
+                                                            <a href="{{ url_for('view_image', image_id=image.id) }}" target="_blank" class="text-decoration-none" title="View {{ image.image_number }}">
+                                                                <div class="bg-secondary text-white p-3" style="cursor: pointer;">
+                                                                    <i class="fas fa-image"></i>
+                                                                    <p class="mb-0 small">{{ image.file_format or 'DICOM' }}</p>
+                                                                </div>
+                                                            </a>
+                                                            {% endif %}
+                                                            <p class="mb-0 mt-1 small text-muted">{{ image.image_number }}</p>
+                                                            {% if image.body_part %}
+                                                            <p class="mb-0 small text-muted">{{ image.body_part }}</p>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {% endfor %}
+                                            </div>
+                                            {% if order_images|length > 4 %}
+                                            <p class="small mt-2">
+                                                <a href="{{ url_for('pacs_dashboard') }}?order_id={{ order.id }}" target="_blank" class="text-primary">
+                                                    View all {{ order_images|length }} images <i class="fas fa-external-link-alt"></i>
+                                                </a>
+                                            </p>
+                                            {% endif %}
+                                        </div>
+                                        {% else %}
+                                        <p class="text-muted small mt-2"><i class="fas fa-info-circle"></i> No images uploaded yet</p>
+                                        {% endif %}
+                                        
+                                        <div class="mt-2">
+                                            <a href="{{ url_for('view_radiology_order', order_id=order.id) }}" class="btn btn-sm btn-outline-primary" target="_blank">
+                                                <i class="fas fa-eye"></i> View Details
+                                            </a>
+                                            {% if order_images %}
+                                            <a href="{{ url_for('pacs_dashboard') }}?order_id={{ order.id }}" class="btn btn-sm btn-outline-info" target="_blank">
+                                                <i class="fas fa-images"></i> View Images
+                                            </a>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <p class="text-muted">No radiology orders</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Prescriptions -->
+                    <div class="col-md-4">
+                        <div class="card card-danger">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-pills mr-1"></i> Prescriptions</h3>
+                                <div class="card-tools">
+                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addPrescription">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="addPrescription" class="collapse">
+                                    <form id="prescriptionForm" method="POST" action="/api/v1/encounters/{{ encounter.id }}/prescriptions/create">
+                                        <div id="prescriptionFormAlert" class="alert" style="display: none;"></div>
+                                        <div class="form-group" style="position: relative;">
+                                            <label>Medication *</label>
+                                            <input type="hidden" name="medication_id" id="medication_id">
+                                            <input type="text" class="form-control" name="medication_name" id="medication_name" 
+                                                   placeholder="Search medication from inventory or type free text" 
+                                                   autocomplete="off" required>
+                                            <small class="form-text text-muted">
+                                                <i class="fas fa-info-circle"></i> Search from inventory or type medication name manually
+                                            </small>
+                                            <div id="medication_search_results" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 300px; overflow-y: auto; width: 100%; background: white; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="form-group">
+                                                    <label>Dosage *</label>
+                                                    <input type="text" class="form-control" name="dosage" id="dosage" placeholder="e.g., 500mg" required>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="form-group">
+                                                    <label>Frequency *</label>
+                                                    <input type="text" class="form-control" name="frequency" id="frequency" placeholder="e.g., twice daily" required>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Duration *</label>
+                                            <input type="text" class="form-control" name="duration" id="duration" placeholder="e.g., 7 days" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Quantity (optional)</label>
+                                            <input type="number" class="form-control" name="quantity" id="quantity" placeholder="e.g., 30">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Instructions (optional)</label>
+                                            <textarea class="form-control" name="instructions" id="instructions" rows="2" placeholder="Patient instructions"></textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-danger btn-sm" id="prescriptionSubmitBtn">
+                                            <i class="fas fa-plus"></i> Add Prescription
+                                        </button>
+                                        <button type="button" class="btn btn-secondary btn-sm" onclick="clearPrescriptionForm()">
+                                            <i class="fas fa-times"></i> Clear
+                                        </button>
+                                    </form>
+                                    <hr>
+                                </div>
+                                <div id="prescriptionsList">
+                                    {% if encounter.prescriptions %}
+                                        {% for prescription in encounter.prescriptions %}
+                                        <div class="callout callout-danger prescription-item" data-prescription-id="{{ prescription.id }}">
+                                            <h5>{{ prescription.medication_name }}</h5>
+                                            <p><small><strong>Dosage:</strong> {{ prescription.dosage }} | <strong>Frequency:</strong> {{ prescription.frequency }} | <strong>Duration:</strong> {{ prescription.duration }}</small></p>
+                                            {% if prescription.quantity %}
+                                            <p><small><strong>Quantity:</strong> {{ prescription.quantity }}</small></p>
+                                            {% endif %}
+                                            {% if prescription.instructions %}
+                                            <p><small><strong>Instructions:</strong> {{ prescription.instructions }}</small></p>
+                                            {% endif %}
+                                            <p><small>Status: <span class="badge badge-{{ 'success' if prescription.status.value == 'completed' else 'warning' if prescription.status.value == 'in_progress' else 'info' }}">{{ prescription.status.value|title }}</span></small></p>
+                                        </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <p class="text-muted" id="noPrescriptionsMsg">No prescriptions</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Procedures -->
+                    {% if user_role in ['Doctor', 'Clinician', 'Admin'] %}
+                    <div class="col-md-4">
+                        <div class="card card-warning">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> Procedures</h3>
+                                <div class="card-tools">
+                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addProcedure">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="addProcedure" class="collapse">
+                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/procedures/create">
+                                        <div class="form-group">
+                                            <label>Procedure Name *</label>
+                                            <select class="form-control" name="procedure_name" id="procedure_name" required>
+                                                <option value="">-- Select Procedure --</option>
+                                                {% for proc_name in procedure_names %}
+                                                <option value="{{ proc_name }}">{{ proc_name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                            <small class="form-text text-muted">Or type procedure name manually</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Procedure Code (optional)</label>
+                                            <input type="text" class="form-control" name="procedure_code" placeholder="e.g., CPT code">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Procedure Type *</label>
+                                            <select class="form-control" name="procedure_type" required>
+                                                <option value="surgical">Surgical</option>
+                                                <option value="non_surgical">Non-Surgical</option>
+                                                <option value="diagnostic">Diagnostic</option>
+                                                <option value="therapeutic">Therapeutic</option>
+                                                <option value="minor">Minor</option>
+                                                <option value="major">Major</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Indication (optional)</label>
+                                            <textarea class="form-control" name="indication" rows="2" placeholder="Clinical indication for procedure"></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Description (optional)</label>
+                                            <textarea class="form-control" name="description" rows="2" placeholder="Detailed description"></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Location (optional)</label>
+                                            <input type="text" class="form-control" name="location" placeholder="e.g., Operating Room 1">
+                                        </div>
+                                        <button type="submit" class="btn btn-warning btn-sm">
+                                            <i class="fas fa-plus"></i> Add Procedure
+                                        </button>
+                                    </form>
+                                    <hr>
+                                </div>
+                                {% if procedures %}
+                                    {% for procedure in procedures %}
+                                    <div class="callout callout-warning">
+                                        <h5>{{ procedure.procedure_name }}</h5>
+                                        <p><small>
+                                            <strong>Type:</strong> {{ procedure.procedure_type.value|title }} | 
+                                            <strong>Status:</strong> 
+                                            <span class="badge badge-{% if procedure.status.value == 'completed' %}success{% elif procedure.status.value == 'in_progress' %}warning{% else %}info{% endif %}">
+                                                {{ procedure.status.value|title }}
+                                            </span>
+                                        </small></p>
+                                        {% if procedure.procedure_code %}
+                                        <p><small><strong>Code:</strong> {{ procedure.procedure_code }}</small></p>
+                                        {% endif %}
+                                        {% if procedure.indication %}
+                                        <p><small><strong>Indication:</strong> {{ procedure.indication }}</small></p>
+                                        {% endif %}
+                                        {% if procedure.location %}
+                                        <p><small><strong>Location:</strong> {{ procedure.location }}</small></p>
+                                        {% endif %}
+                                        {% if procedure.scheduled_date %}
+                                        <p><small><strong>Scheduled:</strong> {{ procedure.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</small></p>
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <p class="text-muted">No procedures</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if antenatal_services %}
+                    <div class="col-md-4">
+                        <div class="card card-pink card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-baby mr-1"></i> Antenatal Services</h3>
+                            </div>
+                            <div class="card-body">
+                                <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/antenatal-orders/create">
+                                    <div class="form-group">
+                                        <label>Select Antenatal Package *</label>
+                                        <select class="form-control" name="service_pricing_id" required>
+                                            <option value="">-- Select Package --</option>
+                                            {% for service in antenatal_services %}
+                                            <option value="{{ service.id }}">
+                                                {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group col-md-6">
+                                            <label>Quantity</label>
+                                            <input type="number" class="form-control" name="quantity" value="1" min="1">
+                                        </div>
+                                        <div class="form-group col-md-6">
+                                            <label>Notes (optional)</label>
+                                            <input type="text" class="form-control" name="notes" placeholder="Notes">
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-sm text-white" style="background-color:#d81b60;">
+                                        <i class="fas fa-plus"></i> Add Antenatal Service
+                                    </button>
+                                </form>
+                                <hr>
+                                {% if antenatal_charges %}
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Service</th>
+                                                <th>Qty</th>
+                                                <th>Amount</th>
+                                                <th>Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for charge in antenatal_charges %}
+                                            <tr>
+                                                <td>{{ charge.description }}</td>
+                                                <td>{{ charge.quantity }}</td>
+                                                <td>GHS {{ "%.2f"|format(charge.total_amount) }}</td>
+                                                <td>{{ charge.created_at.strftime('%Y-%m-%d') }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <p class="text-muted mb-0">No antenatal services recorded.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Pending Orders Warning -->
+                {% if has_pending_orders and (encounter.status.value == 'in_progress' or encounter.status.value == 'detained') %}
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-triangle"></i> Pending Orders</h5>
+                    <p class="mb-2">
+                        <strong>This encounter cannot be closed until all orders are completed:</strong>
+                    </p>
+                    <ul class="mb-2">
+                        {% if pending_lab_orders %}
+                        <li><strong>{{ pending_lab_orders|length }} pending lab order(s):</strong>
+                            <ul>
+                                {% for order in pending_lab_orders %}
+                                <li>{{ order.test_name }} ({{ order.status.value }})</li>
+                                {% endfor %}
+                            </ul>
+                        </li>
+                        {% endif %}
+                        {% if pending_radiology_orders %}
+                        <li><strong>{{ pending_radiology_orders|length }} pending radiology order(s):</strong>
+                            <ul>
+                                {% for order in pending_radiology_orders %}
+                                <li>{{ order.study_type }} ({{ order.status.value }})</li>
+                                {% endfor %}
+                            </ul>
+                        </li>
+                        {% endif %}
+                    </ul>
+                    <p class="mb-0">
+                        Please complete all orders before closing the encounter.
+                        {% if user_role == 'Admin' %}
+                        <br><small class="text-muted">As an Administrator, you can use the "Force Close" option if necessary.</small>
+                        {% endif %}
+                    </p>
+                </div>
+                {% endif %}
+
+                <!-- Actions -->
+                <div class="card">
+                    <div class="card-footer">
+                        <a href="{{ url_for('search_patients') }}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left mr-1"></i> Back to Patients
+                        </a>
+                        {% if encounter.status.value == 'in_progress' or encounter.status.value == 'detained' %}
+                        {% if is_admitted and current_admission %}
+                        <!-- Patient is already admitted - show link to admission details -->
+                        <div class="float-right">
+                            <a href="{{ url_for('ipd_admission_detail', admission_id=current_admission.id) }}" class="btn btn-info mr-2">
+                                <i class="fas fa-hospital mr-1"></i> View Admission Details
+                            </a>
+                            <span class="badge badge-info" style="padding: 8px 15px; font-size: 14px;">
+                                <i class="fas fa-info-circle mr-1"></i> Patient is admitted. Encounter will be completed automatically upon discharge.
+                            </span>
+                        </div>
+                        {% else %}
+                        <!-- Patient is not admitted - show admit and detain buttons -->
+                        {% if user_role in ['Doctor', 'Admin'] %}
+                        <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/detain" style="display: inline;" onsubmit="detainEncounter(event, {{ encounter.id }}); return false;">
+                            <button type="submit" class="btn btn-warning float-right mr-2" {% if encounter.status.value == 'detained' %}disabled title="Patient already detained"{% endif %}>
+                                <i class="fas fa-clock mr-1"></i> {% if encounter.status.value == 'detained' %}Detained{% else %}Detain Patient{% endif %}
+                            </button>
+                        </form>
+                        <a href="{{ url_for('ipd_admission_create_form') }}?patient_id={{ patient.id }}&encounter_id={{ encounter.id }}" class="btn btn-danger float-right mr-2">
+                            <i class="fas fa-hospital mr-1"></i> Admit Patient
+                        </a>
+                        {% endif %}
+                        <!-- Complete Encounter button - only show if patient is NOT admitted -->
+                        <form method="PUT" action="/api/v1/encounters/{{ encounter.id }}" style="display: inline;" onsubmit="completeEncounter(event, {{ encounter.id }}, false); return false;">
+                            <button type="submit" class="btn btn-success float-right {% if has_pending_orders %}mr-2{% endif %}" {% if has_pending_orders and user_role != 'Admin' %}disabled title="Cannot close with pending orders"{% endif %}>
+                                <i class="fas fa-check mr-1"></i> Complete Encounter
+                            </button>
+                        </form>
+                        {% if has_pending_orders and user_role == 'Admin' %}
+                        <form method="PUT" action="/api/v1/encounters/{{ encounter.id }}" style="display: inline;" onsubmit="completeEncounter(event, {{ encounter.id }}, true); return false;">
+                            <button type="submit" class="btn btn-danger float-right" title="Force close encounter with pending orders (Admin only)">
+                                <i class="fas fa-exclamation-triangle mr-1"></i> Force Close
+                            </button>
+                        </form>
+                        {% endif %}
+                        {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+    <script>
+        function attachServiceSelect(selectId, nameFieldId, codeFieldId, helperTextId) {
+            const selectEl = document.getElementById(selectId);
+            const nameField = nameFieldId ? document.getElementById(nameFieldId) : null;
+            const codeField = codeFieldId ? document.getElementById(codeFieldId) : null;
+            const helperText = helperTextId ? document.getElementById(helperTextId) : null;
+
+            if (!selectEl) {
+                return;
+            }
+
+            const updateFields = () => {
+                const option = selectEl.selectedOptions.length ? selectEl.selectedOptions[0] : null;
+                if (option && option.value) {
+                    if (nameField) {
+                        nameField.value = option.dataset.name || option.textContent.trim();
+                    }
+                    if (codeField) {
+                        codeField.value = option.dataset.code || '';
+                    }
+                    if (helperText) {
+                        const price = option.dataset.price;
+                        helperText.textContent = price
+                            ? `Unit price: GHS ${Number(price).toFixed(2)}`
+                            : 'No price configured for this service.';
+                    }
+                } else {
+                    if (nameField) {
+                        nameField.value = '';
+                    }
+                    if (codeField) {
+                        codeField.value = '';
+                    }
+                    if (helperText) {
+                        helperText.textContent = 'Select an option to see pricing.';
+                    }
+                }
+            };
+
+            selectEl.addEventListener('change', updateFields);
+            updateFields();
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            attachServiceSelect('labServiceSelect', 'lab_test_name', 'lab_test_code', 'labSelectedPriceText');
+            attachServiceSelect('radiologyServiceSelect', 'radiology_study_name', 'radiology_study_code', 'radiologySelectedPriceText');
+        });
+
+        // Medication Search Autocomplete
+        const medicationNameInput = document.getElementById('medication_name');
+        const medicationIdInput = document.getElementById('medication_id');
+        const searchResults = document.getElementById('medication_search_results');
+        let searchTimeout;
+        
+        medicationNameInput.addEventListener('input', function(e) {
+            const query = e.target.value.trim();
+            
+            // Clear previous timeout
+            clearTimeout(searchTimeout);
+            
+            // Hide results if query is too short
+            if (query.length < 2) {
+                searchResults.style.display = 'none';
+                medicationIdInput.value = '';
+                return;
+            }
+            
+            // Debounce search
+            searchTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch(`/api/v1/inventory/medications/search?search=${encodeURIComponent(query)}&limit=10`);
+                    const data = await response.json();
+                    
+                    if (data.medications && data.medications.length > 0) {
+                        // Show results
+                        searchResults.innerHTML = '';
+                        data.medications.forEach(med => {
+                            const item = document.createElement('a');
+                            item.href = '#';
+                            item.className = 'list-group-item list-group-item-action';
+                            
+                            let stockBadge = '';
+                            if (med.in_stock) {
+                                stockBadge = `<span class="badge badge-success float-right">In Stock (${med.available_quantity})</span>`;
+                            } else {
+                                stockBadge = `<span class="badge badge-warning float-right">Out of Stock</span>`;
+                            }
+                            
+                            item.innerHTML = `
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">${med.name}${med.strength ? ' - ' + med.strength : ''}</h6>
+                                    ${stockBadge}
+                                </div>
+                                ${med.generic_name ? `<small class="text-muted">Generic: ${med.generic_name}</small>` : ''}
+                                ${med.medication_code ? `<small class="text-muted"> | Code: ${med.medication_code}</small>` : ''}
+                            `;
+                            
+                            item.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                medicationNameInput.value = med.name;
+                                medicationIdInput.value = med.id;
+                                searchResults.style.display = 'none';
+                                
+                                // Auto-fill dosage if available
+                                if (med.strength && !document.getElementById('dosage').value) {
+                                    document.getElementById('dosage').value = med.strength;
+                                }
+                            });
+                            
+                            searchResults.appendChild(item);
+                        });
+                        searchResults.style.display = 'block';
+                    } else {
+                        // No results - allow free text entry
+                        searchResults.style.display = 'none';
+                        medicationIdInput.value = '';
+                    }
+                } catch (error) {
+                    console.error('Error searching medications:', error);
+                    searchResults.style.display = 'none';
+                }
+            }, 300);
+        });
+        
+        // Hide results when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!medicationNameInput.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.style.display = 'none';
+            }
+        });
+        
+        // Prescription Form AJAX Submission
+        document.getElementById('prescriptionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const form = e.target;
+            const submitBtn = document.getElementById('prescriptionSubmitBtn');
+            const alertDiv = document.getElementById('prescriptionFormAlert');
+            const prescriptionsList = document.getElementById('prescriptionsList');
+            const noPrescriptionsMsg = document.getElementById('noPrescriptionsMsg');
+            const originalBtnText = submitBtn.innerHTML;
+            
+            // Disable submit button
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
+            alertDiv.style.display = 'none';
+            
+            // Get form data
+            const formData = new FormData(form);
+            
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    // Success - add prescription to list dynamically
+                    const prescription = data.prescription;
+                    
+                    // Remove "No prescriptions" message if it exists
+                    if (noPrescriptionsMsg) {
+                        noPrescriptionsMsg.remove();
+                    }
+                    
+                    // Create new prescription item
+                    const prescriptionDiv = document.createElement('div');
+                    prescriptionDiv.className = 'callout callout-danger prescription-item';
+                    prescriptionDiv.setAttribute('data-prescription-id', prescription.id);
+                    
+                    let statusBadgeClass = 'info';
+                    if (prescription.status === 'completed') statusBadgeClass = 'success';
+                    else if (prescription.status === 'in_progress') statusBadgeClass = 'warning';
+                    
+                    let html = `<h5>${prescription.medication_name}</h5>`;
+                    html += `<p><small><strong>Dosage:</strong> ${prescription.dosage} | <strong>Frequency:</strong> ${prescription.frequency} | <strong>Duration:</strong> ${prescription.duration}</small></p>`;
+                    if (prescription.quantity) {
+                        html += `<p><small><strong>Quantity:</strong> ${prescription.quantity}</small></p>`;
+                    }
+                    if (prescription.instructions) {
+                        html += `<p><small><strong>Instructions:</strong> ${prescription.instructions}</small></p>`;
+                    }
+                    html += `<p><small>Status: <span class="badge badge-${statusBadgeClass}">${prescription.status.charAt(0).toUpperCase() + prescription.status.slice(1)}</span></small></p>`;
+                    
+                    prescriptionDiv.innerHTML = html;
+                    
+                    // Add to list
+                    prescriptionsList.insertBefore(prescriptionDiv, prescriptionsList.firstChild);
+                    
+                    // Show success message
+                    alertDiv.className = 'alert alert-success';
+                    alertDiv.innerHTML = '<i class="fas fa-check-circle"></i> Prescription added successfully!';
+                    alertDiv.style.display = 'block';
+                    
+                    // Clear form
+                    form.reset();
+                    
+                    // Hide success message after 3 seconds
+                    setTimeout(() => {
+                        alertDiv.style.display = 'none';
+                    }, 3000);
+                    
+                    // Re-enable submit button
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalBtnText;
+                } else {
+                    // Handle error
+                    alertDiv.className = 'alert alert-danger';
+                    alertDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> Error: ' + (data.error || 'Failed to add prescription');
+                    alertDiv.style.display = 'block';
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalBtnText;
+                }
+            } catch (error) {
+                alertDiv.className = 'alert alert-danger';
+                alertDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> Error: ' + error.message;
+                alertDiv.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnText;
+            }
+        });
+        
+        function clearPrescriptionForm() {
+            document.getElementById('prescriptionForm').reset();
+            document.getElementById('prescriptionFormAlert').style.display = 'none';
+        }
+        
+        function detainEncounter(event, encounterId) {
+            event.preventDefault();
+            if (!confirm('Are you sure you want to detain this patient for observation?')) {
+                return;
+            }
+            
+            fetch(`/api/v1/encounters/${encounterId}/detain`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.id) {
+                    alert('Patient detained successfully. Patient will remain under observation.');
+                    window.location.reload();
+                } else {
+                    alert(data.detail || 'Error detaining patient.');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error detaining patient. Please try again.');
+            });
+        }
+        
+        function completeEncounter(event, encounterId, forceClose = false) {
+            event.preventDefault();
+            
+            // Confirm force close if applicable
+            if (forceClose) {
+                if (!confirm('Are you sure you want to FORCE CLOSE this encounter? There are pending orders that will remain incomplete. This action should only be used in exceptional circumstances.')) {
+                    return;
+                }
+            }
+            
+            // Build URL with force_close parameter if needed
+            let url = `/api/v1/encounters/${encounterId}`;
+            if (forceClose) {
+                url += '?force_close=true';
+            }
+            
+            fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ status: 'completed' })
+            })
+            .then(response => {
+                if (response.ok) {
+                    if (forceClose) {
+                        alert('Encounter force closed successfully. Note: Some orders remain pending.');
+                    }
+                    window.location.reload();
+                } else {
+                    return response.json().then(data => {
+                        alert(data.detail || 'Error completing encounter. Please ensure all lab and radiology orders are completed, and all bills are settled.');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error completing encounter. Please try again.');
+            });
+        }
+        
+    </script>
+
+{% endblock %}
+

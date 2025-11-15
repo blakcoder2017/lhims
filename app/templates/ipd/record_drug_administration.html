@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-syringe mr-2"></i>Record Drug Administration</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admissions_list') }}">Admissions</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}">Admission {{ admission.admission_number }}</a></li>
+                            <li class="breadcrumb-item active">Record Administration</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-user mr-1"></i> Patient Info</h3>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</strong></p>
+                                <p class="text-muted mb-1">Patient Number: {{ admission.patient.patient_number or 'N/A' }}</p>
+                                <p class="text-muted mb-1">Admission Number: {{ admission.admission_number }}</p>
+                                <p class="text-muted mb-1">Ward: {{ admission.ward.name }}</p>
+                                <p class="text-muted mb-0">Bed: {{ admission.bed.bed_number }}</p>
+                                <hr>
+                                <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-outline-primary btn-block">
+                                    <i class="fas fa-arrow-left mr-1"></i> Back to Admission Details
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-8">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-syringe mr-1"></i> Administration Details</h3>
+                            </div>
+                            <form method="POST" action="{{ url_for('ipd_record_drug_administration', admission_id=admission.id) }}">
+                                <div class="card-body">
+                                    {% if not prescription_options %}
+                                        <div class="alert alert-warning">
+                                            <i class="fas fa-exclamation-triangle"></i> There are no prescriptions available for this admission. Please ensure the doctor has prescribed medications before recording administrations.
+                                        </div>
+                                    {% endif %}
+
+                                    <div class="form-group">
+                                        <label for="medication_identifier">Select Drug <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="medication_identifier" name="medication_identifier" required {% if not prescription_options %}disabled{% endif %}>
+                                            <option value="">-- Select Drug --</option>
+                                            {% for drug in prescription_options %}
+                                            <option value="{{ drug.medication_identifier or drug.id }}">{{ drug.medication_name or drug.name }} - {{ drug.dosage }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="form-text text-muted">
+                                            Only prescriptions created for this admission are listed.
+                                        </small>
+                                    </div>
+
+                                    <div class="form-row">
+                                        <div class="form-group col-md-6">
+                                            <label for="administration_time">Administration Date/Time <span class="text-danger">*</span></label>
+                                            <input type="datetime-local" class="form-control" id="administration_time" name="administration_time" value="{{ default_admin_time }}" required>
+                                        </div>
+                                        <div class="form-group col-md-6">
+                                            <label for="route">Route of Administration</label>
+                                            <select class="form-control" id="route" name="route">
+                                                <option value="">-- Select Route --</option>
+                                                <option value="oral">Oral</option>
+                                                <option value="IV">IV (Intravenous)</option>
+                                                <option value="IM">IM (Intramuscular)</option>
+                                                <option value="subcutaneous">Subcutaneous</option>
+                                                <option value="topical">Topical</option>
+                                                <option value="inhalation">Inhalation</option>
+                                                <option value="rectal">Rectal</option>
+                                                <option value="other">Other</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-row">
+                                        <div class="form-group col-md-6">
+                                            <label for="dosage_given">Dosage Given</label>
+                                            <input type="text" class="form-control" id="dosage_given" name="dosage_given" placeholder="e.g., 500mg, 10ml">
+                                            <small class="form-text text-muted">Leave blank to use the prescribed dosage.</small>
+                                        </div>
+                                        <div class="form-group col-md-6">
+                                            <label for="administeredBy">Administered By</label>
+                                            <input type="text" class="form-control" id="administeredBy" value="{{ current_user.full_name }}" readonly>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="notes">Notes</label>
+                                        <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Additional notes about the administration"></textarea>
+                                    </div>
+                                </div>
+                                <div class="card-footer text-right">
+                                    <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-secondary">
+                                        <i class="fas fa-times mr-1"></i> Cancel
+                                    </a>
+                                    <button type="submit" class="btn btn-success" {% if not prescription_options %}disabled{% endif %}>
+                                        <i class="fas fa-save mr-1"></i> Record Administration
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

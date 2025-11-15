@@ -1,0 +1,332 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>New Clinical Encounter: {{ patient.first_name }} {{ patient.last_name }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('search_patients') }}">Patients</a></li>
+                            <li class="breadcrumb-item active">New Encounter</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            {% if payment_required and not payment_paid %}
+            <div class="alert alert-warning alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                <h5><i class="icon fas fa-money-bill-wave"></i> Payment Required</h5>
+                <p class="mb-2">
+                    This is a <strong>cash-only</strong> patient. Payment is required before creating an encounter.
+                    {% if charge %}
+                    <strong>Amount Due: GHS {{ "%.2f"|format(charge.total_amount) }}</strong>
+                    {% endif %}
+                </p>
+                <a href="{{ url_for('pay_consultation', patient_id=patient.id) }}?return_to=encounters/new" class="btn btn-warning">
+                    <i class="fas fa-credit-card mr-1"></i> Proceed to Payment
+                </a>
+            </div>
+            {% elif payment_required and payment_paid %}
+            <div class="alert alert-success alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                <h5><i class="icon fas fa-check-circle"></i> Payment Confirmed</h5>
+                <p class="mb-2">Payment has been received. You can now proceed to create the encounter.</p>
+                {% if patient.payment_mechanism and patient.payment_mechanism.value != 'cash' %}
+                <div class="mt-2">
+                    <strong><i class="fas fa-shield-alt mr-1"></i> Insurance Information:</strong>
+                    <ul class="mb-0 mt-1">
+                        {% if patient.payment_mechanism.value == 'nhis' %}
+                        <li><strong>Payment Method:</strong> NHIS (National Health Insurance Scheme)</li>
+                        {% if patient.nhis_number %}
+                        <li><strong>NHIS Number:</strong> {{ patient.nhis_number }}</li>
+                        {% endif %}
+                        {% elif patient.insurance_provider %}
+                        <li><strong>Payment Method:</strong> Private Insurance</li>
+                        <li><strong>Insurance Provider:</strong> {{ patient.insurance_provider }}</li>
+                        {% if patient.insurance_policy_number %}
+                        <li><strong>Policy Number:</strong> {{ patient.insurance_policy_number }}</li>
+                        {% endif %}
+                        {% endif %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+            <div class="container-fluid">
+
+                <!-- Patient Demographics Card -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient Demographics</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3"><strong>Name:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
+                            <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
+                            <div class="col-md-3"><strong>Patient ID:</strong> {{ patient.id }}</div>
+                        </div>
+                        {% if appointment %}
+                        <div class="row mt-2">
+                            <div class="col-md-12">
+                                <strong>Appointment:</strong> #{{ appointment.id }} - {{ appointment.department }} 
+                                ({{ appointment.appointment_type.value }})
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Clinical Encounter Form -->
+                <form method="POST" action="/api/v1/encounters/create" id="encounter-form">
+                    <input type="hidden" name="patient_id" value="{{ patient.id }}">
+                    {% if appointment %}
+                    <input type="hidden" name="appointment_id" value="{{ appointment.id }}">
+                    {% endif %}
+
+                    <!-- Chief Complaint & History -->
+                    <div class="card card-info">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-stethoscope mr-1"></i> Chief Complaint & History</h3>
+                        </div>
+                        <div class="card-body">
+    <div class="form-group">
+        <label for="chief_complaint">Chief Complaint</label>
+        <textarea class="form-control" id="chief_complaint" name="chief_complaint" rows="3" placeholder="Enter patient's chief complaint..."></textarea>
+        <small class="form-text text-muted">Describe the patient's main complaint or symptom.</small>
+    </div>
+                            <div class="form-group">
+                                <label for="history_of_present_illness">History of Present Illness (HPI)</label>
+                                <textarea class="form-control" id="history_of_present_illness" name="history_of_present_illness" rows="4" placeholder="Detailed history of the current illness"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="past_medical_history">Past Medical History</label>
+                                <textarea class="form-control" id="past_medical_history" name="past_medical_history" rows="3" placeholder="Previous medical conditions, surgeries, etc."></textarea>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="allergies">Allergies</label>
+                                        <textarea class="form-control" id="allergies" name="allergies" rows="2" placeholder="Known allergies, if any"></textarea>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="medications">Current Medications</label>
+                                        <textarea class="form-control" id="medications" name="medications" rows="2" placeholder="Current medications"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Physical Examination -->
+                    <div class="card card-warning">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-clipboard-check mr-1"></i> Physical Examination</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label for="physical_examination">Physical Examination Findings</label>
+                                <textarea class="form-control" id="physical_examination" name="physical_examination" rows="6" placeholder="Document physical examination findings"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Assessment & Diagnosis -->
+                    <div class="card card-success">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-diagnoses mr-1"></i> Assessment & Diagnosis</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label for="assessment">Clinical Assessment</label>
+                                <textarea class="form-control" id="assessment" name="assessment" rows="3" placeholder="Clinical assessment and findings"></textarea>
+                            </div>
+    <div class="form-group">
+        <label for="diseases_select">Diagnoses</label>
+        <div class="searchable-select-container">
+            <select class="form-control" id="diseases_select" name="diseases[]" multiple size="6">
+                <option value="">Select Diagnosis(es)</option>
+                {% for disease in diseases %}
+                <option value="{{ disease.id }}">{{ disease.name }}{% if disease.code %} ({{ disease.code }}){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <small class="form-text text-muted">Search and select diseases. You can select multiple. Mark the first one as primary.</small>
+    </div>
+                           
+                           
+                    </div>
+
+                    <!-- Plan -->
+                    <div class="card card-primary">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-tasks mr-1"></i> Treatment Plan</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label for="plan">Treatment Plan</label>
+                                <textarea class="form-control" id="plan" name="plan" rows="4" placeholder="Treatment plan, medications, follow-up instructions, etc."></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Form Actions -->
+                    <div class="card">
+                        <div class="card-footer">
+                          
+                            <button type="submit" class="btn btn-primary float-right">
+                                <i class="fas fa-save mr-1"></i> Save Encounter
+                            </button>
+                            <a href="{{ url_for('search_patients') }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons (Note: These will be available after encounter is created) -->
+                    <div class="alert alert-info mt-3">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        <strong>Note:</strong> Once the encounter is saved, you can detain the patient for observation or admit them to the hospital. Admit and Detain options will be available on the encounter view page after saving.
+                    </div>
+                </form>
+
+            </div>
+        </section>
+    </div>
+
+
+{% endblock %}
+
+<style>
+    .searchable-select-container {
+        position: relative;
+    }
+
+    .searchable-select-container select[multiple] {
+        height: auto;
+        min-height: 120px;
+    }
+
+    .searchable-select-container select[multiple] option {
+        padding: 8px 12px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    .searchable-select-container select[multiple] option:last-child {
+        border-bottom: none;
+    }
+
+    .searchable-select-container select[multiple] option:hover {
+        background-color: #f8f9fa;
+    }
+
+    .searchable-select-container select[multiple] option:checked {
+        background-color: #007bff;
+        color: white;
+    }
+</style>
+
+
+<script>
+    // Simple form handling for clinical encounter
+    let selectedDiseases = [];
+    let customDiseases = [];
+    let selectedComplaints = [];
+
+    // Helper functions
+    function updateComplaintsHiddenField() {
+        // Get value from textarea
+        const textareaElement = document.getElementById('chief_complaint');
+        const complaintsText = textareaElement.value.trim();
+        // For backward compatibility, also set a hidden field if it exists
+        const hiddenField = document.getElementById('chief_complaints_json');
+        if (hiddenField) {
+            hiddenField.value = complaintsText;
+        }
+    }
+
+    function filterOptions(selectId) {
+        const searchInput = document.getElementById(selectId + '_search');
+        const selectElement = document.getElementById(selectId);
+        const searchTerm = searchInput.value.toLowerCase();
+        const options = selectElement.options;
+
+        console.log(`Filtering ${selectId} with term: "${searchTerm}"`);
+
+        for (let i = 0; i < options.length; i++) {
+            const option = options[i];
+            const text = option.text.toLowerCase();
+            if (text.includes(searchTerm) || option.value === '') {
+                option.style.display = '';
+            } else {
+                option.style.display = 'none';
+            }
+        }
+    }
+
+    // Make function globally accessible
+    window.filterOptions = filterOptions;
+
+    function updateHiddenFields() {
+        // Get selected options from the diseases select element
+        const selectElement = document.getElementById('diseases_select');
+        const selectedOptions = Array.from(selectElement.selectedOptions);
+
+        // For now, just store the selected disease names
+        // This can be enhanced to match the expected backend format
+        const diseasesText = selectedOptions.map(option => option.textContent).join(', ');
+        console.log('Selected diseases:', diseasesText);
+    }
+
+    // Document ready
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Clinical encounter form loaded');
+
+        // Toggle custom disease input
+        const toggle = document.getElementById('add_custom_disease_toggle');
+        if (toggle) {
+            toggle.addEventListener('change', function() {
+                const container = document.getElementById('custom_disease_container');
+                container.style.display = this.checked ? 'block' : 'none';
+            });
+        }
+
+        // Add input event listeners to update hidden fields
+        document.getElementById('chief_complaint').addEventListener('input', updateComplaintsHiddenField);
+        document.getElementById('diseases_select').addEventListener('change', updateHiddenFields);
+
+        // Add search input event listeners
+        document.getElementById('diseases_search').addEventListener('input', function() {
+            filterOptions('diseases_select');
+        });
+
+        // Initialize hidden fields
+        updateComplaintsHiddenField();
+        updateHiddenFields();
+    });
+
+    // Form submission
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('encounter-form');
+        if (form) {
+            form.addEventListener('submit', function() {
+                console.log('Form submitted');
+                updateHiddenFields();
+                updateComplaintsHiddenField();
+            });
+        }
+    });
+</script>
+

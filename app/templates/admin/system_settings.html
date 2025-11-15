@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>System Settings</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">System Settings</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('backup_created') %}
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success!</strong> Backup created successfully. 
+                    <a href="{{ url_for('backup_dashboard') }}" class="alert-link">View all backups</a>
+                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                {% endif %}
+
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Error!</strong> {{ request.query_params.get('error') }}
+                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                {% endif %}
+
+                {% if request.query_params.get('backup_cron_installed') %}
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success!</strong> Automatic backup cron job installed successfully.
+                    {% if request.query_params.get('message') %}
+                    <br><small>{{ request.query_params.get('message') }}</small>
+                    {% endif %}
+                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                {% endif %}
+
+                {% if request.query_params.get('backup_cron_removed') %}
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success!</strong> Automatic backup cron job removed successfully.
+                    {% if request.query_params.get('message') %}
+                    <br><small>{{ request.query_params.get('message') }}</small>
+                    {% endif %}
+                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                {% endif %}
+
+                <!-- System Information -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> System Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <table class="table table-sm">
+                                    <tr>
+                                        <th>System Name:</th>
+                                        <td>LHIMS (Lower Manya Krobo Health Information Management System)</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Version:</th>
+                                        <td>v0.9.0</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Database:</th>
+                                        <td>PostgreSQL</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Framework:</th>
+                                        <td>FastAPI</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h5>Quick Actions</h5>
+                                <a href="{{ url_for('hospital_settings') }}" class="btn btn-sm btn-primary mb-2">
+                                    <i class="fas fa-hospital mr-1"></i> Hospital Settings
+                                </a><br>
+                                <a href="{{ url_for('backup_dashboard') }}" class="btn btn-sm btn-info mb-2">
+                                    <i class="fas fa-database mr-1"></i> Backup & Recovery
+                                </a><br>
+                                <a href="/admin/export/patients?format=csv" class="btn btn-sm btn-success mb-2">
+                                    <i class="fas fa-download mr-1"></i> Export Patients (CSV)
+                                </a><br>
+                                <a href="/admin/export/patients?format=json" class="btn btn-sm btn-info mb-2">
+                                    <i class="fas fa-download mr-1"></i> Export Patients (JSON)
+                                </a><br>
+                                <a href="/admin/export/invoices?format=csv" class="btn btn-sm btn-success mb-2">
+                                    <i class="fas fa-download mr-1"></i> Export Invoices (CSV)
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Database Settings -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-database mr-1"></i> Database Settings</h3>
+                    </div>
+                    <div class="card-body">
+                        <p>Database configuration is managed through environment variables (.env file).</p>
+                        <p><strong>Note:</strong> Database migrations are managed through Alembic. Run <code>alembic upgrade head</code> to apply migrations.</p>
+                    </div>
+                </div>
+
+                <!-- Backup & Recovery -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-database mr-1"></i> Backup & Recovery</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h5><i class="fas fa-cloud-download-alt mr-2"></i> Manual Backup</h5>
+                                <p class="text-muted">Create a backup of your database and system data immediately.</p>
+                                <form method="POST" action="{{ url_for('create_backup') }}?return_to=settings" style="display: inline;">
+                                    <button type="submit" class="btn btn-primary" onclick="this.disabled=true; this.innerHTML='<i class=\'fas fa-spinner fa-spin mr-1\'></i> Creating Backup...'; this.form.submit();">
+                                        <i class="fas fa-download mr-1"></i> Create Backup Now
+                                    </button>
+                                </form>
+                                <a href="{{ url_for('backup_dashboard') }}" class="btn btn-info ml-2">
+                                    <i class="fas fa-list mr-1"></i> View All Backups
+                                </a>
+                            </div>
+                            <div class="col-md-6">
+                                <h5><i class="fas fa-clock mr-2"></i> Automatic Backup Configuration</h5>
+                                <p class="text-muted">Set up scheduled automatic backups for your system.</p>
+                                
+                                {% if platform == "Windows" %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle mr-1"></i> 
+                                    <strong>Windows Detected</strong><br>
+                                    Automatic backups on Windows require Task Scheduler configuration. 
+                                    Please use Windows Task Scheduler to create a scheduled task that runs:
+                                    <pre class="bg-dark text-light p-2 rounded mt-2"><code>python -m app.services.backup_scheduler</code></pre>
+                                </div>
+                                {% elif cron_status.installed %}
+                                <div class="alert alert-success">
+                                    <i class="fas fa-check-circle mr-1"></i> 
+                                    <strong>Automatic Backup Enabled</strong><br>
+                                    <small>{{ cron_status.message }}</small>
+                                    {% if cron_status.cron_entry %}
+                                    <div class="mt-2">
+                                        <strong>Current Schedule:</strong>
+                                        <pre class="bg-dark text-light p-2 rounded mt-1"><code>{{ cron_status.cron_entry }}</code></pre>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <form method="POST" action="{{ url_for('remove_backup_cron') }}" style="display: inline;" onsubmit="return confirm('Are you sure you want to remove the automatic backup schedule?');">
+                                    <button type="submit" class="btn btn-warning btn-sm mt-2">
+                                        <i class="fas fa-times mr-1"></i> Remove Automatic Backup
+                                    </button>
+                                </form>
+                                {% else %}
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-exclamation-triangle mr-1"></i> 
+                                    <strong>Automatic Backup Not Configured</strong><br>
+                                    <small>{{ cron_status.message if cron_status.message else 'Click below to set up automatic backups.' }}</small>
+                                </div>
+                                
+                                <form method="POST" action="{{ url_for('install_backup_cron') }}" class="mt-3">
+                                    <div class="form-group">
+                                        <label for="backup_hour">Backup Time</label>
+                                        <div class="row">
+                                            <div class="col-6">
+                                                <label class="small">Hour (0-23)</label>
+                                                <input type="number" class="form-control" id="backup_hour" name="hour" 
+                                                       min="0" max="23" value="2" required>
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="small">Minute (0-59)</label>
+                                                <input type="number" class="form-control" id="backup_minute" name="minute" 
+                                                       min="0" max="59" value="0" required>
+                                            </div>
+                                        </div>
+                                        <small class="form-text text-muted">Recommended: 2:00 AM (02:00)</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="days_to_keep">Retention Period (Days)</label>
+                                        <input type="number" class="form-control" id="days_to_keep" name="days_to_keep" 
+                                               min="1" max="365" value="30" required>
+                                        <small class="form-text text-muted">Keep last N days of backups (default: 30)</small>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-check mr-1"></i> Install Automatic Backup
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <div class="row">
+                            <div class="col-md-12">
+                                <h5><i class="fas fa-info-circle mr-2"></i> Backup Information</h5>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Backups include all patient data, invoices, and payments</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Backups are stored in the <code>backups/</code> directory</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Each backup includes metadata and timestamp</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Backups can be downloaded as ZIP files</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Manual backups can be created at any time from this page</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

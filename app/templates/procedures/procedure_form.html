@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-procedures mr-2"></i>{% if procedure %}Edit{% else %}Create{% endif %} Procedure</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('procedures_list') }}">Procedures</a></li>
+                            <li class="breadcrumb-item active">{% if procedure %}Edit{% else %}Create{% endif %}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">{% if procedure %}Edit Procedure{% else %}Create New Procedure{% endif %}</h3>
+                    </div>
+                    <form method="POST" action="{% if procedure %}{{ url_for('update_procedure', procedure_id=procedure.id) }}{% else %}{{ url_for('create_procedure') }}{% endif %}">
+                        <div class="card-body">
+                            {% if patient %}
+                            <div class="alert alert-info">
+                                <i class="fas fa-user-injured mr-1"></i> Patient: <strong>{{ patient.first_name }} {{ patient.last_name }}</strong> ({{ patient.patient_number }})
+                            </div>
+                            {% endif %}
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group" style="position: relative;">
+                                        <label for="patient_search">Patient <span class="text-danger">*</span></label>
+                                        {% if patient %}
+                                        <!-- Pre-selected patient (from query parameter) -->
+                                        <div class="alert alert-info">
+                                            <i class="fas fa-user-injured mr-1"></i> 
+                                            <strong>{{ patient.first_name }} {{ patient.last_name }}</strong> 
+                                            ({{ patient.patient_number or 'N/A' }})
+                                            <input type="hidden" name="patient_id" id="selected_patient_id" value="{{ patient.id }}" required>
+                                        </div>
+                                        {% else %}
+                                        <!-- Searchable patient field -->
+                                        <div class="input-group">
+                                            <input type="text" 
+                                                   class="form-control" 
+                                                   id="patient_search" 
+                                                   name="patient_search" 
+                                                   placeholder="Search by patient number, name, or phone number..."
+                                                   autocomplete="off"
+                                                   onkeyup="searchPatients(this.value)"
+                                                   value="{% if procedure and procedure.patient %}{{ procedure.patient.first_name }} {{ procedure.patient.last_name }} ({{ procedure.patient.patient_number or 'N/A' }}){% endif %}"
+                                                   {% if not procedure %}required{% endif %}>
+                                            <div class="input-group-append">
+                                                <a href="{{ url_for('search_patients') }}" 
+                                                   class="btn btn-primary" 
+                                                   target="_blank">
+                                                    <i class="fas fa-search mr-1"></i> Advanced Search
+                                                </a>
+                                            </div>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            Start typing to search by patient number, name, or phone number. 
+                                            Or click "Advanced Search" for more options.
+                                        </small>
+                                        <input type="hidden" name="patient_id" id="selected_patient_id" 
+                                               value="{% if procedure %}{{ procedure.patient_id }}{% endif %}" required>
+                                        
+                                        <!-- Patient Search Results Dropdown -->
+                                        <div id="patient_search_results" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 300px; overflow-y: auto; width: 100%;">
+                                            <!-- Results will be populated here by JavaScript -->
+                                        </div>
+                                        
+                                        <!-- Selected Patient Info (hidden initially) -->
+                                        <div id="selected_patient_info" class="alert alert-info mt-2" style="display: {% if procedure %}block{% else %}none{% endif %};">
+                                            <strong><i class="fas fa-user mr-1"></i> Selected Patient:</strong>
+                                            <span id="selected_patient_name">
+                                                {% if procedure and procedure.patient %}
+                                                    {{ procedure.patient.first_name }} {{ procedure.patient.last_name }}
+                                                {% endif %}
+                                            </span>
+                                            <span id="selected_patient_number" class="badge badge-primary ml-2">
+                                                {% if procedure and procedure.patient %}
+                                                    {{ procedure.patient.patient_number or 'N/A' }}
+                                                {% endif %}
+                                            </span>
+                                            <button type="button" class="btn btn-sm btn-secondary float-right" onclick="clearPatientSelection()">
+                                                <i class="fas fa-times mr-1"></i> Change
+                                            </button>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% if encounter %}
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="encounter_id">Encounter ID</label>
+                                        <input type="number" class="form-control" id="encounter_id" name="encounter_id" 
+                                               value="{% if procedure %}{{ procedure.encounter_id }}{% elif encounter %}{{ encounter.id }}{% endif %}">
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="procedure_name">Procedure Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="procedure_name" name="procedure_name" 
+                                               value="{% if procedure %}{{ procedure.procedure_name }}{% endif %}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="procedure_code">Procedure Code</label>
+                                        <input type="text" class="form-control" id="procedure_code" name="procedure_code" 
+                                               value="{% if procedure %}{{ procedure.procedure_code }}{% endif %}">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="procedure_type">Procedure Type <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="procedure_type" name="procedure_type" required>
+                                            <option value="">Select Type</option>
+                                            {% for pt in procedure_types %}
+                                            <option value="{{ pt }}" {% if procedure and procedure.procedure_type.value == pt %}selected{% endif %}>{{ pt|replace('_', ' ')|title }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="status">Status</label>
+                                        <select class="form-control" id="status" name="status">
+                                            {% for stat in statuses %}
+                                            <option value="{{ stat }}" {% if procedure and procedure.status.value == stat %}selected{% elif not procedure and stat == 'scheduled' %}selected{% endif %}>{{ stat|replace('_', ' ')|title }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="scheduled_date">Scheduled Date & Time</label>
+                                        <input type="datetime-local" class="form-control" id="scheduled_date" name="scheduled_date" 
+                                               value="{% if procedure and procedure.scheduled_date %}{{ procedure.scheduled_date.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="location">Location</label>
+                                        <input type="text" class="form-control" id="location" name="location" 
+                                               value="{% if procedure %}{{ procedure.location }}{% endif %}" placeholder="e.g., Operating Room 1">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="description">Description</label>
+                                        <textarea class="form-control" id="description" name="description" rows="3">{% if procedure %}{{ procedure.description }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="indication">Indication</label>
+                                        <textarea class="form-control" id="indication" name="indication" rows="2">{% if procedure %}{{ procedure.indication }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {% if procedure %}
+                            <h5 class="mt-4 mb-2">Procedure Execution</h5>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="start_time">Start Time</label>
+                                        <input type="datetime-local" class="form-control" id="start_time" name="start_time" 
+                                               value="{% if procedure.start_time %}{{ procedure.start_time.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="end_time">End Time</label>
+                                        <input type="datetime-local" class="form-control" id="end_time" name="end_time" 
+                                               value="{% if procedure.end_time %}{{ procedure.end_time.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="performed_by_id">Performed By (User ID)</label>
+                                        <input type="number" class="form-control" id="performed_by_id" name="performed_by_id" 
+                                               value="{% if procedure.performed_by_id %}{{ procedure.performed_by_id }}{% endif %}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="findings">Findings</label>
+                                        <textarea class="form-control" id="findings" name="findings" rows="3">{% if procedure %}{{ procedure.findings }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="complications">Complications</label>
+                                        <textarea class="form-control" id="complications" name="complications" rows="2">{% if procedure %}{{ procedure.complications }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="outcome">Outcome</label>
+                                        <textarea class="form-control" id="outcome" name="outcome" rows="2">{% if procedure %}{{ procedure.outcome }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            <div class="row mt-3">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="notes">Notes</label>
+                                        <textarea class="form-control" id="notes" name="notes" rows="3">{% if procedure %}{{ procedure.notes }}{% endif %}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save mr-1"></i> {% if procedure %}Update{% else %}Create{% endif %} Procedure
+                            </button>
+                            <a href="{% if procedure %}{{ url_for('procedure_detail', procedure_id=procedure.id) }}{% else %}{{ url_for('procedures_list') }}{% endif %}" class="btn btn-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        let searchTimeout;
+        const patientSearchInput = document.getElementById('patient_search');
+        const patientSearchResults = document.getElementById('patient_search_results');
+        const selectedPatientId = document.getElementById('selected_patient_id');
+        const selectedPatientInfo = document.getElementById('selected_patient_info');
+        const selectedPatientName = document.getElementById('selected_patient_name');
+        const selectedPatientNumber = document.getElementById('selected_patient_number');
+
+        // Only initialize search functionality if search input exists (patient not pre-selected)
+        if (patientSearchInput && patientSearchResults) {
+            function searchPatients(query) {
+                if (!query || query.length < 2) {
+                    if (patientSearchResults) {
+                        patientSearchResults.style.display = 'none';
+                    }
+                    return;
+                }
+
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    fetch(`/api/v1/patients/search?query=${encodeURIComponent(query)}&limit=10`)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Network response was not ok');
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            if (Array.isArray(data)) {
+                                displayPatientResults(data);
+                            } else {
+                                console.error('Unexpected response format:', data);
+                                if (patientSearchResults) {
+                                    patientSearchResults.innerHTML = '<div class="list-group-item text-danger">Error: Unexpected response format</div>';
+                                    patientSearchResults.style.display = 'block';
+                                }
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error searching patients:', error);
+                            if (patientSearchResults) {
+                                patientSearchResults.innerHTML = '<div class="list-group-item text-danger">Error: Could not search patients</div>';
+                                patientSearchResults.style.display = 'block';
+                            }
+                        });
+                }, 300);
+            }
+
+            function displayPatientResults(patients) {
+                if (!patientSearchResults) return;
+                
+                if (!patients || patients.length === 0) {
+                    patientSearchResults.innerHTML = '<div class="list-group-item">No patients found</div>';
+                    patientSearchResults.style.display = 'block';
+                    return;
+                }
+
+                let html = '';
+                patients.forEach(patient => {
+                    // Escape HTML to prevent XSS
+                    const fullName = escapeHtml(`${patient.first_name} ${patient.last_name}`);
+                    const patientNumber = escapeHtml(patient.patient_number || 'N/A');
+                    const phoneNumber = escapeHtml(patient.phone_number || 'N/A');
+                    html += `
+                        <a href="#" class="list-group-item list-group-item-action" 
+                           onclick="selectPatient(${patient.id}, '${fullName}', '${patientNumber}'); return false;">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">${fullName}</h6>
+                                <small class="badge badge-primary">${patientNumber}</small>
+                            </div>
+                            <p class="mb-1">Phone: ${phoneNumber} | ID: ${patient.id}</p>
+                        </a>
+                    `;
+                });
+                patientSearchResults.innerHTML = html;
+                patientSearchResults.style.display = 'block';
+            }
+
+            function escapeHtml(text) {
+                const map = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                };
+                return text.replace(/[&<>"']/g, m => map[m]);
+            }
+
+            function selectPatient(patientId, patientName, patientNumber) {
+                if (selectedPatientId) selectedPatientId.value = patientId;
+                if (selectedPatientName) selectedPatientName.textContent = patientName;
+                if (selectedPatientNumber) selectedPatientNumber.textContent = patientNumber;
+                if (patientSearchInput) patientSearchInput.value = '';
+                if (patientSearchResults) patientSearchResults.style.display = 'none';
+                if (selectedPatientInfo) selectedPatientInfo.style.display = 'block';
+                if (patientSearchInput) patientSearchInput.required = false;
+            }
+
+            function clearPatientSelection() {
+                if (selectedPatientId) selectedPatientId.value = '';
+                if (selectedPatientInfo) selectedPatientInfo.style.display = 'none';
+                if (patientSearchInput) {
+                    patientSearchInput.value = '';
+                    patientSearchInput.required = true;
+                    patientSearchInput.focus();
+                }
+            }
+
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(event) {
+                if (patientSearchResults && 
+                    !event.target.closest('#patient_search') && 
+                    !event.target.closest('#patient_search_results')) {
+                    patientSearchResults.style.display = 'none';
+                }
+            });
+
+            // Make functions globally available
+            window.searchPatients = searchPatients;
+            window.selectPatient = selectPatient;
+            window.clearPatientSelection = clearPatientSelection;
+        }
+    </script>
+
+{% endblock %}
+

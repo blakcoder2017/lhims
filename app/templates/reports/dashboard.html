@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-chart-bar mr-2"></i>Reports Dashboard</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Reports</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <div class="row">
+                    <!-- Financial Reports -->
+                    {% if user_role in ['Admin', 'Finance', 'Management'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-chart-line mr-1"></i> Financial Reports</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Generate comprehensive financial reports with breakdowns by service type and payment mechanism.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue summary</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Service type breakdown</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Payment mechanism analysis</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> PDF export available</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('financial_report') }}" class="btn btn-primary btn-block mb-2">
+                                    <i class="fas fa-chart-line mr-1"></i> View Financial Report
+                                </a>
+                                <a href="{{ url_for('income_statement') }}" class="btn btn-success btn-block">
+                                    <i class="fas fa-file-invoice-dollar mr-1"></i> Income Statement (P&L)
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Patient Demographics Reports -->
+                    {% if user_role in ['Admin', 'Management', 'Doctor'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-users mr-1"></i> Patient Demographics</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Analyze patient demographics including age distribution, gender, payment mechanisms, and common conditions.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Age group distribution</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Gender breakdown</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Payment mechanism analysis</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Top conditions report</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('patient_demographics_report') }}" class="btn btn-info btn-block">
+                                    <i class="fas fa-users mr-1"></i> View Demographics Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Admission Reports -->
+                    {% if user_role in ['Admin', 'Doctor', 'Nurse', 'Front Office', 'Finance'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-warning card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-file-medical mr-1"></i> Admission Reports</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Generate detailed reports for patient admissions including medication administrations, vitals, and financial summary.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Complete admission history</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Medication administrations</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Vitals and test results</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> PDF export available</li>
+                                </ul>
+                                <p class="text-muted mt-2">
+                                    <small><i class="fas fa-info-circle"></i> Access from individual admission detail pages</small>
+                                </p>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('ipd_admissions_list') }}" class="btn btn-warning btn-block">
+                                    <i class="fas fa-hospital mr-1"></i> View Admissions
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Quick Stats -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> About Reports</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-file-pdf text-danger mr-2"></i> PDF Export</h5>
+                                        <p class="text-muted">All reports support PDF export for printing and archiving. Click the "Export PDF" button on any report page.</p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-filter text-primary mr-2"></i> Customizable Filters</h5>
+                                        <p class="text-muted">Use date ranges, service types, and other filters to generate reports for specific time periods or criteria.</p>
+                                    </div>
+                                </div>
+                                <div class="row mt-3">
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-shield-alt text-success mr-2"></i> Access Control</h5>
+                                        <p class="text-muted">Reports are restricted based on user roles to ensure appropriate access to sensitive information.</p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-chart-pie text-info mr-2"></i> Comprehensive Data</h5>
+                                        <p class="text-muted">Reports include detailed breakdowns, statistics, and visualizations to help with decision-making.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

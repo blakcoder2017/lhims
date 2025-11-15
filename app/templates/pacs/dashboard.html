@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-images mr-2"></i>PACS - Radiology Images</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Home</a></li>
+                        <li class="breadcrumb-item active">PACS</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+            {% if request.query_params.get('status') == 'uploaded' %}
+            <div class="alert alert-success alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                <h5><i class="icon fas fa-check"></i> Success!</h5>
+                Image uploaded successfully.
+            </div>
+            {% endif %}
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-images mr-1"></i> Radiology Images</h3>
+                            <div class="card-tools">
+                                {% if radiology_order %}
+                                <a href="{{ url_for('upload_image_page') }}?order_id={{ radiology_order.id }}" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-upload mr-1"></i> Upload Image
+                                </a>
+                                {% else %}
+                                <a href="{{ url_for('upload_image_page') }}" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-upload mr-1"></i> Upload Image
+                                </a>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            {% if images %}
+                            <div class="row">
+                                {% for image in images %}
+                                <div class="col-md-3 mb-4">
+                                    <div class="card">
+                                        <div class="card-body text-center">
+                                            {% if image.thumbnail_path %}
+                                            <img src="{{ url_for('static', path=image.thumbnail_path) }}" class="img-fluid mb-2" alt="Thumbnail" style="max-height: 200px;">
+                                            {% else %}
+                                            <div class="bg-secondary text-white p-5 mb-2">
+                                                <i class="fas fa-image fa-3x"></i>
+                                                <p class="mt-2">{{ image.file_format or 'DICOM' }}</p>
+                                            </div>
+                                            {% endif %}
+                                            <h6 class="card-title">{{ image.image_number }}</h6>
+                                            {% if image.radiology_order %}
+                                            <p class="text-muted small mb-1"><strong>Study:</strong> {{ image.radiology_order.study_type }}</p>
+                                            {% endif %}
+                                            <p class="text-muted small mb-1"><strong>Type:</strong> {{ image.image_type.value|title }}</p>
+                                            {% if image.body_part %}
+                                            <p class="text-muted small mb-1"><strong>Body Part:</strong> {{ image.body_part }}</p>
+                                            {% endif %}
+                                            {% if image.study_description %}
+                                            <p class="text-muted small mb-1"><strong>Description:</strong> {{ image.study_description[:30] }}{% if image.study_description|length > 30 %}...{% endif %}</p>
+                                            {% endif %}
+                                            <p class="text-muted small mb-1"><strong>Format:</strong> {{ image.file_format or 'DICOM' }}</p>
+                                            {% if image.uploaded_at %}
+                                            <p class="text-muted small mb-1"><strong>Uploaded:</strong> {{ image.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                                            {% endif %}
+                                            <div class="btn-group btn-group-sm">
+                                                <a href="{{ url_for('view_image', image_id=image.id) }}" class="btn btn-info">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                                <a href="{{ url_for('download_image', image_id=image.id) }}" class="btn btn-primary">
+                                                    <i class="fas fa-download"></i> Download
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle mr-2"></i>
+                                No images found.
+                                {% if radiology_order %}
+                                <a href="{{ url_for('upload_image_page') }}?order_id={{ radiology_order.id }}" class="alert-link">Upload an image</a>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+

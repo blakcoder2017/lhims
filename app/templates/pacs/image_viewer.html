@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-image mr-2"></i>Image {{ image.image_number }}</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Home</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('pacs_dashboard') }}">PACS</a></li>
+                        <li class="breadcrumb-item active">Image Viewer</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+            {% if request.query_params.get('status') == 'annotated' %}
+            <div class="alert alert-success alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                <h5><i class="icon fas fa-check"></i> Success!</h5>
+                Annotation added successfully.
+            </div>
+            {% endif %}
+
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-image mr-1"></i> Image Viewer</h3>
+                            <div class="card-tools">
+                                <a href="{{ url_for('download_image', image_id=image.id) }}" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-download mr-1"></i> Download
+                                </a>
+                            </div>
+                        </div>
+                        <div class="card-body text-center">
+                            {% if image.mime_type and 'image' in image.mime_type %}
+                            <img src="{{ url_for('download_image', image_id=image.id) }}" class="img-fluid" alt="Radiology Image" style="max-width: 100%;">
+                            {% else %}
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle mr-2"></i>
+                                DICOM image viewer not available. Please download the file to view.
+                            </div>
+                            <a href="{{ url_for('download_image', image_id=image.id) }}" class="btn btn-primary">
+                                <i class="fas fa-download mr-1"></i> Download DICOM File
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- Annotations Section -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-comments mr-1"></i> Annotations</h3>
+                        </div>
+                        <div class="card-body">
+                            {% if annotations %}
+                            <ul class="list-group">
+                                {% for annotation in annotations %}
+                                <li class="list-group-item">
+                                    <strong>{{ annotation.annotation_type|title }}</strong>
+                                    {% if annotation.measurement_value %}
+                                    - {{ annotation.measurement_value }} {{ annotation.measurement_unit or '' }}
+                                    {% endif %}
+                                    <br>
+                                    <small class="text-muted">
+                                        By {% if annotation.created_by.full_name %}{{ annotation.created_by.full_name }}{% else %}{{ annotation.created_by.username }}{% endif %} on {{ annotation.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                    </small>
+                                    {% if annotation.notes %}
+                                    <p class="mt-2">{{ annotation.notes }}</p>
+                                    {% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            {% else %}
+                            <p class="text-muted">No annotations yet.</p>
+                            {% endif %}
+
+                            <!-- Add Annotation Form -->
+                            <div class="mt-3">
+                                <h5>Add Annotation</h5>
+                                <form method="POST" action="{{ url_for('create_annotation', image_id=image.id) }}">
+                                    <div class="form-group">
+                                        <label>Annotation Type</label>
+                                        <select name="annotation_type" class="form-control" required>
+                                            <option value="measurement">Measurement</option>
+                                            <option value="arrow">Arrow</option>
+                                            <option value="text">Text</option>
+                                            <option value="roi">Region of Interest</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Annotation Data (JSON)</label>
+                                        <textarea name="annotation_data" class="form-control" rows="3" placeholder='{"x": 100, "y": 200, ...}' required></textarea>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label>Measurement Value (if applicable)</label>
+                                                <input type="number" name="measurement_value" class="form-control" step="0.01">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label>Unit</label>
+                                                <input type="text" name="measurement_unit" class="form-control" placeholder="mm, cm, etc.">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Notes</label>
+                                        <textarea name="notes" class="form-control" rows="2"></textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-plus mr-1"></i> Add Annotation
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <!-- Image Information -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Image Information</h3>
+                        </div>
+                        <div class="card-body">
+                            <dl class="row">
+                                <dt class="col-sm-5">Image Number:</dt>
+                                <dd class="col-sm-7">{{ image.image_number }}</dd>
+                                
+                                <dt class="col-sm-5">Type:</dt>
+                                <dd class="col-sm-7">{{ image.image_type.value|title }}</dd>
+                                
+                                <dt class="col-sm-5">Modality:</dt>
+                                <dd class="col-sm-7">{{ image.modality or 'N/A' }}</dd>
+                                
+                                <dt class="col-sm-5">Body Part:</dt>
+                                <dd class="col-sm-7">{{ image.body_part or 'N/A' }}</dd>
+                                
+                                <dt class="col-sm-5">File Format:</dt>
+                                <dd class="col-sm-7">{{ image.file_format or 'N/A' }}</dd>
+                                
+                                <dt class="col-sm-5">File Size:</dt>
+                                <dd class="col-sm-7">
+                                    {% if image.file_size %}
+                                    {{ (image.file_size / 1024 / 1024)|round(2) }} MB
+                                    {% else %}
+                                    N/A
+                                    {% endif %}
+                                </dd>
+                                
+                                <dt class="col-sm-5">Status:</dt>
+                                <dd class="col-sm-7">
+                                    <span class="badge badge-{{ 'success' if image.status.value == 'available' else 'warning' }}">
+                                        {{ image.status.value|title }}
+                                    </span>
+                                </dd>
+                                
+                                <dt class="col-sm-5">Uploaded:</dt>
+                                <dd class="col-sm-7">{{ image.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                                
+                                <dt class="col-sm-5">Uploaded By:</dt>
+                                <dd class="col-sm-7">{{ image.uploaded_by.full_name }}</dd>
+                            </dl>
+                        </div>
+                    </div>
+
+                    <!-- Patient Information -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-user mr-1"></i> Patient</h3>
+                        </div>
+                        <div class="card-body">
+                            <p><strong>{{ patient.first_name }} {{ patient.last_name }}</strong></p>
+                            <p class="text-muted small">ID: {{ patient.national_id or 'N/A' }}</p>
+                        </div>
+                    </div>
+
+                    <!-- Radiology Order Information -->
+                    {% if radiology_order %}
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-file-medical mr-1"></i> Order</h3>
+                        </div>
+                        <div class="card-body">
+                            <p><strong>{{ radiology_order.study_type }}</strong></p>
+                            <p class="text-muted small">Order #{{ radiology_order.id }}</p>
+                            <a href="{{ url_for('view_radiology_order', order_id=radiology_order.id) }}" class="btn btn-sm btn-info">
+                                View Order
+                            </a>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+

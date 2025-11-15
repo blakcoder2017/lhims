@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-exchange-alt mr-2"></i>Transfer Patient</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admissions_list') }}">Admissions</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}">Admission {{ admission.admission_number }}</a></li>
+                            <li class="breadcrumb-item active">Transfer</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> Error: {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <!-- Current Admission Info -->
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Current Admission</h3>
+                    </div>
+                    <div class="card-body">
+                        <dl class="row">
+                            <dt class="col-sm-3">Patient:</dt>
+                            <dd class="col-sm-9"><strong>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</strong></dd>
+                            
+                            <dt class="col-sm-3">Current Ward:</dt>
+                            <dd class="col-sm-9">{{ admission.ward.name }} ({{ admission.ward.ward_number or 'N/A' }})</dd>
+                            
+                            <dt class="col-sm-3">Current Bed:</dt>
+                            <dd class="col-sm-9">{{ admission.bed.bed_number }} - {{ admission.bed.bed_name or 'N/A' }}</dd>
+                            
+                            <dt class="col-sm-3">Admission Date:</dt>
+                            <dd class="col-sm-9">{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') }}</dd>
+                        </dl>
+                    </div>
+                </div>
+
+                <!-- Transfer Form -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-exchange-alt mr-1"></i> Transfer Information</h3>
+                    </div>
+                    <form method="POST" action="{{ url_for('ipd_admission_transfer', admission_id=admission.id) }}" id="transferForm">
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label>Transfer Type <span class="text-danger">*</span></label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="transfer_type" id="transfer_internal" value="internal" checked onchange="toggleTransferType()">
+                                    <label class="form-check-label" for="transfer_internal">
+                                        <i class="fas fa-hospital mr-1"></i> Internal Transfer (Within Hospital)
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="transfer_type" id="transfer_external" value="external" onchange="toggleTransferType()">
+                                    <label class="form-check-label" for="transfer_external">
+                                        <i class="fas fa-hospital-alt mr-1"></i> External Transfer (To Different Hospital)
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Internal Transfer Fields -->
+                            <div id="internalTransferFields">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="ward_id">New Ward <span class="text-danger">*</span></label>
+                                            <select class="form-control" id="ward_id" name="ward_id" onchange="loadAvailableBeds(this.value)">
+                                                <option value="">Select Ward</option>
+                                                {% for ward in wards %}
+                                                <option value="{{ ward.id }}" {% if ward.id == admission.ward_id %}selected{% endif %}>
+                                                    {{ ward.name }} ({{ ward.current_occupancy }}/{{ ward.capacity }})
+                                                </option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="bed_id">New Bed <span class="text-danger">*</span></label>
+                                            <select class="form-control" id="bed_id" name="bed_id">
+                                                <option value="">Select Bed</option>
+                                                {% for bed in available_beds %}
+                                                <option value="{{ bed.id }}" data-ward-id="{{ bed.ward_id }}" {% if bed.id == admission.bed_id %}selected{% endif %}>
+                                                    {{ bed.bed_number }} - {{ bed.bed_name or 'N/A' }} ({{ bed.ward.name }})
+                                                </option>
+                                                {% endfor %}
+                                            </select>
+                                            <small class="form-text text-muted">Only available beds are shown</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- External Transfer Fields -->
+                            <div id="externalTransferFields" style="display: none;">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="external_hospital_name">Hospital Name <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" id="external_hospital_name" name="external_hospital_name" placeholder="Enter hospital name">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="external_hospital_address">Hospital Address</label>
+                                            <input type="text" class="form-control" id="external_hospital_address" name="external_hospital_address" placeholder="Enter hospital address">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="external_hospital_contact">Contact Information</label>
+                                            <input type="text" class="form-control" id="external_hospital_contact" name="external_hospital_contact" placeholder="Phone, email, or contact person">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="external_ward_department">Ward/Department</label>
+                                            <input type="text" class="form-control" id="external_ward_department" name="external_ward_department" placeholder="Ward or department name">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="transfer_reason">Transfer Reason <span class="text-danger">*</span></label>
+                                        <textarea class="form-control" id="transfer_reason" name="transfer_reason" rows="3" placeholder="Reason for transferring the patient" required></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-exchange-alt mr-1"></i> Transfer Patient
+                            </button>
+                            <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+    <script>
+        function loadAvailableBeds(wardId) {
+            const bedSelect = document.getElementById('bed_id');
+            const options = bedSelect.querySelectorAll('option[data-ward-id]');
+            
+            // Show/hide beds based on selected ward
+            options.forEach(option => {
+                if (wardId && option.getAttribute('data-ward-id') == wardId) {
+                    option.style.display = '';
+                } else {
+                    option.style.display = 'none';
+                }
+            });
+            
+            // Reset selection if current selection is not in the new ward
+            const currentBedWardId = bedSelect.options[bedSelect.selectedIndex]?.getAttribute('data-ward-id');
+            if (currentBedWardId && currentBedWardId != wardId) {
+                bedSelect.value = '';
+            }
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const wardSelect = document.getElementById('ward_id');
+            if (wardSelect.value) {
+                loadAvailableBeds(wardSelect.value);
+            }
+            toggleTransferType();
+        });
+
+        function toggleTransferType() {
+            const transferType = document.querySelector('input[name="transfer_type"]:checked').value;
+            const internalFields = document.getElementById('internalTransferFields');
+            const externalFields = document.getElementById('externalTransferFields');
+            const wardSelect = document.getElementById('ward_id');
+            const bedSelect = document.getElementById('bed_id');
+            const externalHospitalName = document.getElementById('external_hospital_name');
+            
+            if (transferType === 'internal') {
+                internalFields.style.display = 'block';
+                externalFields.style.display = 'none';
+                wardSelect.required = true;
+                bedSelect.required = true;
+                externalHospitalName.required = false;
+            } else {
+                internalFields.style.display = 'none';
+                externalFields.style.display = 'block';
+                wardSelect.required = false;
+                bedSelect.required = false;
+                externalHospitalName.required = true;
+            }
+        }
+    </script>
+
+{% endblock %}
+

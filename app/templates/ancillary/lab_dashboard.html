@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Laboratory Information System (LIS)</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Laboratory</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                <!-- Status Filter -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Orders</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="btn-group" role="group">
+                            <a href="/lab" class="btn btn-sm btn-outline-primary {{ 'active' if not status_filter else '' }}">All Pending</a>
+                            <a href="/lab?status_filter=pending" class="btn btn-sm btn-outline-warning {{ 'active' if status_filter == 'pending' else '' }}">Pending</a>
+                            <a href="/lab?status_filter=in_progress" class="btn btn-sm btn-outline-info {{ 'active' if status_filter == 'in_progress' else '' }}">In Progress</a>
+                            <a href="/lab?status_filter=completed" class="btn btn-sm btn-outline-success {{ 'active' if status_filter == 'completed' else '' }}">Completed</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lab Orders Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-vial mr-1"></i> Lab Orders</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if lab_orders %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Order ID</th>
+                                        <th>Patient</th>
+                                        <th>Patient Number</th>
+                                        <th>Test Name</th>
+                                        <th>Test Code</th>
+                                        <th>Ordered By</th>
+                                        <th>Priority</th>
+                                        <th>Status</th>
+                                        <th>Ordered At</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for order in lab_orders %}
+                                    <tr>
+                                        <td><strong>#{{ order.id }}</td>
+                                        <td>{{ order.encounter.patient.first_name }} {{ order.encounter.patient.last_name }}</td>
+                                        <td><span class="badge badge-primary">{{ order.encounter.patient.patient_number or 'N/A' }}</span></td>
+                                        <td>{{ order.test_name }}</td>
+                                        <td>{{ order.test_code or 'N/A' }}</td>
+                                        <td>{{ order.ordered_by.full_name or order.ordered_by.username }}</td>
+                                        <td>
+                                            <span class="badge badge-{{ 'danger' if order.priority == 'stat' else 'warning' if order.priority == 'urgent' else 'secondary' }}">
+                                                {{ order.priority }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">
+                                                {{ order.status.value.replace('_', ' ').title() }}
+                                            </span>
+                                        </td>
+                                        <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>
+                                            <a href="{{ url_for('view_lab_order', order_id=order.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View/Enter Result
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> No lab orders found.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

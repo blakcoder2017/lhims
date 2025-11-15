@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-12">
+                        <h1>Access Denied</h1>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="error-page">
+                <h2 class="headline text-danger">403</h2>
+                <div class="error-content">
+                    <h3><i class="fas fa-ban text-danger"></i> Access Forbidden</h3>
+                    
+                    <p>
+                        You do not have permission to access this page.
+                    </p>
+                    
+                    {% if user_role and required_roles %}
+                    <div class="alert alert-warning">
+                        <h5><i class="icon fas fa-info-circle"></i> Permission Information</h5>
+                        <p>
+                            <strong>Your Role:</strong> {{ user_role }}<br>
+                            <strong>Required Role(s):</strong> {{ required_roles }}
+                        </p>
+                        <p class="mb-0">
+                            If you believe you should have access to this page, please contact your system administrator.
+                        </p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if detail %}
+                    <div class="alert alert-info">
+                        <strong>Details:</strong> {{ detail }}
+                    </div>
+                    {% endif %}
+                    
+                    <p>
+                        <a href="/" class="btn btn-primary mt-3">
+                            <i class="fas fa-home mr-1"></i> Return to Dashboard
+                        </a>
+                        <a href="javascript:history.back()" class="btn btn-secondary mt-3 ml-2">
+                            <i class="fas fa-arrow-left mr-1"></i> Go Back
+                        </a>
+                    </p>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}
+

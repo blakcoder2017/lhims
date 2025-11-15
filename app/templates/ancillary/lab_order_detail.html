@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Lab Order #{{ lab_order.id }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('lab_dashboard') }}">Laboratory</a></li>
+                            <li class="breadcrumb-item active">Order #{{ lab_order.id }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                {% if request.query_params.get('status') == 'result_entered' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Result Entered!</h5>
+                    Lab test result has been successfully recorded.
+                </div>
+                {% endif %}
+
+                <!-- Patient Information -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3"><strong>Patient:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
+                            <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
+                            <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
+                            {% if patient.phone_number %}
+                            <div class="col-md-3"><strong>Phone:</strong> {{ patient.phone_number }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lab Order Details -->
+                <div class="card card-info">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-vial mr-1"></i> Lab Order Details</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <table class="table table-sm">
+                                    <tr>
+                                        <th>Test Name:</th>
+                                        <td><strong>{{ lab_order.test_name }}</strong></td>
+                                    </tr>
+                                    <tr>
+                                        <th>Test Code:</th>
+                                        <td>{{ lab_order.test_code or 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Priority:</th>
+                                        <td>
+                                            <span class="badge badge-{{ 'danger' if lab_order.priority == 'stat' else 'warning' if lab_order.priority == 'urgent' else 'secondary' }}">
+                                                {{ lab_order.priority }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <th>Status:</th>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if lab_order.status.value == 'completed' else 'warning' if lab_order.status.value == 'in_progress' else 'info' }}">
+                                                {{ lab_order.status.value.replace('_', ' ').title() }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <th>Ordered By:</th>
+                                        <td>{{ lab_order.ordered_by.full_name or lab_order.ordered_by.username }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Ordered At:</th>
+                                        <td>{{ lab_order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                {% if lab_order.instructions %}
+                                <div class="form-group">
+                                    <label><strong>Special Instructions:</strong></label>
+                                    <p>{{ lab_order.instructions }}</p>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sample Tracking -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-barcode mr-1"></i> Sample Tracking</h3>
+                        {% if lab_order.status.value != 'completed' and user_role in ['Admin', 'Lab Staff'] %}
+                        <div class="card-tools">
+                            <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#createSampleModal">
+                                <i class="fas fa-plus mr-1"></i> Create Sample
+                            </button>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        {% if samples %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Barcode</th>
+                                        <th>Sample Type</th>
+                                        <th>Status</th>
+                                        <th>Collected At</th>
+                                        <th>Received At</th>
+                                        <th>Storage Location</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for sample in samples %}
+                                    <tr>
+                                        <td><strong>{{ sample.barcode }}</strong></td>
+                                        <td>{{ sample.sample_type or 'N/A' }}</td>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if sample.status.value == 'completed' else 'warning' if sample.status.value == 'processing' else 'info' if sample.status.value == 'received' else 'secondary' }}">
+                                                {{ sample.status.value.replace('_', ' ').title() }}
+                                            </span>
+                                        </td>
+                                        <td>{{ sample.collected_at.strftime('%Y-%m-%d %H:%M') if sample.collected_at else 'N/A' }}</td>
+                                        <td>{{ sample.received_at.strftime('%Y-%m-%d %H:%M') if sample.received_at else 'N/A' }}</td>
+                                        <td>{{ sample.storage_location or 'N/A' }}</td>
+                                        <td>
+                                            <a href="{{ url_for('view_lab_sample', sample_id=sample.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> No samples created yet.
+                            {% if lab_order.status.value != 'completed' and user_role in ['Admin', 'Lab Staff'] %}
+                            <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#createSampleModal">Create Sample</button>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Result Entry (Only for Lab Staff) -->
+                {% if lab_order.status.value != 'completed' and user_role in ['Admin', 'Lab Staff'] %}
+                <div class="card card-success">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-edit mr-1"></i> Enter Test Result</h3>
+                    </div>
+                    <form method="POST" action="{{ url_for('enter_lab_result', order_id=lab_order.id) }}">
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label for="result">Test Result</label>
+                                <textarea class="form-control" id="result" name="result" rows="8" placeholder="Enter test results, values, and interpretation..." required></textarea>
+                                <small class="form-text text-muted">Enter the complete test result including values, units, and interpretation.</small>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <button type="submit" class="btn btn-success float-right">
+                                <i class="fas fa-save mr-1"></i> Save Result
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                {% elif lab_order.status.value != 'completed' and user_role == 'Clinician' %}
+                <div class="card card-info">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-clock mr-1"></i> Pending Result</h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Lab test result is pending. Lab staff will enter the result when available.</p>
+                    </div>
+                </div>
+                {% else %}
+                <!-- Display Existing Result -->
+                <div class="card card-success">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-check-circle mr-1"></i> Test Result</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label><strong>Result:</strong></label>
+                            <div class="p-3 bg-light border rounded">
+                                {{ lab_order.result }}
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>Entered By:</strong> {{ lab_order.result_entered_by.full_name or lab_order.result_entered_by.username if lab_order.result_entered_by else 'N/A' }}
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Entered At:</strong> {{ lab_order.result_entered_at.strftime('%Y-%m-%d %H:%M') if lab_order.result_entered_at else 'N/A' }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Actions -->
+                <div class="card">
+                    <div class="card-footer">
+                        <a href="{{ url_for('lab_dashboard') }}" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left mr-1"></i> Back to Lab Dashboard
+                        </a>
+                        {% if user_role in ['Admin', 'Lab Staff'] %}
+                        <a href="{{ url_for('lab_samples_dashboard') }}" class="btn btn-info">
+                            <i class="fas fa-barcode mr-1"></i> View All Samples
+                        </a>
+                        <a href="{{ url_for('qc_dashboard') }}" class="btn btn-warning">
+                            <i class="fas fa-clipboard-check mr-1"></i> QC Records
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+    <!-- Create Sample Modal -->
+    <div class="modal fade" id="createSampleModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <form method="POST" action="{{ url_for('create_lab_sample', order_id=lab_order.id) }}">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Create Lab Sample</h5>
+                        <button type="button" class="close" data-dismiss="modal">
+                            <span>&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Sample Type</label>
+                            <select name="sample_type" class="form-control" required>
+                                <option value="Blood">Blood</option>
+                                <option value="Urine">Urine</option>
+                                <option value="Stool">Stool</option>
+                                <option value="Sputum">Sputum</option>
+                                <option value="Swab">Swab</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Collection Method</label>
+                            <input type="text" name="collection_method" class="form-control" placeholder="e.g., Venipuncture, Midstream">
+                        </div>
+                        <div class="form-group">
+                            <label>Collection Site</label>
+                            <input type="text" name="collection_site" class="form-control" placeholder="e.g., Left arm, Midstream">
+                        </div>
+                        <div class="form-group">
+                            <label>Storage Location</label>
+                            <input type="text" name="storage_location" class="form-control" placeholder="e.g., Refrigerator A, Shelf 3">
+                        </div>
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> A unique barcode will be automatically generated for this sample.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Create Sample</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
+

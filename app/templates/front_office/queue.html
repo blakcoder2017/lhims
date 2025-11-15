@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>Appointment Queue</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Queue</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Department Filter -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Queue</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('view_queue') }}">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="department">Department</label>
+                                        <select class="form-control" id="department" name="department">
+                                            <option value="">All Departments</option>
+                                            {% for dept in departments %}
+                                            <option value="{{ dept }}" {% if selected_department == dept %}selected{% endif %}>{{ dept }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label for="queue_search">Search</label>
+                                        <input type="text"
+                                               class="form-control"
+                                               id="queue_search"
+                                               name="search"
+                                               placeholder="Patient name, number, or phone"
+                                               value="{{ search_query }}">
+                                        <small class="form-text text-muted">Search today's queue by patient name, patient number, or phone number.</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">Filter</button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% if search_query %}
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <a href="{{ url_for('view_queue') }}{% if selected_department %}?department={{ selected_department }}{% endif %}" class="btn btn-sm btn-secondary">
+                                        <i class="fas fa-times mr-1"></i> Clear Search
+                                    </a>
+                                    <span class="ml-2 text-muted">Searching for: <strong>{{ search_query }}</strong></span>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Queue Table -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header patient-header">
+                        <h3 class="card-title"><i class="fas fa-list mr-1"></i> Today's Queue</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if queue %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Queue #</th>
+                                        <th>Patient Name</th>
+                                        <th>Patient Number</th>
+                                        <th>Department</th>
+                                        <th>Dept Type</th>
+                                        <th>Type</th>
+                                        <th>Scheduled Time</th>
+                                        <th>Chief Complaint</th>
+                                        <th>Status</th>
+                                        <th>Priority</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for appointment in queue %}
+                                    <tr>
+                                        <td>{{ appointment.queue_number or 'N/A' }}</td>
+                                        <td>{{ appointment.patient.first_name }} {{ appointment.patient.last_name }}</td>
+                                        <td><span class="badge badge-primary">{{ appointment.patient.patient_number or 'N/A' }}</span></td>
+                                        <td>{{ appointment.department }}</td>
+                                        <td>
+                                            <span class="badge badge-{% if appointment.department_type == 'ipd' %}danger{% elif appointment.department_type == 'opd' %}success{% else %}secondary{% endif %}">
+                                                {{ (appointment.department_type or 'opd').upper() }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-info">
+                                                {{ appointment.appointment_type.value.replace('_', ' ').title() }}
+                                            </span>
+                                        </td>
+                                        <td>{{ appointment.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>{{ appointment.chief_complaint or 'N/A' }}</td>
+                                        <td>
+                                            {% if appointment.status.value == 'scheduled' %}
+                                                <span class="badge badge-secondary">Scheduled</span>
+                                            {% elif appointment.status.value == 'checked_in' %}
+                                                <span class="badge badge-primary">Checked In</span>
+                                            {% elif appointment.status.value == 'in_progress' %}
+                                                <span class="badge badge-warning">In Progress</span>
+                                            {% elif appointment.status.value == 'completed' %}
+                                                <span class="badge badge-success">Completed</span>
+                                            {% elif appointment.status.value == 'cancelled' %}
+                                                <span class="badge badge-danger">Cancelled</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                {{ appointment.priority }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <a href="/patients/{{ appointment.patient_id }}/triage?appointment_id={{ appointment.id }}" 
+                                               class="btn btn-sm btn-primary">View</a>
+                                            {% if appointment.status.value == 'scheduled' %}
+                                            <form method="POST" action="/api/v1/appointments/{{ appointment.id }}/update-status" style="display: inline;">
+                                                <input type="hidden" name="appointment_status" value="checked_in">
+                                                <button type="submit" class="btn btn-sm btn-success">Check In</button>
+                                            </form>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> No Appointments</h5>
+                            No appointments in the queue for today{% if selected_department %} in {{ selected_department }}{% endif %}.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}
+
