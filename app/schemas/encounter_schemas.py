@@ -20,6 +20,7 @@ class EncounterBase(BaseModel):
     primary_diagnosis_code: Optional[str] = Field(None, max_length=20)
     primary_diagnosis_description: Optional[str] = Field(None, max_length=500)
     secondary_diagnosis_codes: Optional[str] = None  # JSON string of secondary diagnoses
+    differential_diagnosis_data: Optional[str] = None  # JSON blob string
 
 
 class EncounterCreate(EncounterBase):
@@ -42,6 +43,7 @@ class EncounterUpdate(BaseModel):
     primary_diagnosis_code: Optional[str] = None
     primary_diagnosis_description: Optional[str] = None
     secondary_diagnosis_codes: Optional[str] = None
+    differential_diagnosis_data: Optional[str] = None
     completed_at: Optional[datetime] = None
 
 
@@ -56,6 +58,7 @@ class Encounter(EncounterBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     is_active: bool
+    differential_diagnosis_data: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -176,6 +179,7 @@ class PrescriptionCreate(PrescriptionBase):
     """Schema for creating a new prescription"""
     encounter_id: int
     prescribed_by_id: int
+    is_walk_in: bool = False
 
 
 class PrescriptionUpdate(BaseModel):
@@ -183,6 +187,8 @@ class PrescriptionUpdate(BaseModel):
     status: Optional[OrderStatus] = None
     dispensed_at: Optional[datetime] = None
     dispensed_by_id: Optional[int] = None
+    checked_in_at: Optional[datetime] = None
+    checked_in_by_id: Optional[int] = None
 
 
 class Prescription(PrescriptionBase):
@@ -190,6 +196,9 @@ class Prescription(PrescriptionBase):
     id: int
     encounter_id: int
     prescribed_by_id: int
+    is_walk_in: bool = False
+    checked_in_at: Optional[datetime] = None
+    checked_in_by_id: Optional[int] = None
     status: OrderStatus
     prescribed_at: datetime
     dispensed_at: Optional[datetime] = None
@@ -210,4 +219,36 @@ class EncounterWithOrders(Encounter):
 
     class Config:
         from_attributes = True
+
+
+# Differential diagnosis helper schemas
+class DifferentialInput(BaseModel):
+    clinical_summary: str
+    age: Optional[int] = None
+    sex: Optional[str] = Field(None, max_length=20)
+    key_vitals: Optional[str] = Field(None, max_length=500)
+    key_labs: Optional[str] = Field(None, max_length=500)
+
+
+class DifferentialSuggestion(BaseModel):
+    diagnosis: str
+    body_system: Optional[str] = None
+    stg_reference: Optional[str] = None
+    stg_summary: Optional[str] = None
+    relevance_score: float = 0.0
+    flags: List[str] = []
+    status: str = Field("suggested", pattern="^(suggested|working|ruled_out)$")
+
+
+class DifferentialResponse(BaseModel):
+    clinical_summary: str
+    generated_at: datetime
+    suggestions: List[DifferentialSuggestion]
+    notes: Optional[str] = None
+
+
+class DifferentialSaveRequest(BaseModel):
+    clinical_summary: str
+    suggestions: List[DifferentialSuggestion]
+    notes: Optional[str] = None
 

@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-virus mr-2"></i> Disease Encounter Report</h1>
+                    <p class="text-muted mb-0">Shows how many encounters recorded each disease within the selected date range.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+            <div class="card card-outline card-primary">
+                <div class="card-body">
+                    <form class="form-inline row">
+                        <div class="form-group col-md-3 mb-2">
+                            <label class="sr-only" for="start_date">Start</label>
+                            <input type="date" class="form-control w-100" id="start_date" name="start_date" value="{{ filters.start_date or '' }}" placeholder="Start Date">
+                        </div>
+                        <div class="form-group col-md-3 mb-2">
+                            <label class="sr-only" for="end_date">End</label>
+                            <input type="date" class="form-control w-100" id="end_date" name="end_date" value="{{ filters.end_date or '' }}" placeholder="End Date">
+                        </div>
+                        <div class="form-group col-md-3 mb-2">
+                            <label class="sr-only" for="search">Disease</label>
+                            <input type="text" class="form-control w-100" id="search" name="search" value="{{ filters.search }}" placeholder="Search disease name">
+                        </div>
+                        <div class="form-group col-md-2 mb-2">
+                            <label class="sr-only" for="limit">Limit</label>
+                            <select class="form-control w-100" id="limit" name="limit">
+                                {% for option in [25, 50, 100, 200, 300, 500] %}
+                                <option value="{{ option }}" {% if filters.limit == option %}selected{% endif %}>Top {{ option }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-1 mb-2 text-right">
+                            <button type="submit" class="btn btn-primary w-100"><i class="fas fa-filter"></i></button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="small-box bg-gradient-primary">
+                        <div class="inner">
+                            <h3>{{ totals.encounters }}</h3>
+                            <p>Total Encounter Diagnoses</p>
+                        </div>
+                        <div class="icon">
+                            <i class="fas fa-notes-medical"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="small-box bg-gradient-success">
+                        <div class="inner">
+                            <h3>{{ totals.primary }}</h3>
+                            <p>Marked as Primary Diagnosis</p>
+                        </div>
+                        <div class="icon">
+                            <i class="fas fa-star"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="small-box bg-gradient-info">
+                        <div class="inner">
+                            <h3>{{ totals.diseases }}</h3>
+                            <p>Unique Diseases</p>
+                        </div>
+                        <div class="icon">
+                            <i class="fas fa-virus"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-list mr-1"></i> Disease Encounter Breakdown</h3>
+                </div>
+                <div class="card-body table-responsive p-0">
+                    {% if stats %}
+                    <table class="table table-hover table-striped">
+                        <thead class="thead-light">
+                            <tr>
+                                <th>Disease</th>
+                                <th>Code</th>
+                                <th>Total Encounters</th>
+                                <th>Primary %</th>
+                                <th>First / Last Recorded</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in stats %}
+                            <tr>
+                                <td>
+                                    <strong>{{ row.name }}</strong>
+                                </td>
+                                <td>{{ row.code or '—' }}</td>
+                                <td>
+                                    <span class="badge badge-dark">{{ row.encounter_count }}</span>
+                                </td>
+                                <td style="min-width: 180px;">
+                                    <div class="progress progress-sm">
+                                        <div class="progress-bar bg-success" role="progressbar" style="width: {{ row.primary_ratio }}%;" aria-valuenow="{{ row.primary_ratio }}" aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                    <small>{{ row.primary_count }} primary diagnosis ({{ row.primary_ratio }}%)</small>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {{ row.first_recorded.strftime('%Y-%m-%d') if row.first_recorded else 'N/A' }} &rarr;
+                                        {{ row.last_recorded.strftime('%Y-%m-%d') if row.last_recorded else 'N/A' }}
+                                    </small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="p-4">
+                        <div class="alert alert-info mb-3">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            No disease encounters found for the selected criteria.
+                        </div>
+                        <div class="card card-body bg-light">
+                            <p class="mb-2">
+                                <strong>How this report works:</strong>
+                            </p>
+                            <ul class="mb-0">
+                                <li>Only encounters that have at least one mapped disease appear here.</li>
+                                <li>Adjust the date range to include more encounters (e.g., the past month or past quarter).</li>
+                                <li>If your facility hasn’t started tagging diseases yet, encourage clinicians to select diagnoses in the encounter form so analytics can be generated.</li>
+                            </ul>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+{% endblock %}
+

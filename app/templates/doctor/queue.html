@@ -107,6 +107,7 @@
                                         <th>Department</th>
                                         <th>Dept Type</th>
                                         <th>Scheduled Time</th>
+                                        <th>Wait Time</th>
                                         <th>Chief Complaint</th>
                                         <th>Priority</th>
                                         <th>Status</th>
@@ -153,6 +154,20 @@
                                                 {{ item.encounter.encounter_date.strftime('%H:%M') }}
                                             {% else %}
                                                 N/A
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if item.wait_time %}
+                                                {% set hours = (item.wait_time.total_seconds() // 3600) | int %}
+                                                {% if hours >= 2 %}
+                                                    <span class="badge badge-danger" title="Long wait time">{{ item.wait_time_str }}</span>
+                                                {% elif hours >= 1 %}
+                                                    <span class="badge badge-warning" title="Moderate wait time">{{ item.wait_time_str }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-info">{{ item.wait_time_str }}</span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="badge badge-secondary">N/A</span>
                                             {% endif %}
                                         </td>
                                         <td>
@@ -230,6 +245,89 @@
                         {% endif %}
                     </div>
                 </div>
+
+                <!-- Previous Days' Unfulfilled Queue -->
+                {% if queue_previous %}
+                <div class="card card-warning card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-exclamation-triangle mr-1"></i> Unfulfilled Queues from Previous Days (Last 7 Days)</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            <strong>Note:</strong> These are appointments from previous days that have not been completed or cancelled. 
+                            Please prioritize these patients.
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Queue #</th>
+                                        <th>Patient Name</th>
+                                        <th>Patient Number</th>
+                                        <th>Department</th>
+                                        <th>Scheduled Date</th>
+                                        <th>Wait Time</th>
+                                        <th>Chief Complaint</th>
+                                        <th>Status</th>
+                                        <th>Priority</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in queue_previous %}
+                                    {% set appointment = item.appointment %}
+                                    <tr class="table-warning">
+                                        <td>{{ appointment.queue_number or 'N/A' }}</td>
+                                        <td>{{ appointment.patient.first_name }} {{ appointment.patient.last_name }}</td>
+                                        <td><span class="badge badge-primary">{{ appointment.patient.patient_number or 'N/A' }}</span></td>
+                                        <td>{{ appointment.department }}</td>
+                                        <td>{{ appointment.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>
+                                            {% if item.wait_time %}
+                                                {% set hours = (item.wait_time.total_seconds() // 3600) | int %}
+                                                {% if hours >= 24 %}
+                                                    <span class="badge badge-danger" title="Very long wait time">{{ item.wait_time_str }}</span>
+                                                {% elif hours >= 12 %}
+                                                    <span class="badge badge-danger" title="Long wait time">{{ item.wait_time_str }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-warning">{{ item.wait_time_str }}</span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="badge badge-secondary">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ appointment.chief_complaint or 'N/A' }}</td>
+                                        <td>
+                                            {% if appointment.status.value == 'checked_in' %}
+                                                <span class="badge badge-primary">Checked In</span>
+                                            {% elif appointment.status.value == 'in_progress' %}
+                                                <span class="badge badge-warning">In Progress</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                {{ appointment.priority }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('view_patient_records', patient_id=appointment.patient_id) }}" 
+                                               class="btn btn-sm btn-primary" title="Patient File">
+                                                <i class="fas fa-file-medical"></i> Patient File
+                                            </a>
+                                            <a href="{{ url_for('new_encounter', patient_id=appointment.patient_id) }}?appointment_id={{ appointment.id }}" 
+                                               class="btn btn-sm btn-success" title="Start Encounter">
+                                                <i class="fas fa-stethoscope"></i> Start
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
 
             </div>
         </section>

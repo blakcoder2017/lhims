@@ -58,13 +58,18 @@ def requires_payment_before_service(
     
     # For admitted patients:
     if is_admitted:
-        # Admission and bed fees are paid at discharge
-        if service_type in [ChargeType.ADMISSION, ChargeType.WARD_STAY, ChargeType.BED_STAY]:
+        bed_related = {ChargeType.ADMISSION}
+        pay_now_services = {
+            ChargeType.PHARMACY,
+            ChargeType.LAB_TEST,
+            ChargeType.RADIOLOGY,
+            ChargeType.PROCEDURE,
+            ChargeType.ANTENATAL,
+        }
+        if service_type in bed_related:
             return False
-        # Consumables and diagnostics are pay-as-you-go even for IPD cash patients
-        if service_type in [ChargeType.PHARMACY, ChargeType.LAB_TEST, ChargeType.RADIOLOGY]:
+        if service_type in pay_now_services:
             return True
-        # Other services can be deferred to discharge for now
         return False
     
     # For OPD cash patients: all services are pay-as-you-go
@@ -78,10 +83,14 @@ def has_paid_for_service(
     encounter_id: Optional[int] = None,
     lab_order_id: Optional[int] = None,
     radiology_order_id: Optional[int] = None,
-    prescription_id: Optional[int] = None
+    prescription_id: Optional[int] = None,
+    check_today_only: bool = False
 ) -> Tuple[bool, Optional[Charge], Optional[Invoice]]:
     """
     Check if patient has paid for a specific service.
+    
+    Args:
+        check_today_only: If True, only check for charges created today (for new visits)
     
     Returns:
         Tuple of (has_paid, charge, invoice)
@@ -89,6 +98,8 @@ def has_paid_for_service(
         - charge: The charge object if found
         - invoice: The invoice object if found
     """
+    from datetime import date
+    
     # Build query to find charge
     charge_query = db.query(Charge).join(Invoice).filter(
         Invoice.patient_id == patient_id,
@@ -96,6 +107,14 @@ def has_paid_for_service(
         Invoice.is_active == True,
         Charge.invoice_id == Invoice.id
     )
+    
+    # For consultation charges without encounter_id (new visit), check for TODAY's charges only
+    if check_today_only or (service_type == ChargeType.CONSULTATION and encounter_id is None):
+        from sqlalchemy import func
+        today = date.today()
+        charge_query = charge_query.filter(
+            func.date(Charge.created_at) == today
+        )
     
     # Add specific filters based on service type
     if encounter_id:

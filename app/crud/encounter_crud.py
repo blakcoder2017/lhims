@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime
+import json
 
 from app.models.encounter_models import Encounter, LabOrder, RadiologyOrder, Prescription, EncounterStatus, OrderStatus
 from app.schemas.encounter_schemas import (
@@ -203,6 +204,48 @@ def create_prescription(db: Session, prescription: PrescriptionCreate):
     db.commit()
     db.refresh(db_prescription)
     return db_prescription
+
+
+# Differential diagnosis helpers
+def save_differential_data(db: Session, encounter_id: int, payload: dict):
+    """Persist differential diagnosis payload as JSON on the encounter."""
+    db_encounter = get_encounter(db, encounter_id)
+    if not db_encounter:
+        return None
+    db_encounter.differential_diagnosis_data = json.dumps(payload)
+    db_encounter.updated_at = datetime.now()
+    db.commit()
+    db.refresh(db_encounter)
+    return db_encounter.differential_diagnosis_data
+
+
+def load_differential_data(encounter: Encounter):
+    """Return parsed differential payload for a given encounter instance."""
+    if not encounter or not encounter.differential_diagnosis_data:
+        return None
+    try:
+        return json.loads(encounter.differential_diagnosis_data)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def get_encounters_with_differentials(db: Session, limit: int = 200, skip: int = 0):
+    """Return encounters that have saved differential diagnosis data."""
+    return (
+        db.query(Encounter)
+        .options(
+            joinedload(Encounter.patient),
+            joinedload(Encounter.clinician),
+        )
+        .filter(
+            Encounter.is_active == True,
+            Encounter.differential_diagnosis_data.isnot(None),
+        )
+        .order_by(Encounter.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 def get_prescription(db: Session, prescription_id: int):

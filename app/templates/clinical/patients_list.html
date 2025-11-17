@@ -160,16 +160,16 @@
                                     </td>
                                     <td>{{ patient.created_at.strftime('%Y-%m-%d') if patient.created_at else 'N/A' }}</td>
                                     <td>
-                                        <a href="{{ url_for('view_patient_records', patient_id=patient.id) }}" 
+                                        <a href="{{ url_for('view_patient_records', patient_id=patient.id) }}"
                                            class="btn btn-sm btn-primary" title="Patient File">
                                             <i class="fas fa-file-medical"></i> Patient File
                                         </a>
-                                        <a href="{{ url_for('patient_triage', patient_id=patient.id) }}" 
-                                           class="btn btn-sm btn-info" title="Vitals">
-                                            <i class="fas fa-heartbeat"></i>
+                                        <a href="{{ url_for('patient_triage', patient_id=patient.id) }}"
+                                           class="btn btn-sm btn-warning" title="Record Vitals & Process Payment">
+                                            <i class="fas fa-heartbeat"></i> Record Vitals
                                         </a>
                                         {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
-                                        <a href="{{ url_for('new_encounter', patient_id=patient.id) }}" 
+                                        <a href="{{ url_for('new_encounter', patient_id=patient.id) }}"
                                            class="btn btn-sm btn-success" title="New Encounter">
                                             <i class="fas fa-stethoscope"></i>
                                         </a>

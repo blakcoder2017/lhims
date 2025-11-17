@@ -2,9 +2,12 @@
 Disease CRUD Operations
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func, case
 from typing import Optional, List
+from datetime import datetime
+
 from app.models.disease_models import Disease, EncounterDisease
+from app.models.encounter_models import Encounter
 
 
 def get_disease(db: Session, disease_id: int) -> Optional[Disease]:
@@ -143,4 +146,71 @@ def remove_disease_from_encounter(db: Session, encounter_disease_id: int) -> boo
     db.delete(encounter_disease)
     db.commit()
     return True
+
+
+def get_disease_encounter_stats(
+    db: Session,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    search: Optional[str] = None,
+    limit: int = 100
+) -> List[dict]:
+    """Aggregate encounter counts per disease within optional date range."""
+    encounter_count = func.count(EncounterDisease.id)
+    primary_count = func.sum(
+        case(
+            (EncounterDisease.is_primary == True, 1),
+            else_=0
+        )
+    )
+    unique_encounters = func.count(func.distinct(EncounterDisease.encounter_id))
+    
+    query = (
+        db.query(
+            Disease.id.label("disease_id"),
+            Disease.name,
+            Disease.code,
+            encounter_count.label("encounter_count"),
+            unique_encounters.label("unique_encounters"),
+            primary_count.label("primary_count"),
+            func.min(Encounter.encounter_date).label("first_recorded"),
+            func.max(Encounter.encounter_date).label("last_recorded"),
+        )
+        .join(EncounterDisease, EncounterDisease.disease_id == Disease.id)
+        .join(Encounter, Encounter.id == EncounterDisease.encounter_id)
+        .filter(
+            Disease.is_active == True,
+            Encounter.is_active == True,
+        )
+    )
+    
+    if start_date:
+        query = query.filter(Encounter.encounter_date >= start_date)
+    if end_date:
+        query = query.filter(Encounter.encounter_date <= end_date)
+    if search:
+        query = query.filter(Disease.name.ilike(f"%{search.strip()}%"))
+    
+    results = (
+        query.group_by(Disease.id, Disease.name, Disease.code)
+        .order_by(encounter_count.desc())
+        .limit(limit)
+        .all()
+    )
+    
+    stats = []
+    for row in results:
+        stats.append(
+            {
+                "disease_id": row.disease_id,
+                "name": row.name,
+                "code": row.code,
+                "encounter_count": int(row.encounter_count or 0),
+                "unique_encounters": int(row.unique_encounters or 0),
+                "primary_count": int(row.primary_count or 0),
+                "first_recorded": row.first_recorded,
+                "last_recorded": row.last_recorded,
+            }
+        )
+    return stats
 

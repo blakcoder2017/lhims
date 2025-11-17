@@ -149,6 +149,7 @@ def nurse_triage_queue(
     ).all()
     
     # Filter to get patients who need triage (no recent vitals today)
+    from app.crud import appointment_crud
     triage_queue = []
     for appointment in appointments:
         # Check if patient has vitals recorded today
@@ -157,26 +158,66 @@ def nurse_triage_queue(
             func.date(TriageVitals.recorded_at) == today
         ).order_by(TriageVitals.recorded_at.desc()).first()
         
+        # Calculate wait time
+        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time_str = appointment_crud.format_wait_time(wait_time)
+        
         # Add to queue if no vitals today, or if status filter requires it
         if status_filter == "needs_triage" and not recent_vitals:
             triage_queue.append({
                 "appointment": appointment,
                 "has_vitals": False,
-                "last_vitals": None
+                "last_vitals": None,
+                "wait_time": wait_time,
+                "wait_time_str": wait_time_str
             })
         elif status_filter == "completed" and recent_vitals:
             triage_queue.append({
                 "appointment": appointment,
                 "has_vitals": True,
-                "last_vitals": recent_vitals
+                "last_vitals": recent_vitals,
+                "wait_time": wait_time,
+                "wait_time_str": wait_time_str
             })
         elif not status_filter:
             # Show all - mark which need triage
             triage_queue.append({
                 "appointment": appointment,
                 "has_vitals": recent_vitals is not None,
-                "last_vitals": recent_vitals
+                "last_vitals": recent_vitals,
+                "wait_time": wait_time,
+                "wait_time_str": wait_time_str
             })
+    
+    # Get unfulfilled queues from previous days
+    previous_appointments = appointment_crud.get_unfulfilled_queues_previous_days(
+        db, department, None, days_back=7
+    )
+    
+    # Filter previous appointments to only SCHEDULED or CHECKED_IN (need triage)
+    previous_appointments = [
+        appt for appt in previous_appointments 
+        if appt.status.value in [AppointmentStatus.SCHEDULED.value, AppointmentStatus.CHECKED_IN.value]
+    ]
+    
+    # Calculate wait times and check vitals for previous day queues
+    triage_queue_previous = []
+    for appointment in previous_appointments:
+        # Check if patient has vitals recorded
+        recent_vitals = db.query(TriageVitals).filter(
+            TriageVitals.patient_id == appointment.patient_id
+        ).order_by(TriageVitals.recorded_at.desc()).first()
+        
+        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time_str = appointment_crud.format_wait_time(wait_time)
+        
+        triage_queue_previous.append({
+            "appointment": appointment,
+            "has_vitals": recent_vitals is not None,
+            "last_vitals": recent_vitals,
+            "wait_time": wait_time,
+            "wait_time_str": wait_time_str
+        })
     
     # Get unique departments for filter
     departments = db.query(Appointment.department).distinct().all()
@@ -188,6 +229,7 @@ def nurse_triage_queue(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "triage_queue": triage_queue,
+        "triage_queue_previous": triage_queue_previous,
         "departments": departments,
         "selected_department": department,
         "status_filter": status_filter

@@ -43,6 +43,7 @@ class Encounter(Base):
     primary_diagnosis_code = Column(String(20), nullable=True)  # ICD-10 code for primary diagnosis
     primary_diagnosis_description = Column(String(500), nullable=True)  # Description of primary diagnosis
     secondary_diagnosis_codes = Column(Text, nullable=True)  # JSON array of secondary diagnosis codes and descriptions
+    differential_diagnosis_data = Column(Text, nullable=True)  # JSON blob storing G-STG differential suggestions/status
     
     # Timestamps
     started_at = Column(DateTime, server_default=func.now())
@@ -205,6 +206,11 @@ class Prescription(Base):
     quantity = Column(Integer, nullable=True)  # Number of units to dispense
     instructions = Column(Text, nullable=True)  # Patient instructions
     
+    # Walk-in Support
+    is_walk_in = Column(Boolean, default=False, server_default='false')  # True if this is a walk-in pharmacy sale
+    checked_in_at = Column(DateTime, nullable=True)  # When front desk confirmed payment
+    checked_in_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Front desk staff who confirmed payment
+    
     # Status Tracking
     status = Column(postgresql.ENUM(OrderStatus, values_callable=lambda x: [e.value for e in x], name='orderstatus', create_type=False), nullable=False, default=OrderStatus.PENDING)
     prescribed_at = Column(DateTime, server_default=func.now())
@@ -219,6 +225,7 @@ class Prescription(Base):
     encounter = relationship("Encounter", back_populates="prescriptions")
     prescribed_by = relationship("User", foreign_keys=[prescribed_by_id])
     dispensed_by = relationship("User", foreign_keys=[dispensed_by_id])
+    checked_in_by = relationship("User", foreign_keys=[checked_in_by_id])
     medication = relationship("Medication", foreign_keys=[medication_id])  # Link to inventory medication
     inventory_transactions = relationship("InventoryTransaction", back_populates="prescription")
     

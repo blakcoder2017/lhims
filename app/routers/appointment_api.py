@@ -263,11 +263,38 @@ def view_queue_page(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Displays the appointment queue for today.
+    Displays the appointment queue for today and unfulfilled queues from previous days.
     Workflow Step 2: Appointment/Queue Management
     """
     # Get today's queue
-    queue = appointment_crud.get_queue_today(db, department, search)
+    queue_today = appointment_crud.get_queue_today(db, department, search)
+    
+    # Get unfulfilled queues from previous days (last 7 days)
+    queue_previous = appointment_crud.get_unfulfilled_queues_previous_days(
+        db, department, search, days_back=7
+    )
+    
+    # Calculate wait times for today's queue
+    queue_today_with_wait = []
+    for appointment in queue_today:
+        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time_str = appointment_crud.format_wait_time(wait_time)
+        queue_today_with_wait.append({
+            "appointment": appointment,
+            "wait_time": wait_time,
+            "wait_time_str": wait_time_str
+        })
+    
+    # Calculate wait times for previous days' queues
+    queue_previous_with_wait = []
+    for appointment in queue_previous:
+        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time_str = appointment_crud.format_wait_time(wait_time)
+        queue_previous_with_wait.append({
+            "appointment": appointment,
+            "wait_time": wait_time,
+            "wait_time_str": wait_time_str
+        })
     
     # Get unique departments for filter
     from app.models.appointment_models import Appointment
@@ -279,7 +306,8 @@ def view_queue_page(
         "title": "Appointment Queue",
         "current_user": current_user,
         "user_role": current_user.role.name,
-        "queue": queue,
+        "queue_today": queue_today_with_wait,
+        "queue_previous": queue_previous_with_wait,
         "departments": departments,
         "selected_department": department,
         "search_query": search or "",

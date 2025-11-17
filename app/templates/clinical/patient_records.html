@@ -27,6 +27,11 @@
                 <!-- Action Buttons -->
                 <div class="row mb-3">
                     <div class="col-12">
+                        {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
+                        <a href="{{ url_for('patient_triage', patient_id=patient.id) }}?new_visit=true" class="btn btn-warning btn-lg">
+                            <i class="fas fa-redo mr-1"></i> Start New Visit
+                        </a>
+                        {% endif %}
                         {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
                         <a href="{{ url_for('new_encounter', patient_id=patient.id) }}" class="btn btn-success">
                             <i class="fas fa-notes-medical mr-1"></i> New Encounter

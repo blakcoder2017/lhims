@@ -122,49 +122,188 @@
                         </div>
                     </div>
                     <div class="card-body" style="display: none;">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="info-box bg-light">
-                                    <span class="info-box-icon bg-info"><i class="fas fa-calendar-check"></i></span>
-                                    <div class="info-box-content">
-                                        <span class="info-box-text"><strong>Appointment</strong></span>
-                                        <span class="info-box-number">Step 2</span>
-                                        <p class="mb-0 small">A scheduled visit (walk-in or future). Creates a queue entry for the patient.</p>
+                        <!-- Complete Workflow Timeline -->
+                        <div class="workflow-timeline mb-4">
+                            <!-- Step 1: Registration -->
+                            <div class="workflow-step">
+                                <div class="step-number bg-secondary">1</div>
+                                <div class="step-content">
+                                    <div class="card card-outline card-secondary">
+                                        <div class="card-header">
+                                            <h5 class="card-title mb-0">
+                                                <i class="fas fa-user-plus mr-2"></i>Registration
+                                            </h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="mb-0">Patient demographics and financial screening. Determines payment method (Cash, NHIS, or Private Insurance).</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="info-box bg-light">
-                                    <span class="info-box-icon bg-success"><i class="fas fa-check-circle"></i></span>
-                                    <div class="info-box-content">
-                                        <span class="info-box-text"><strong>Check-In</strong></span>
-                                        <span class="info-box-number">Step 5</span>
-                                        <p class="mb-0 small">After vitals, checking in creates an appointment (if needed) and adds patient to doctor's queue. Makes patient visible to doctors.</p>
+
+                            <!-- Step 2: Payment (Cash Patients Only) -->
+                            {% if patient.payment_mechanism and patient.payment_mechanism.value == 'cash' %}
+                            <div class="workflow-step">
+                                <div class="step-number bg-warning">2</div>
+                                <div class="step-content">
+                                    <div class="card card-outline card-warning">
+                                        <div class="card-header">
+                                            <h5 class="card-title mb-0">
+                                                <i class="fas fa-money-bill-wave mr-2"></i>Payment (Cash Patients)
+                                            </h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="mb-0">Cash patients must pay consultation fee before vitals can be recorded. This fee covers both vitals and the initial encounter.</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-4">
-                                <div class="info-box bg-light">
-                                    <span class="info-box-icon bg-primary"><i class="fas fa-stethoscope"></i></span>
-                                    <div class="info-box-content">
-                                        <span class="info-box-text"><strong>Encounter</strong></span>
-                                        <span class="info-box-number">Step 6</span>
-                                        <p class="mb-0 small">Created by doctor when seeing patient. Documents clinical findings, orders tests, prescribes medications.</p>
+                            {% set vitals_step = 3 %}
+                            {% set checkin_step = 4 %}
+                            {% set encounter_step = 5 %}
+                            {% else %}
+                            {% set vitals_step = 2 %}
+                            {% set checkin_step = 3 %}
+                            {% set encounter_step = 4 %}
+                            {% endif %}
+
+                            <!-- Vitals (Current Step) -->
+                            <div class="workflow-step">
+                                <div class="step-number bg-info" style="animation: pulse 2s infinite;">{{ vitals_step }}</div>
+                                <div class="step-content">
+                                    <div class="card card-outline card-info border-3">
+                                        <div class="card-header bg-info">
+                                            <h5 class="card-title mb-0 text-white">
+                                                <i class="fas fa-heartbeat mr-2"></i>Vitals <span class="badge badge-light">You are here</span>
+                                            </h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="mb-0"><strong>Current Step:</strong> Record patient's vital signs including temperature, blood pressure, pulse, respiratory rate, oxygen saturation, weight, height, and pain scale.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Check-In -->
+                            <div class="workflow-step">
+                                <div class="step-number bg-success">{{ checkin_step }}</div>
+                                <div class="step-content">
+                                    <div class="card card-outline card-success">
+                                        <div class="card-header">
+                                            <h5 class="card-title mb-0">
+                                                <i class="fas fa-check-circle mr-2"></i>Check-In
+                                            </h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="mb-0">After vitals are recorded, check-in creates an appointment (if needed) and adds the patient to the doctor's queue. Makes the patient visible to doctors.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Doctor Creates Encounter -->
+                            <div class="workflow-step">
+                                <div class="step-number bg-primary">{{ encounter_step }}</div>
+                                <div class="step-content">
+                                    <div class="card card-outline card-primary">
+                                        <div class="card-header">
+                                            <h5 class="card-title mb-0">
+                                                <i class="fas fa-stethoscope mr-2"></i>Doctor Creates Encounter
+                                            </h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <p class="mb-0">When the doctor sees the patient, they create the clinical encounter. This documents clinical findings, orders tests, prescribes medications, and records diagnoses.</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="alert alert-info mt-3">
-                            <h5><i class="icon fas fa-info-circle"></i> Current Workflow:</h5>
-                            <ol class="mb-0">
-                                <li><strong>Registration</strong> → Patient demographics and financial screening</li>
-                                <li><strong>Vitals</strong> (You are here) → Record vital signs</li>
-                                <li><strong>Check-In</strong> → Creates appointment automatically and adds to doctor's queue</li>
-                                <li><strong>Doctor Creates Encounter</strong> → When doctor sees patient, they create the clinical encounter</li>
-                            </ol>
+
+                        <!-- Quick Reference -->
+                        <div class="alert alert-light border">
+                            <h5 class="mb-3"><i class="fas fa-lightbulb mr-2 text-warning"></i>Quick Reference</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <ul class="mb-0">
+                                        <li><strong>Registration:</strong> Patient demographics and financial screening</li>
+                                        <li><strong>Payment:</strong> Required for cash patients before vitals</li>
+                                        <li><strong>Vitals:</strong> Record vital signs (current step)</li>
+                                    </ul>
+                                </div>
+                                <div class="col-md-6">
+                                    <ul class="mb-0">
+                                        <li><strong>Check-In:</strong> Adds patient to doctor's queue</li>
+                                        <li><strong>Encounter:</strong> Doctor documents clinical findings</li>
+                                    </ul>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                <style>
+                    .workflow-timeline {
+                        position: relative;
+                        padding-left: 40px;
+                    }
+
+                    .workflow-step {
+                        position: relative;
+                        margin-bottom: 30px;
+                    }
+
+                    .workflow-step:not(:last-child)::after {
+                        content: '';
+                        position: absolute;
+                        left: 15px;
+                        top: 50px;
+                        width: 2px;
+                        height: calc(100% + 10px);
+                        background: linear-gradient(to bottom, #6c757d, #17a2b8);
+                        z-index: 0;
+                    }
+
+                    .step-number {
+                        position: absolute;
+                        left: -40px;
+                        top: 0;
+                        width: 35px;
+                        height: 35px;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: white;
+                        font-weight: bold;
+                        font-size: 16px;
+                        z-index: 1;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    }
+
+                    .step-content {
+                        margin-left: 10px;
+                    }
+
+                    @keyframes pulse {
+                        0%, 100% {
+                            transform: scale(1);
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                        }
+                        50% {
+                            transform: scale(1.1);
+                            box-shadow: 0 4px 8px rgba(23, 162, 184, 0.5);
+                        }
+                    }
+
+                    .workflow-step .card {
+                        transition: transform 0.2s, box-shadow 0.2s;
+                    }
+
+                    .workflow-step .card:hover {
+                        transform: translateX(5px);
+                        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+                    }
+                </style>
 
                 <!-- Patient Demographics - Step 1 -->
                 <div class="card card-primary card-outline">

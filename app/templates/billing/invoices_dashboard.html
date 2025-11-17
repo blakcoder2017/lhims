@@ -23,6 +23,17 @@
         <section class="content">
             <div class="container-fluid">
 
+                <!-- Insurance Patient Notice -->
+                <div class="alert alert-info alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-info-circle"></i> Health Insurance Patients</h5>
+                    <p class="mb-0">
+                        <strong>NHIS and Private Insurance patients</strong> are indicated with a blue badge and highlighted rows. 
+                        These patients <strong>cannot pay directly</strong> like cash patients. Their invoices must be processed through the 
+                        <strong>Claims</strong> page where you can prepare and submit claims to the insurance provider.
+                    </p>
+                </div>
+
                 <!-- Actions -->
                 <div class="card">
                     <div class="card-header">
@@ -123,12 +134,29 @@
                                 </thead>
                                 <tbody>
                                     {% for summary in patient_summaries %}
-                                    <tr>
+                                    <tr class="{% if summary.is_insurance_patient %}table-info{% endif %}">
                                         <td>
-                                            <strong>{{ summary.patient_name }}</strong><br>
+                                            <strong>{{ summary.patient_name }}</strong>
+                                            {% if summary.is_insurance_patient %}
+                                            <span class="badge badge-info ml-2">
+                                                <i class="fas fa-shield-alt mr-1"></i>
+                                                {% if summary.patient_payment_mechanism == 'nhis' %}NHIS
+                                                {% elif summary.patient_payment_mechanism == 'private_insurance' %}Private Insurance
+                                                {% else %}Insurance{% endif %}
+                                            </span>
+                                            {% endif %}
+                                            <br>
                                             <small class="text-muted">#{{ summary.patient_number }}</small>
                                         </td>
-                                        <td>{{ summary.payment_label }}</td>
+                                        <td>
+                                            {{ summary.payment_label }}
+                                            {% if summary.is_insurance_patient %}
+                                            <br><small class="text-info">
+                                                <i class="fas fa-info-circle mr-1"></i>
+                                                Process through Claims page
+                                            </small>
+                                            {% endif %}
+                                        </td>
                                         <td class="text-center">{{ summary.invoice_count }}</td>
                                         <td class="text-center">
                                             {% if summary.open_invoices > 0 %}
@@ -160,7 +188,17 @@
                                                 <a href="{{ url_for('view_patient_records', patient_id=summary.patient_id) }}" class="btn btn-sm btn-secondary">
                                                     <i class="fas fa-user mr-1"></i> Patient File
                                                 </a>
-                                                {% if summary.total_balance > 0 and summary.payable_invoice_ids %}
+                                                {% if summary.is_insurance_patient %}
+                                                    {% if summary.patient_payment_mechanism == 'nhis' %}
+                                                    <a href="{{ url_for('claims_dashboard') }}?patient_id={{ summary.patient_id }}" class="btn btn-sm btn-info">
+                                                        <i class="fas fa-file-invoice-dollar mr-1"></i> Prepare NHIS Claim
+                                                    </a>
+                                                    {% elif summary.patient_payment_mechanism == 'private_insurance' %}
+                                                    <a href="/claims/private-insurance?patient_id={{ summary.patient_id }}" class="btn btn-sm btn-info">
+                                                        <i class="fas fa-file-invoice-dollar mr-1"></i> Prepare Private Insurance Claim
+                                                    </a>
+                                                    {% endif %}
+                                                {% elif summary.total_balance > 0 and summary.payable_invoice_ids %}
                                                 <a href="{{ url_for('pay_selected_invoices_page') }}?invoice_ids={{ summary.payable_invoice_ids | join(',') }}" class="btn btn-sm btn-success">
                                                     <i class="fas fa-credit-card mr-1"></i> Pay Outstanding
                                                 </a>
@@ -226,6 +264,10 @@
                                 <button type="button" class="btn btn-success btn-sm" id="paySelectedBtn">
                                     <i class="fas fa-credit-card mr-1"></i> Pay Selected
                                 </button>
+                                <span class="text-muted ml-3" id="insuranceNotice" style="display: none;">
+                                    <i class="fas fa-info-circle text-info"></i> 
+                                    Insurance invoices cannot be paid here. Process through Claims page.
+                                </span>
                             </div>
                             {% if patient_filter %}
                             <span class="text-muted">Showing invoices for <strong>{{ patient_filter.first_name }} {{ patient_filter.last_name }}</strong></span>
@@ -260,14 +302,38 @@
                                 </thead>
                                 <tbody>
                                     {% for invoice in invoices %}
-                                    <tr>
+                                    {% set is_insurance = invoice.payment_mechanism and invoice.payment_mechanism.value in ['nhis', 'private_insurance'] %}
+                                    {% set patient_is_insurance = invoice.patient.payment_mechanism and invoice.patient.payment_mechanism.value in ['nhis', 'private_insurance'] %}
+                                    {% set is_insurance_invoice = is_insurance or patient_is_insurance %}
+                                    <tr class="{% if is_insurance_invoice %}table-info{% endif %}">
                                         <td class="text-center align-middle">
                                             {% set balance_value = invoice.balance if invoice.balance is not none else (invoice.total_amount - invoice.paid_amount) %}
-                                            <input type="checkbox" class="invoice-select-checkbox" value="{{ invoice.id }}"
-                                                   {% if balance_value <= 0 %}disabled{% endif %}>
+                                            <input type="checkbox" class="invoice-select-checkbox" 
+                                                   value="{{ invoice.id }}"
+                                                   data-is-insurance="{{ 'true' if is_insurance_invoice else 'false' }}"
+                                                   {% if balance_value <= 0 or is_insurance_invoice %}disabled{% endif %}>
                                         </td>
-                                        <td><strong>{{ invoice.invoice_number }}</strong></td>
-                                        <td>{{ invoice.patient.first_name }} {{ invoice.patient.last_name }}</td>
+                                        <td>
+                                            <strong>{{ invoice.invoice_number }}</strong>
+                                            {% if is_insurance_invoice %}
+                                            <br><span class="badge badge-info badge-sm">
+                                                <i class="fas fa-shield-alt mr-1"></i>
+                                                {% if is_insurance and invoice.payment_mechanism.value == 'nhis' %}NHIS
+                                                {% elif is_insurance and invoice.payment_mechanism.value == 'private_insurance' %}Private Insurance
+                                                {% elif patient_is_insurance and invoice.patient.payment_mechanism.value == 'nhis' %}NHIS
+                                                {% elif patient_is_insurance and invoice.patient.payment_mechanism.value == 'private_insurance' %}Private Insurance
+                                                {% else %}Insurance{% endif %}
+                                            </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {{ invoice.patient.first_name }} {{ invoice.patient.last_name }}
+                                            {% if is_insurance_invoice %}
+                                            <br><small class="text-info">
+                                                <i class="fas fa-info-circle mr-1"></i>Process through Claims
+                                            </small>
+                                            {% endif %}
+                                        </td>
                                         <td><span class="badge badge-primary">{{ invoice.patient.patient_number or 'N/A' }}</span></td>
                                         <td>{{ invoice.invoice_date.strftime('%Y-%m-%d') }}</td>
                                         <td>GHS {{ "%.2f"|format(invoice.total_amount) }}</td>
@@ -280,9 +346,22 @@
                                             </span>
                                         </td>
                                         <td>
-                                            <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" class="btn btn-sm btn-primary">
-                                                <i class="fas fa-eye"></i> View
-                                            </a>
+                                            <div class="btn-group-vertical">
+                                                <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" class="btn btn-sm btn-primary">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                                {% if is_insurance_invoice %}
+                                                    {% if is_insurance and invoice.payment_mechanism.value == 'nhis' or patient_is_insurance and invoice.patient.payment_mechanism.value == 'nhis' %}
+                                                    <a href="{{ url_for('claims_dashboard') }}?patient_id={{ invoice.patient.id }}" class="btn btn-sm btn-info">
+                                                        <i class="fas fa-file-invoice-dollar"></i> NHIS Claims
+                                                    </a>
+                                                    {% elif is_insurance and invoice.payment_mechanism.value == 'private_insurance' or patient_is_insurance and invoice.patient.payment_mechanism.value == 'private_insurance' %}
+                                                    <a href="/claims/private-insurance?patient_id={{ invoice.patient.id }}" class="btn btn-sm btn-info">
+                                                        <i class="fas fa-file-invoice-dollar"></i> Private Claims
+                                                    </a>
+                                                    {% endif %}
+                                                {% endif %}
+                                            </div>
                                         </td>
                                     </tr>
                                     {% endfor %}
@@ -308,6 +387,20 @@
             const payButton = document.getElementById('paySelectedBtn');
             const hiddenField = document.getElementById('selected_invoice_ids');
             const form = document.getElementById('paySelectedForm');
+            const insuranceNotice = document.getElementById('insuranceNotice');
+
+            function updateInsuranceNotice() {
+                const selected = Array.from(checkboxes)
+                    .filter(cb => cb.checked)
+                    .map(cb => cb.getAttribute('data-is-insurance') === 'true');
+                
+                const hasInsuranceSelected = selected.some(isInsurance => isInsurance);
+                if (hasInsuranceSelected && insuranceNotice) {
+                    insuranceNotice.style.display = 'inline';
+                } else if (insuranceNotice) {
+                    insuranceNotice.style.display = 'none';
+                }
+            }
 
             if (selectAll) {
                 selectAll.addEventListener('change', function() {
@@ -316,16 +409,31 @@
                             cb.checked = selectAll.checked;
                         }
                     });
+                    updateInsuranceNotice();
                 });
             }
+
+            // Add change listeners to all checkboxes
+            checkboxes.forEach(cb => {
+                cb.addEventListener('change', updateInsuranceNotice);
+            });
 
             if (payButton) {
                 payButton.addEventListener('click', function() {
                     const selected = Array.from(checkboxes)
                         .filter(cb => cb.checked && !cb.disabled)
+                        .filter(cb => cb.getAttribute('data-is-insurance') !== 'true')
                         .map(cb => cb.value);
+                    
                     if (!selected.length) {
-                        alert('Select at least one invoice with an outstanding balance to pay.');
+                        const insuranceSelected = Array.from(checkboxes)
+                            .filter(cb => cb.checked && cb.getAttribute('data-is-insurance') === 'true');
+                        
+                        if (insuranceSelected.length > 0) {
+                            alert('Insurance invoices cannot be paid here. Please process them through the Claims page.');
+                        } else {
+                            alert('Select at least one invoice with an outstanding balance to pay.');
+                        }
                         return;
                     }
                     hiddenField.value = selected.join(',');

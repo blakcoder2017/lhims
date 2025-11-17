@@ -61,20 +61,76 @@ def record_vitals_form(
     
     # Check payment requirement for cash patients
     # Consultation fee now covers both vitals and encounter, so check for CONSULTATION fee
-    payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
-        db, patient_id, ChargeType.CONSULTATION  # Consultation fee covers vitals + encounter
-    )
+    # For returning patients, check for TODAY's consultation payment only
     
-    if payment_required and not payment_paid:
-        try:
-            create_charge_for_consultation(db, patient_id, current_user.id, encounter_id=None)
-        except Exception as billing_error:
-            print(f"Warning: Unable to seed consultation charge for patient {patient_id}: {billing_error}")
-        # Redirect to consultation fee payment page
-        return RedirectResponse(
-            url=f"/patients/{patient_id}/pay/consultation?return_to=triage",
-            status_code=status.HTTP_302_FOUND
-        )
+    payment_required = requires_payment_before_service(db, patient_id, ChargeType.CONSULTATION)
+    
+    if payment_required:
+        # Improved payment check: look for recent payments (last 2 hours)
+        from datetime import timedelta, datetime
+        from app.models.billing_models import Charge, Invoice, Payment, PaymentStatus
+        
+        two_hours_ago = datetime.now() - timedelta(hours=2)
+        
+        # Look for any consultation charges, then check if they have recent payments
+        recent_charges = db.query(Charge).join(Invoice).filter(
+            Invoice.patient_id == patient_id,
+            Charge.charge_type == ChargeType.CONSULTATION,
+            Charge.encounter_id.is_(None),
+            Invoice.is_active == True
+        ).order_by(Charge.created_at.desc()).limit(5).all()
+        
+        recent_paid_charge = None
+        has_paid = False
+        for ch in recent_charges:
+            # Check if this charge has recent payments
+            recent_payments = db.query(Payment).filter(
+                Payment.invoice_id == ch.invoice_id,
+                Payment.status == PaymentStatus.COMPLETED,
+                Payment.is_active == True,
+                Payment.created_at >= two_hours_ago
+            ).all()
+            
+            if recent_payments:
+                # Check all payments on this invoice, not just recent ones
+                all_payments = db.query(Payment).filter(
+                    Payment.invoice_id == ch.invoice_id,
+                    Payment.status == PaymentStatus.COMPLETED,
+                    Payment.is_active == True
+                ).all()
+                total_paid_all = sum(p.amount for p in all_payments)
+                
+                if total_paid_all >= ch.total_amount:
+                    recent_paid_charge = ch
+                    has_paid = True
+                    break
+        
+        # Fallback: check for today's charges using the standard method
+        if not has_paid:
+            has_paid, charge, invoice = has_paid_for_service(
+                db, patient_id, ChargeType.CONSULTATION,
+                encounter_id=None,
+                check_today_only=True
+            )
+            if charge:
+                recent_paid_charge = charge
+        
+        payment_paid = has_paid
+        
+        if not payment_paid:
+            # If no charge exists for today, create one
+            if not recent_paid_charge:
+                try:
+                    create_charge_for_consultation(db, patient_id, current_user.id, encounter_id=None)
+                except Exception as billing_error:
+                    print(f"Warning: Unable to seed consultation charge for patient {patient_id}: {billing_error}")
+            # Redirect to consultation fee payment page
+            return RedirectResponse(
+                url=f"/patients/{patient_id}/pay/consultation?return_to=triage",
+                status_code=status.HTTP_302_FOUND
+            )
+    else:
+        payment_paid = True
     
     # Helper function to convert string to int, handling empty strings
     def str_to_int(value: Optional[str]) -> Optional[int]:

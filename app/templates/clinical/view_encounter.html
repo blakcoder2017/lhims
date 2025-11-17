@@ -3,6 +3,35 @@
 
     {% include "includes/sidebar_navbar.html" %} 
 
+    <style>
+        .encounter-summary-card {
+            position: sticky;
+            top: 90px;
+            z-index: 1030;
+            max-height: calc(100vh - 130px);
+            overflow-y: auto;
+        }
+        .text-truncate-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .text-truncate-3 {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        @media (max-width: 991.98px) {
+            .encounter-summary-card {
+                position: static;
+                max-height: none;
+                overflow: visible;
+            }
+        }
+    </style>
+
     <div class="content-wrapper">
         <section class="content-header">
             <div class="container-fluid">
@@ -152,6 +181,105 @@
                             <p>{{ encounter.plan }}</p>
                         </div>
                         {% endif %}
+                    </div>
+                </div>
+
+                <!-- Differential Diagnosis (G-STG) -->
+                <div class="card card-secondary card-outline" id="gstgDifferentialsCard">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-project-diagram mr-1"></i>
+                            Differential Diagnosis (G-STG)
+                        </h3>
+                        <div class="card-tools">
+                            <span class="badge badge-primary">Beta</span>
+                            {% if differential_data and differential_data.suggestions %}
+                            <a href="{{ url_for('view_differential_report', encounter_id=encounter.id) }}" class="btn btn-sm btn-outline-light ml-2" target="_blank">
+                                <i class="fas fa-file-alt mr-1"></i> Report
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="gstgAlert" class="alert d-none" role="alert"></div>
+                        <div class="row">
+                            <div class="col-md-5 border-right">
+                                <div class="form-group">
+                                    <label for="gstgSummaryInput">Clinical Summary *</label>
+                                    <textarea class="form-control" id="gstgSummaryInput" rows="6" placeholder="Summarize the case...">{{ (differential_data.clinical_summary if differential_data else (encounter.assessment or encounter.history_of_present_illness or encounter.chief_complaint)) or '' }}</textarea>
+                                    <small class="form-text text-muted">
+                                        Auto-filled from assessment; edit before generating to improve accuracy.
+                                    </small>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-4">
+                                        <label for="gstgAgeInput">Age (years)</label>
+                                        <input type="number" min="0" class="form-control" id="gstgAgeInput" value="{{ patient_age.years if patient_age else '' }}">
+                                    </div>
+                                    <div class="form-group col-md-4">
+                                        <label for="gstgSexInput">Sex</label>
+                                        <select class="form-control" id="gstgSexInput">
+                                            <option value="">—</option>
+                                            <option value="male" {% if patient.gender and patient.gender|lower == 'male' %}selected{% endif %}>Male</option>
+                                            <option value="female" {% if patient.gender and patient.gender|lower == 'female' %}selected{% endif %}>Female</option>
+                                            <option value="other" {% if patient.gender and patient.gender|lower not in ['male','female'] %}selected{% endif %}>Other</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group col-md-4">
+                                        <label for="gstgVitalsInput">Key Vitals</label>
+                                        <input type="text" class="form-control" id="gstgVitalsInput" placeholder="Temp 38.5°C, BP 160/100">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="gstgLabsInput">Key Labs/Findings</label>
+                                    <textarea class="form-control" id="gstgLabsInput" rows="2" placeholder="Hb 7.8 g/dL, RBS 24 mmol/L"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label for="gstgNotesInput">Clinical Notes (optional)</label>
+                                    <textarea class="form-control" id="gstgNotesInput" rows="2" placeholder="Notes for the care team">{{ differential_data.notes if differential_data and differential_data.notes else '' }}</textarea>
+                                </div>
+                                <button class="btn btn-secondary btn-block" id="gstgGenerateBtn">
+                                    <i class="fas fa-magic mr-1"></i> Generate from Ghana STG
+                                </button>
+                                <small class="text-muted d-block mt-2" id="gstgGenerateStatus">
+                                    Provide a concise summary plus vitals/labs to improve matching accuracy.
+                                </small>
+                            </div>
+                            <div class="col-md-7">
+                                <div id="gstgResultsPlaceholder" class="alert alert-info mb-3 {% if differential_data and differential_data.suggestions %}d-none{% endif %}">
+                                    <i class="fas fa-info-circle mr-1"></i>
+                                    No suggestions yet. Click the button to pull guideline-aligned differentials.
+                                </div>
+                                <div class="table-responsive {% if not (differential_data and differential_data.suggestions) %}d-none{% endif %}" id="gstgResultsWrapper">
+                                    <table class="table table-sm table-hover">
+                                        <thead class="thead-light">
+                                            <tr>
+                                                <th>Diagnosis</th>
+                                                <th>STG Reference</th>
+                                                <th>Score</th>
+                                                <th>Flags</th>
+                                                <th>Status</th>
+                                                <th style="width: 170px;">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="gstgResultsBody"></tbody>
+                                    </table>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-3">
+                                    <div>
+                                        <button class="btn btn-success" id="gstgSaveBtn" disabled>
+                                            <i class="fas fa-save mr-1"></i> Save selections
+                                        </button>
+                                        <button class="btn btn-outline-secondary btn-sm ml-2" id="gstgResetBtn">
+                                            Reset
+                                        </button>
+                                    </div>
+                                    <small class="text-muted">
+                                        Tag items as <span class="badge badge-success">Working Dx</span> or <span class="badge badge-secondary">Rule Out</span>, then save.
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -378,455 +506,536 @@
                 </div>
                 {% endif %}
 
-                <!-- Orders Section -->
-                <div class="row">
-                    <!-- Lab Orders -->
-                    <div class="col-md-6">
-                        <div class="card card-warning card-outline">
-                            <div class="card-header">
-                                <h3 class="card-title"><i class="fas fa-vial mr-1"></i> Lab Orders</h3>
-                                <div class="card-tools">
-                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addLabOrder">
-                                        <i class="fas fa-plus"></i> Add Order
-                                    </button>
+                <!-- Orders & Summary Layout -->
+                <div class="row align-items-start">
+                    <div class="col-12 col-lg-9 order-lg-1 order-2">
+                        <div class="row">
+                            <div class="col-12 col-xl-6 mb-4">
+                                <div class="card card-warning card-outline h-100">
+                                    <div class="card-header">
+                                        <h3 class="card-title"><i class="fas fa-vial mr-1"></i> Lab Orders</h3>
+                                        <div class="card-tools">
+                                            <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addLabOrder">
+                                                <i class="fas fa-plus"></i> Add Order
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="addLabOrder" class="collapse">
+                                            <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/lab-orders/create">
+                                                <div class="form-group">
+                                                    <label>Lab Test <span class="text-danger">*</span></label>
+                                                    <select class="form-control" id="labServiceSelect" name="service_pricing_id" required>
+                                                        <option value="">-- Select Lab Test --</option>
+                                                        {% for service in lab_services %}
+                                                        <option value="{{ service.id }}"
+                                                                data-name="{{ service.service_name }}"
+                                                                data-code="{{ service.service_code or '' }}"
+                                                                data-price="{{ service.unit_price }}">
+                                                            {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
+                                                        </option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <small class="form-text text-muted" id="labSelectedPriceText">Select a lab test to see pricing.</small>
+                                                </div>
+                                                <input type="hidden" name="test_name" id="lab_test_name">
+                                                <input type="hidden" name="test_code" id="lab_test_code">
+                                                <div class="form-group">
+                                                    <label>Priority</label>
+                                                    <select class="form-control" name="priority">
+                                                        <option value="routine">Routine</option>
+                                                        <option value="urgent">Urgent</option>
+                                                        <option value="stat">STAT</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Instructions (optional)</label>
+                                                    <textarea class="form-control" name="instructions" rows="2" placeholder="Special instructions for lab staff"></textarea>
+                                                </div>
+                                                <button type="submit" class="btn btn-warning btn-sm">Add Lab Order</button>
+                                            </form>
+                                            <hr>
+                                        </div>
+                                        {% if encounter.lab_orders %}
+                                            <div class="table-responsive">
+                                                <table class="table table-sm table-bordered">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Test Name</th>
+                                                            <th>Code</th>
+                                                            <th>Status</th>
+                                                            <th>Ordered</th>
+                                                            <th>Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for order in encounter.lab_orders %}
+                                                        <tr class="{% if order.status.value == 'completed' %}table-success{% elif order.status.value == 'in_progress' %}table-warning{% endif %}">
+                                                            <td><strong>{{ order.test_name }}</strong></td>
+                                                            <td>{{ order.test_code or '-' }}</td>
+                                                            <td>
+                                                                <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">
+                                                                    {{ order.status.value.replace('_', ' ').title() }}
+                                                                </span>
+                                                            </td>
+                                                            <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                            <td>
+                                                                <a href="/lab/orders/{{ order.id }}" class="btn btn-xs btn-primary" target="_blank">
+                                                                    <i class="fas fa-eye"></i> View
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        {% else %}
+                                            <p class="text-muted">No lab orders</p>
+                                        {% endif %}
+                                    </div>
                                 </div>
                             </div>
-                            <div class="card-body">
-                                <div id="addLabOrder" class="collapse">
-                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/lab-orders/create">
-                                        <div class="form-group">
-                                            <label>Lab Test <span class="text-danger">*</span></label>
-                                            <select class="form-control" id="labServiceSelect" name="service_pricing_id" required>
-                                                <option value="">-- Select Lab Test --</option>
-                                                {% for service in lab_services %}
-                                                <option value="{{ service.id }}"
-                                                        data-name="{{ service.service_name }}"
-                                                        data-code="{{ service.service_code or '' }}"
-                                                        data-price="{{ service.unit_price }}">
-                                                    {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
-                                                </option>
-                                                {% endfor %}
-                                            </select>
-                                            <small class="form-text text-muted" id="labSelectedPriceText">Select a lab test to see pricing.</small>
+
+                            <div class="col-12 col-xl-6 mb-4">
+                                <div class="card card-success card-outline h-100">
+                                    <div class="card-header">
+                                        <h3 class="card-title"><i class="fas fa-x-ray mr-1"></i> Radiology Orders</h3>
+                                        <div class="card-tools">
+                                            <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addRadiologyOrder">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
                                         </div>
-                                        <input type="hidden" name="test_name" id="lab_test_name">
-                                        <input type="hidden" name="test_code" id="lab_test_code">
-                                        <div class="form-group">
-                                            <label>Priority</label>
-                                            <select class="form-control" name="priority">
-                                                <option value="routine">Routine</option>
-                                                <option value="urgent">Urgent</option>
-                                                <option value="stat">STAT</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Instructions (optional)</label>
-                                            <textarea class="form-control" name="instructions" rows="2" placeholder="Special instructions for lab staff"></textarea>
-                                        </div>
-                                        <button type="submit" class="btn btn-warning btn-sm">Add Lab Order</button>
-                                    </form>
-                                    <hr>
-                                </div>
-                                {% if encounter.lab_orders %}
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-bordered">
-                                            <thead>
-                                                <tr>
-                                                    <th>Test Name</th>
-                                                    <th>Code</th>
-                                                    <th>Status</th>
-                                                    <th>Ordered</th>
-                                                    <th>Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {% for order in encounter.lab_orders %}
-                                                <tr class="{% if order.status.value == 'completed' %}table-success{% elif order.status.value == 'in_progress' %}table-warning{% endif %}">
-                                                    <td><strong>{{ order.test_name }}</strong></td>
-                                                    <td>{{ order.test_code or '-' }}</td>
-                                                    <td>
-                                                        <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">
-                                                            {{ order.status.value.replace('_', ' ').title() }}
-                                                        </span>
-                                                    </td>
-                                                    <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                                                    <td>
-                                                        <a href="/lab/orders/{{ order.id }}" class="btn btn-xs btn-primary" target="_blank">
-                                                            <i class="fas fa-eye"></i> View
-                                                        </a>
-                                                    </td>
-                                                </tr>
-                                                {% endfor %}
-                                            </tbody>
-                                        </table>
                                     </div>
-                                {% else %}
-                                    <p class="text-muted">No lab orders</p>
-                                {% endif %}
+                                    <div class="card-body">
+                                        <div id="addRadiologyOrder" class="collapse">
+                                            <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/radiology-orders/create">
+                                                <div class="form-group">
+                                                    <label>Radiology Study <span class="text-danger">*</span></label>
+                                                    <select class="form-control" id="radiologyServiceSelect" name="service_pricing_id" required>
+                                                        <option value="">-- Select Radiology Study --</option>
+                                                        {% for service in radiology_services %}
+                                                        <option value="{{ service.id }}"
+                                                                data-name="{{ service.service_name }}"
+                                                                data-code="{{ service.service_code or '' }}"
+                                                                data-price="{{ service.unit_price }}">
+                                                            {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
+                                                        </option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <small class="form-text text-muted" id="radiologySelectedPriceText">Select a study to see pricing.</small>
+                                                </div>
+                                                <input type="hidden" name="study_type" id="radiology_study_name">
+                                                <input type="hidden" name="study_code" id="radiology_study_code">
+                                                <div class="form-group">
+                                                    <label>Body Part (optional)</label>
+                                                    <input type="text" class="form-control" name="body_part">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Priority</label>
+                                                    <select class="form-control" name="priority">
+                                                        <option value="routine">Routine</option>
+                                                        <option value="urgent">Urgent</option>
+                                                        <option value="stat">STAT</option>
+                                                    </select>
+                                                </div>
+                                                <button type="submit" class="btn btn-success btn-sm">Add Radiology Order</button>
+                                            </form>
+                                            <hr>
+                                        </div>
+                                        {% if encounter.radiology_orders %}
+                                            {% for order in encounter.radiology_orders %}
+                                            <div class="callout callout-success mb-3">
+                                                <h5>{{ order.study_type }}</h5>
+                                                <p><small>Status: <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">{{ order.status.value|title }}</span></small></p>
+                                                {% if order.body_part %}
+                                                <p><small>Body Part: {{ order.body_part }}</small></p>
+                                                {% endif %}
+                                                {% if order.report %}
+                                                <p><strong>Report:</strong> {{ order.report[:100] }}{% if order.report|length > 100 %}...{% endif %}</p>
+                                                {% endif %}
+                                                {% set order_images = order.images|selectattr('is_active', 'equalto', True)|list %}
+                                                {% if order_images %}
+                                                <div class="mt-2">
+                                                    <strong><i class="fas fa-images mr-1"></i> Images ({{ order_images|length }}):</strong>
+                                                    <div class="row mt-2">
+                                                        {% for image in order_images[:4] %}
+                                                        <div class="col-6 col-md-3 mb-2">
+                                                            <div class="card">
+                                                                <div class="card-body p-2 text-center">
+                                                                    {% if image.thumbnail_path %}
+                                                                    <a href="{{ url_for('view_image', image_id=image.id) }}" target="_blank" title="View {{ image.image_number }}">
+                                                                        <img src="{{ url_for('static', path=image.thumbnail_path) }}" class="img-fluid" alt="{{ image.image_number }}" style="max-height: 80px; cursor: pointer;">
+                                                                    </a>
+                                                                    {% else %}
+                                                                    <a href="{{ url_for('view_image', image_id=image.id) }}" target="_blank" class="text-decoration-none" title="View {{ image.image_number }}">
+                                                                        <div class="bg-secondary text-white p-3" style="cursor: pointer;">
+                                                                            <i class="fas fa-image"></i>
+                                                                            <p class="mb-0 small">{{ image.file_format or 'DICOM' }}</p>
+                                                                        </div>
+                                                                    </a>
+                                                                    {% endif %}
+                                                                    <p class="mb-0 mt-1 small text-muted">{{ image.image_number }}</p>
+                                                                    {% if image.body_part %}
+                                                                    <p class="mb-0 small text-muted">{{ image.body_part }}</p>
+                                                                    {% endif %}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                    {% if order_images|length > 4 %}
+                                                    <p class="small mt-2">
+                                                        <a href="{{ url_for('pacs_dashboard') }}?order_id={{ order.id }}" target="_blank" class="text-primary">
+                                                            View all {{ order_images|length }} images <i class="fas fa-external-link-alt"></i>
+                                                        </a>
+                                                    </p>
+                                                    {% endif %}
+                                                </div>
+                                                {% else %}
+                                                <p class="text-muted small mt-2"><i class="fas fa-info-circle"></i> No images uploaded yet</p>
+                                                {% endif %}
+                                                <div class="mt-2">
+                                                    <a href="{{ url_for('view_radiology_order', order_id=order.id) }}" class="btn btn-sm btn-outline-primary" target="_blank">
+                                                        <i class="fas fa-eye"></i> View Details
+                                                    </a>
+                                                    {% if order_images %}
+                                                    <a href="{{ url_for('pacs_dashboard') }}?order_id={{ order.id }}" class="btn btn-sm btn-outline-info" target="_blank">
+                                                        <i class="fas fa-images"></i> View Images
+                                                    </a>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        {% else %}
+                                            <p class="text-muted">No radiology orders</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Radiology Orders -->
-                    <div class="col-md-6">
-                        <div class="card card-success card-outline">
-                            <div class="card-header">
-                                <h3 class="card-title"><i class="fas fa-x-ray mr-1"></i> Radiology Orders</h3>
-                                <div class="card-tools">
-                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addRadiologyOrder">
-                                        <i class="fas fa-plus"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <div id="addRadiologyOrder" class="collapse">
-                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/radiology-orders/create">
-                                        <div class="form-group">
-                                            <label>Radiology Study <span class="text-danger">*</span></label>
-                                            <select class="form-control" id="radiologyServiceSelect" name="service_pricing_id" required>
-                                                <option value="">-- Select Radiology Study --</option>
-                                                {% for service in radiology_services %}
-                                                <option value="{{ service.id }}"
-                                                        data-name="{{ service.service_name }}"
-                                                        data-code="{{ service.service_code or '' }}"
-                                                        data-price="{{ service.unit_price }}">
-                                                    {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
-                                                </option>
-                                                {% endfor %}
-                                            </select>
-                                            <small class="form-text text-muted" id="radiologySelectedPriceText">Select a study to see pricing.</small>
+                        <div class="row">
+                            <div class="col-12 col-xl-4 mb-4">
+                                <div class="card card-danger h-100">
+                                    <div class="card-header">
+                                        <h3 class="card-title"><i class="fas fa-pills mr-1"></i> Prescriptions</h3>
+                                        <div class="card-tools">
+                                            <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addPrescription">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
                                         </div>
-                                        <input type="hidden" name="study_type" id="radiology_study_name">
-                                        <input type="hidden" name="study_code" id="radiology_study_code">
-                                        <div class="form-group">
-                                            <label>Body Part (optional)</label>
-                                            <input type="text" class="form-control" name="body_part">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Priority</label>
-                                            <select class="form-control" name="priority">
-                                                <option value="routine">Routine</option>
-                                                <option value="urgent">Urgent</option>
-                                                <option value="stat">STAT</option>
-                                            </select>
-                                        </div>
-                                        <button type="submit" class="btn btn-success btn-sm">Add Radiology Order</button>
-                                    </form>
-                                    <hr>
-                                </div>
-                                {% if encounter.radiology_orders %}
-                                    {% for order in encounter.radiology_orders %}
-                                    <div class="callout callout-success mb-3">
-                                        <h5>{{ order.study_type }}</h5>
-                                        <p><small>Status: <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">{{ order.status.value|title }}</span></small></p>
-                                        {% if order.body_part %}
-                                        <p><small>Body Part: {{ order.body_part }}</small></p>
-                                        {% endif %}
-                                        {% if order.report %}
-                                        <p><strong>Report:</strong> {{ order.report[:100] }}{% if order.report|length > 100 %}...{% endif %}</p>
-                                        {% endif %}
-                                        
-                                        <!-- PACS Images for this order -->
-                                        {% set order_images = order.images|selectattr('is_active', 'equalto', True)|list %}
-                                        {% if order_images %}
-                                        <div class="mt-2">
-                                            <strong><i class="fas fa-images mr-1"></i> Images ({{ order_images|length }}):</strong>
-                                            <div class="row mt-2">
-                                                {% for image in order_images[:4] %}
-                                                <div class="col-6 col-md-3 mb-2">
-                                                    <div class="card">
-                                                        <div class="card-body p-2 text-center">
-                                                            {% if image.thumbnail_path %}
-                                                            <a href="{{ url_for('view_image', image_id=image.id) }}" target="_blank" title="View {{ image.image_number }}">
-                                                                <img src="{{ url_for('static', path=image.thumbnail_path) }}" class="img-fluid" alt="{{ image.image_number }}" style="max-height: 80px; cursor: pointer;">
-                                                            </a>
-                                                            {% else %}
-                                                            <a href="{{ url_for('view_image', image_id=image.id) }}" target="_blank" class="text-decoration-none" title="View {{ image.image_number }}">
-                                                                <div class="bg-secondary text-white p-3" style="cursor: pointer;">
-                                                                    <i class="fas fa-image"></i>
-                                                                    <p class="mb-0 small">{{ image.file_format or 'DICOM' }}</p>
-                                                                </div>
-                                                            </a>
-                                                            {% endif %}
-                                                            <p class="mb-0 mt-1 small text-muted">{{ image.image_number }}</p>
-                                                            {% if image.body_part %}
-                                                            <p class="mb-0 small text-muted">{{ image.body_part }}</p>
-                                                            {% endif %}
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="addPrescription" class="collapse">
+                                            <form id="prescriptionForm" method="POST" action="/api/v1/encounters/{{ encounter.id }}/prescriptions/create">
+                                                <div id="prescriptionFormAlert" class="alert" style="display: none;"></div>
+                                                <div class="form-group" style="position: relative;">
+                                                    <label>Medication *</label>
+                                                    <input type="hidden" name="medication_id" id="medication_id">
+                                                    <input type="text" class="form-control" name="medication_name" id="medication_name"
+                                                           placeholder="Search medication from inventory or type free text"
+                                                           autocomplete="off" required>
+                                                    <small class="form-text text-muted">
+                                                        <i class="fas fa-info-circle"></i> Search from inventory or type medication name manually
+                                                    </small>
+                                                    <div id="medication_search_results" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 300px; overflow-y: auto; width: 100%; background: white; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
+                                                </div>
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <div class="form-group">
+                                                            <label>Dosage *</label>
+                                                            <input type="text" class="form-control" name="dosage" id="dosage" placeholder="e.g., 500mg" required>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <div class="form-group">
+                                                            <label>Frequency *</label>
+                                                            <input type="text" class="form-control" name="frequency" id="frequency" placeholder="e.g., twice daily" required>
                                                         </div>
                                                     </div>
                                                 </div>
+                                                <div class="form-group">
+                                                    <label>Duration *</label>
+                                                    <input type="text" class="form-control" name="duration" id="duration" placeholder="e.g., 7 days" required>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Quantity (optional)</label>
+                                                    <input type="number" class="form-control" name="quantity" id="quantity" placeholder="e.g., 30">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Instructions (optional)</label>
+                                                    <textarea class="form-control" name="instructions" id="instructions" rows="2" placeholder="Patient instructions"></textarea>
+                                                </div>
+                                                <button type="submit" class="btn btn-danger btn-sm" id="prescriptionSubmitBtn">
+                                                    <i class="fas fa-plus"></i> Add Prescription
+                                                </button>
+                                                <button type="button" class="btn btn-secondary btn-sm" onclick="clearPrescriptionForm()">
+                                                    <i class="fas fa-times"></i> Clear
+                                                </button>
+                                            </form>
+                                            <hr>
+                                        </div>
+                                        <div id="prescriptionsList">
+                                            {% if encounter.prescriptions %}
+                                                {% for prescription in encounter.prescriptions %}
+                                                <div class="callout callout-danger prescription-item" data-prescription-id="{{ prescription.id }}">
+                                                    <h5>{{ prescription.medication_name }}</h5>
+                                                    <p><small><strong>Dosage:</strong> {{ prescription.dosage }} | <strong>Frequency:</strong> {{ prescription.frequency }} | <strong>Duration:</strong> {{ prescription.duration }}</small></p>
+                                                    {% if prescription.quantity %}
+                                                    <p><small><strong>Quantity:</strong> {{ prescription.quantity }}</small></p>
+                                                    {% endif %}
+                                                    {% if prescription.instructions %}
+                                                    <p><small><strong>Instructions:</strong> {{ prescription.instructions }}</small></p>
+                                                    {% endif %}
+                                                    <p><small>Status: <span class="badge badge-{{ 'success' if prescription.status.value == 'completed' else 'warning' if prescription.status.value == 'in_progress' else 'info' }}">{{ prescription.status.value|title }}</span></small></p>
+                                                </div>
                                                 {% endfor %}
-                                            </div>
-                                            {% if order_images|length > 4 %}
-                                            <p class="small mt-2">
-                                                <a href="{{ url_for('pacs_dashboard') }}?order_id={{ order.id }}" target="_blank" class="text-primary">
-                                                    View all {{ order_images|length }} images <i class="fas fa-external-link-alt"></i>
-                                                </a>
-                                            </p>
+                                            {% else %}
+                                                <p class="text-muted" id="noPrescriptionsMsg">No prescriptions</p>
                                             {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {% if user_role in ['Doctor', 'Clinician', 'Admin'] %}
+                            <div class="col-12 col-xl-4 mb-4">
+                                <div class="card card-warning h-100">
+                                    <div class="card-header">
+                                        <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> Procedures</h3>
+                                        <div class="card-tools">
+                                            <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addProcedure">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="addProcedure" class="collapse">
+                                            <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/procedures/create">
+                                                <div class="form-group">
+                                                    <label>Procedure Name *</label>
+                                                    <select class="form-control" name="procedure_name" id="procedure_name" required>
+                                                        <option value="">-- Select Procedure --</option>
+                                                        {% for proc_name in procedure_names %}
+                                                        <option value="{{ proc_name }}">{{ proc_name }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <small class="form-text text-muted">Or type procedure name manually</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Procedure Code (optional)</label>
+                                                    <input type="text" class="form-control" name="procedure_code" placeholder="e.g., CPT code">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Procedure Type *</label>
+                                                    <select class="form-control" name="procedure_type" required>
+                                                        <option value="surgical">Surgical</option>
+                                                        <option value="non_surgical">Non-Surgical</option>
+                                                        <option value="diagnostic">Diagnostic</option>
+                                                        <option value="therapeutic">Therapeutic</option>
+                                                        <option value="minor">Minor</option>
+                                                        <option value="major">Major</option>
+                                                    </select>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Indication (optional)</label>
+                                                    <textarea class="form-control" name="indication" rows="2" placeholder="Clinical indication for procedure"></textarea>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Description (optional)</label>
+                                                    <textarea class="form-control" name="description" rows="2" placeholder="Detailed description"></textarea>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Location (optional)</label>
+                                                    <input type="text" class="form-control" name="location" placeholder="e.g., Operating Room 1">
+                                                </div>
+                                                <button type="submit" class="btn btn-warning btn-sm">
+                                                    <i class="fas fa-plus"></i> Add Procedure
+                                                </button>
+                                            </form>
+                                            <hr>
+                                        </div>
+                                        {% if procedures %}
+                                            {% for procedure in procedures %}
+                                            <div class="callout callout-warning">
+                                                <h5>{{ procedure.procedure_name }}</h5>
+                                                <p><small>
+                                                    <strong>Type:</strong> {{ procedure.procedure_type.value|title }} | 
+                                                    <strong>Status:</strong> 
+                                                    <span class="badge badge-{% if procedure.status.value == 'completed' %}success{% elif procedure.status.value == 'in_progress' %}warning{% else %}info{% endif %}">
+                                                        {{ procedure.status.value|title }}
+                                                    </span>
+                                                </small></p>
+                                                {% if procedure.procedure_code %}
+                                                <p><small><strong>Code:</strong> {{ procedure.procedure_code }}</small></p>
+                                                {% endif %}
+                                                {% if procedure.indication %}
+                                                <p><small><strong>Indication:</strong> {{ procedure.indication }}</small></p>
+                                                {% endif %}
+                                                {% if procedure.location %}
+                                                <p><small><strong>Location:</strong> {{ procedure.location }}</small></p>
+                                                {% endif %}
+                                                {% if procedure.scheduled_date %}
+                                                <p><small><strong>Scheduled:</strong> {{ procedure.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</small></p>
+                                                {% endif %}
+                                            </div>
+                                            {% endfor %}
+                                        {% else %}
+                                            <p class="text-muted">No procedures</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            {% if antenatal_services %}
+                            <div class="col-12 col-xl-4 mb-4">
+                                <div class="card card-pink card-outline h-100">
+                                    <div class="card-header">
+                                        <h3 class="card-title"><i class="fas fa-baby mr-1"></i> Antenatal Services</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/antenatal-orders/create">
+                                            <div class="form-group">
+                                                <label>Select Antenatal Package *</label>
+                                                <select class="form-control" name="service_pricing_id" required>
+                                                    <option value="">-- Select Package --</option>
+                                                    {% for service in antenatal_services %}
+                                                    <option value="{{ service.id }}">
+                                                        {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
+                                                    </option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group col-md-6">
+                                                    <label>Quantity</label>
+                                                    <input type="number" class="form-control" name="quantity" value="1" min="1">
+                                                </div>
+                                                <div class="form-group col-md-6">
+                                                    <label>Notes (optional)</label>
+                                                    <input type="text" class="form-control" name="notes" placeholder="Notes">
+                                                </div>
+                                            </div>
+                                            <button type="submit" class="btn btn-sm text-white" style="background-color:#d81b60;">
+                                                <i class="fas fa-plus"></i> Add Antenatal Service
+                                            </button>
+                                        </form>
+                                        <hr>
+                                        {% if antenatal_charges %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Service</th>
+                                                        <th>Qty</th>
+                                                        <th>Amount</th>
+                                                        <th>Date</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for charge in antenatal_charges %}
+                                                    <tr>
+                                                        <td>{{ charge.description }}</td>
+                                                        <td>{{ charge.quantity }}</td>
+                                                        <td>GHS {{ "%.2f"|format(charge.total_amount) }}</td>
+                                                        <td>{{ charge.created_at.strftime('%Y-%m-%d') }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
                                         </div>
                                         {% else %}
-                                        <p class="text-muted small mt-2"><i class="fas fa-info-circle"></i> No images uploaded yet</p>
+                                        <p class="text-muted mb-0">No antenatal services recorded.</p>
                                         {% endif %}
-                                        
-                                        <div class="mt-2">
-                                            <a href="{{ url_for('view_radiology_order', order_id=order.id) }}" class="btn btn-sm btn-outline-primary" target="_blank">
-                                                <i class="fas fa-eye"></i> View Details
-                                            </a>
-                                            {% if order_images %}
-                                            <a href="{{ url_for('pacs_dashboard') }}?order_id={{ order.id }}" class="btn btn-sm btn-outline-info" target="_blank">
-                                                <i class="fas fa-images"></i> View Images
-                                            </a>
-                                            {% endif %}
-                                        </div>
                                     </div>
-                                    {% endfor %}
-                                {% else %}
-                                    <p class="text-muted">No radiology orders</p>
-                                {% endif %}
+                                </div>
                             </div>
+                            {% endif %}
                         </div>
                     </div>
 
-                    <!-- Prescriptions -->
-                    <div class="col-md-4">
-                        <div class="card card-danger">
-                            <div class="card-header">
-                                <h3 class="card-title"><i class="fas fa-pills mr-1"></i> Prescriptions</h3>
-                                <div class="card-tools">
-                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addPrescription">
-                                        <i class="fas fa-plus"></i>
-                                    </button>
-                                </div>
+                    <div class="col-12 col-lg-3 order-lg-2 order-1 mb-4">
+                        <div class="card card-primary card-outline encounter-summary-card h-100">
+                            <div class="card-header bg-primary text-white">
+                                <h3 class="card-title">
+                                    <i class="fas fa-clipboard-list mr-1"></i> Encounter Summary
+                                </h3>
                             </div>
-                            <div class="card-body">
-                                <div id="addPrescription" class="collapse">
-                                    <form id="prescriptionForm" method="POST" action="/api/v1/encounters/{{ encounter.id }}/prescriptions/create">
-                                        <div id="prescriptionFormAlert" class="alert" style="display: none;"></div>
-                                        <div class="form-group" style="position: relative;">
-                                            <label>Medication *</label>
-                                            <input type="hidden" name="medication_id" id="medication_id">
-                                            <input type="text" class="form-control" name="medication_name" id="medication_name" 
-                                                   placeholder="Search medication from inventory or type free text" 
-                                                   autocomplete="off" required>
-                                            <small class="form-text text-muted">
-                                                <i class="fas fa-info-circle"></i> Search from inventory or type medication name manually
-                                            </small>
-                                            <div id="medication_search_results" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 300px; overflow-y: auto; width: 100%; background: white; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
-                                        </div>
-                                        <div class="row">
-                                            <div class="col-md-6">
-                                                <div class="form-group">
-                                                    <label>Dosage *</label>
-                                                    <input type="text" class="form-control" name="dosage" id="dosage" placeholder="e.g., 500mg" required>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-6">
-                                                <div class="form-group">
-                                                    <label>Frequency *</label>
-                                                    <input type="text" class="form-control" name="frequency" id="frequency" placeholder="e.g., twice daily" required>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Duration *</label>
-                                            <input type="text" class="form-control" name="duration" id="duration" placeholder="e.g., 7 days" required>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Quantity (optional)</label>
-                                            <input type="number" class="form-control" name="quantity" id="quantity" placeholder="e.g., 30">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Instructions (optional)</label>
-                                            <textarea class="form-control" name="instructions" id="instructions" rows="2" placeholder="Patient instructions"></textarea>
-                                        </div>
-                                        <button type="submit" class="btn btn-danger btn-sm" id="prescriptionSubmitBtn">
-                                            <i class="fas fa-plus"></i> Add Prescription
-                                        </button>
-                                        <button type="button" class="btn btn-secondary btn-sm" onclick="clearPrescriptionForm()">
-                                            <i class="fas fa-times"></i> Clear
-                                        </button>
-                                    </form>
-                                    <hr>
+                            <div class="card-body pb-0">
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">Patient</small>
+                                    <p class="mb-1">
+                                        <strong>{{ patient.first_name }} {{ patient.last_name }}</strong><br>
+                                        <span class="text-muted">#{{ patient.id }}{% if patient_age %} &bull; {{ patient_age.display }}{% endif %}</span>
+                                    </p>
+                                    <span class="badge badge-info">{{ patient.gender }}</span>
                                 </div>
-                                <div id="prescriptionsList">
-                                    {% if encounter.prescriptions %}
-                                        {% for prescription in encounter.prescriptions %}
-                                        <div class="callout callout-danger prescription-item" data-prescription-id="{{ prescription.id }}">
-                                            <h5>{{ prescription.medication_name }}</h5>
-                                            <p><small><strong>Dosage:</strong> {{ prescription.dosage }} | <strong>Frequency:</strong> {{ prescription.frequency }} | <strong>Duration:</strong> {{ prescription.duration }}</small></p>
-                                            {% if prescription.quantity %}
-                                            <p><small><strong>Quantity:</strong> {{ prescription.quantity }}</small></p>
-                                            {% endif %}
-                                            {% if prescription.instructions %}
-                                            <p><small><strong>Instructions:</strong> {{ prescription.instructions }}</small></p>
-                                            {% endif %}
-                                            <p><small>Status: <span class="badge badge-{{ 'success' if prescription.status.value == 'completed' else 'warning' if prescription.status.value == 'in_progress' else 'info' }}">{{ prescription.status.value|title }}</span></small></p>
-                                        </div>
+                                {% if encounter.chief_complaint %}
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">Chief Complaint</small>
+                                    <p class="mb-0">{{ encounter.chief_complaint }}</p>
+                                </div>
+                                {% endif %}
+                                {% if encounter.history_of_present_illness %}
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">History of Present Illness</small>
+                                    <p class="mb-0 text-truncate-3">{{ encounter.history_of_present_illness }}</p>
+                                </div>
+                                {% endif %}
+                                {% if encounter.assessment %}
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">Assessment</small>
+                                    <p class="mb-0 text-truncate-3">{{ encounter.assessment }}</p>
+                                </div>
+                                {% endif %}
+                                {% if encounter.plan %}
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">Plan</small>
+                                    <p class="mb-0 text-truncate-3">{{ encounter.plan }}</p>
+                                </div>
+                                {% endif %}
+                                {% if encounter.primary_diagnosis_code or secondary_diagnoses %}
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">Diagnoses</small>
+                                    {% if encounter.primary_diagnosis_code %}
+                                    <p class="mb-1">
+                                        <span class="badge badge-primary">Primary</span>
+                                        <strong>{{ encounter.primary_diagnosis_code }}</strong><br>
+                                        <small class="text-muted">{{ encounter.primary_diagnosis_description }}</small>
+                                    </p>
+                                    {% endif %}
+                                    {% if secondary_diagnoses %}
+                                        {% for diagnosis in secondary_diagnoses %}
+                                        <p class="mb-1">
+                                            <span class="badge badge-secondary">Secondary</span>
+                                            {% if diagnosis.get('code') %}<strong>{{ diagnosis.code }}</strong> &mdash; {% endif %}
+                                            <small>{{ diagnosis.get('description', diagnosis) }}</small>
+                                        </p>
                                         {% endfor %}
-                                    {% else %}
-                                        <p class="text-muted" id="noPrescriptionsMsg">No prescriptions</p>
                                     {% endif %}
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Procedures -->
-                    {% if user_role in ['Doctor', 'Clinician', 'Admin'] %}
-                    <div class="col-md-4">
-                        <div class="card card-warning">
-                            <div class="card-header">
-                                <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> Procedures</h3>
-                                <div class="card-tools">
-                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addProcedure">
-                                        <i class="fas fa-plus"></i>
-                                    </button>
+                                {% endif %}
+                                {% if encounter.allergies %}
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">Allergies</small>
+                                    <p class="mb-0 text-danger">{{ encounter.allergies }}</p>
                                 </div>
-                            </div>
-                            <div class="card-body">
-                                <div id="addProcedure" class="collapse">
-                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/procedures/create">
-                                        <div class="form-group">
-                                            <label>Procedure Name *</label>
-                                            <select class="form-control" name="procedure_name" id="procedure_name" required>
-                                                <option value="">-- Select Procedure --</option>
-                                                {% for proc_name in procedure_names %}
-                                                <option value="{{ proc_name }}">{{ proc_name }}</option>
-                                                {% endfor %}
-                                            </select>
-                                            <small class="form-text text-muted">Or type procedure name manually</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Procedure Code (optional)</label>
-                                            <input type="text" class="form-control" name="procedure_code" placeholder="e.g., CPT code">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Procedure Type *</label>
-                                            <select class="form-control" name="procedure_type" required>
-                                                <option value="surgical">Surgical</option>
-                                                <option value="non_surgical">Non-Surgical</option>
-                                                <option value="diagnostic">Diagnostic</option>
-                                                <option value="therapeutic">Therapeutic</option>
-                                                <option value="minor">Minor</option>
-                                                <option value="major">Major</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Indication (optional)</label>
-                                            <textarea class="form-control" name="indication" rows="2" placeholder="Clinical indication for procedure"></textarea>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Description (optional)</label>
-                                            <textarea class="form-control" name="description" rows="2" placeholder="Detailed description"></textarea>
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Location (optional)</label>
-                                            <input type="text" class="form-control" name="location" placeholder="e.g., Operating Room 1">
-                                        </div>
-                                        <button type="submit" class="btn btn-warning btn-sm">
-                                            <i class="fas fa-plus"></i> Add Procedure
-                                        </button>
-                                    </form>
-                                    <hr>
+                                {% endif %}
+                                {% if encounter.medications %}
+                                <div class="mb-3">
+                                    <small class="text-muted text-uppercase">Current Medications</small>
+                                    <p class="mb-0 text-truncate-2">{{ encounter.medications }}</p>
                                 </div>
-                                {% if procedures %}
-                                    {% for procedure in procedures %}
-                                    <div class="callout callout-warning">
-                                        <h5>{{ procedure.procedure_name }}</h5>
-                                        <p><small>
-                                            <strong>Type:</strong> {{ procedure.procedure_type.value|title }} | 
-                                            <strong>Status:</strong> 
-                                            <span class="badge badge-{% if procedure.status.value == 'completed' %}success{% elif procedure.status.value == 'in_progress' %}warning{% else %}info{% endif %}">
-                                                {{ procedure.status.value|title }}
-                                            </span>
-                                        </small></p>
-                                        {% if procedure.procedure_code %}
-                                        <p><small><strong>Code:</strong> {{ procedure.procedure_code }}</small></p>
-                                        {% endif %}
-                                        {% if procedure.indication %}
-                                        <p><small><strong>Indication:</strong> {{ procedure.indication }}</small></p>
-                                        {% endif %}
-                                        {% if procedure.location %}
-                                        <p><small><strong>Location:</strong> {{ procedure.location }}</small></p>
-                                        {% endif %}
-                                        {% if procedure.scheduled_date %}
-                                        <p><small><strong>Scheduled:</strong> {{ procedure.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</small></p>
-                                        {% endif %}
-                                    </div>
-                                    {% endfor %}
-                                {% else %}
-                                    <p class="text-muted">No procedures</p>
                                 {% endif %}
                             </div>
-                        </div>
-                    </div>
-                    {% endif %}
-
-                    {% if antenatal_services %}
-                    <div class="col-md-4">
-                        <div class="card card-pink card-outline">
-                            <div class="card-header">
-                                <h3 class="card-title"><i class="fas fa-baby mr-1"></i> Antenatal Services</h3>
-                            </div>
-                            <div class="card-body">
-                                <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/antenatal-orders/create">
-                                    <div class="form-group">
-                                        <label>Select Antenatal Package *</label>
-                                        <select class="form-control" name="service_pricing_id" required>
-                                            <option value="">-- Select Package --</option>
-                                            {% for service in antenatal_services %}
-                                            <option value="{{ service.id }}">
-                                                {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
-                                            </option>
-                                            {% endfor %}
-                                        </select>
-                                    </div>
-                                    <div class="form-row">
-                                        <div class="form-group col-md-6">
-                                            <label>Quantity</label>
-                                            <input type="number" class="form-control" name="quantity" value="1" min="1">
-                                        </div>
-                                        <div class="form-group col-md-6">
-                                            <label>Notes (optional)</label>
-                                            <input type="text" class="form-control" name="notes" placeholder="Notes">
-                                        </div>
-                                    </div>
-                                    <button type="submit" class="btn btn-sm text-white" style="background-color:#d81b60;">
-                                        <i class="fas fa-plus"></i> Add Antenatal Service
-                                    </button>
-                                </form>
-                                <hr>
-                                {% if antenatal_charges %}
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-striped">
-                                        <thead>
-                                            <tr>
-                                                <th>Service</th>
-                                                <th>Qty</th>
-                                                <th>Amount</th>
-                                                <th>Date</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {% for charge in antenatal_charges %}
-                                            <tr>
-                                                <td>{{ charge.description }}</td>
-                                                <td>{{ charge.quantity }}</td>
-                                                <td>GHS {{ "%.2f"|format(charge.total_amount) }}</td>
-                                                <td>{{ charge.created_at.strftime('%Y-%m-%d') }}</td>
-                                            </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {% else %}
-                                <p class="text-muted mb-0">No antenatal services recorded.</p>
-                                {% endif %}
+                            <div class="card-footer text-center">
+                                <a href="#clinical-documents" class="btn btn-link btn-sm" onclick="window.scrollTo({ top: document.getElementById('gstgDifferentialsCard').offsetTop - 120, behavior: 'smooth' }); return false;">
+                                    View full documentation
+                                </a>
                             </div>
                         </div>
                     </div>
-                    {% endif %}
                 </div>
 
                 <!-- Pending Orders Warning -->
@@ -917,7 +1126,29 @@
         </section>
     </div>
 
+    <!-- STG Summary Modal -->
+    <div class="modal fade" id="gstgStgModal" tabindex="-1" role="dialog" aria-labelledby="gstgStgModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="gstgStgModalLabel">Ghana STG Summary</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body" id="gstgStgModalBody">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        const encounterId = {{ encounter.id }};
+        const gstgInitialData = {{ differential_data|tojson }};
+
         function attachServiceSelect(selectId, nameFieldId, codeFieldId, helperTextId) {
             const selectEl = document.getElementById(selectId);
             const nameField = nameFieldId ? document.getElementById(nameFieldId) : null;
@@ -960,9 +1191,295 @@
             updateFields();
         }
 
+        function initGstgDifferentialUI() {
+            const card = document.getElementById('gstgDifferentialsCard');
+            if (!card) {
+                return;
+            }
+            const elements = {
+                summary: document.getElementById('gstgSummaryInput'),
+                age: document.getElementById('gstgAgeInput'),
+                sex: document.getElementById('gstgSexInput'),
+                vitals: document.getElementById('gstgVitalsInput'),
+                labs: document.getElementById('gstgLabsInput'),
+                notes: document.getElementById('gstgNotesInput'),
+                alert: document.getElementById('gstgAlert'),
+                placeholder: document.getElementById('gstgResultsPlaceholder'),
+                wrapper: document.getElementById('gstgResultsWrapper'),
+                tbody: document.getElementById('gstgResultsBody'),
+                saveBtn: document.getElementById('gstgSaveBtn'),
+                resetBtn: document.getElementById('gstgResetBtn'),
+                generateBtn: document.getElementById('gstgGenerateBtn'),
+                status: document.getElementById('gstgGenerateStatus'),
+                modalTitle: document.getElementById('gstgStgModalLabel'),
+                modalBody: document.getElementById('gstgStgModalBody')
+            };
+            const initialSuggestions = Array.isArray(gstgInitialData && gstgInitialData.suggestions)
+                ? JSON.parse(JSON.stringify(gstgInitialData.suggestions))
+                : [];
+            const gstgState = {
+                suggestions: initialSuggestions,
+                notes: gstgInitialData && gstgInitialData.notes ? gstgInitialData.notes : '',
+                isDirty: false
+            };
+            if (elements.notes && gstgState.notes) {
+                elements.notes.value = gstgState.notes;
+            }
+
+            function setAlert(type, message) {
+                if (!elements.alert) return;
+                if (!message) {
+                    elements.alert.classList.add('d-none');
+                    return;
+                }
+                const classes = {
+                    success: 'alert alert-success',
+                    danger: 'alert alert-danger',
+                    warning: 'alert alert-warning',
+                    info: 'alert alert-info'
+                };
+                elements.alert.className = classes[type] || 'alert alert-info';
+                elements.alert.textContent = message;
+                elements.alert.classList.remove('d-none');
+            }
+
+            function statusMeta(status) {
+                switch (status) {
+                    case 'working':
+                        return { label: 'Working Dx', className: 'badge badge-success' };
+                    case 'ruled_out':
+                    case 'ruled-out':
+                        return { label: 'Rule Out', className: 'badge badge-secondary' };
+                    default:
+                        return { label: 'Suggested', className: 'badge badge-light text-dark border' };
+                }
+            }
+
+            function scoreBadge(score) {
+                const value = Number(score || 0);
+                let badgeClass = 'badge badge-secondary';
+                if (value >= 1.2) badgeClass = 'badge badge-success';
+                else if (value >= 0.7) badgeClass = 'badge badge-warning';
+                return `<span class="${badgeClass}">${value.toFixed(2)}</span>`;
+            }
+
+            function renderTable() {
+                if (!elements.tbody) return;
+                if (!gstgState.suggestions.length) {
+                    elements.tbody.innerHTML = '';
+                    elements.placeholder && elements.placeholder.classList.remove('d-none');
+                    elements.wrapper && elements.wrapper.classList.add('d-none');
+                    if (elements.saveBtn) {
+                        elements.saveBtn.disabled = true;
+                    }
+                    return;
+                }
+                if (elements.placeholder) {
+                    elements.placeholder.classList.add('d-none');
+                }
+                if (elements.wrapper) {
+                    elements.wrapper.classList.remove('d-none');
+                }
+                elements.tbody.innerHTML = '';
+                gstgState.suggestions.forEach((suggestion, index) => {
+                    const flags = (suggestion.flags || []).map(flag => `<span class="badge badge-info mr-1">${flag}</span>`).join(' ');
+                    const meta = statusMeta(suggestion.status);
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>
+                            <strong>${suggestion.diagnosis || 'N/A'}</strong><br>
+                            <small class="text-muted">${suggestion.body_system || '—'}</small>
+                        </td>
+                        <td>${suggestion.stg_reference || '—'}</td>
+                        <td>${scoreBadge(suggestion.relevance_score)}</td>
+                        <td>${flags || '<span class="text-muted">—</span>'}</td>
+                        <td><span class="${meta.className}">${meta.label}</span></td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-success gstg-status-btn" data-status="working" data-index="${index}" title="Mark as working diagnosis">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                <button type="button" class="btn btn-secondary gstg-status-btn" data-status="ruled_out" data-index="${index}" title="Mark as rule out">
+                                    <i class="fas fa-ban"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-dark gstg-status-btn" data-status="suggested" data-index="${index}" title="Reset status">
+                                    <i class="fas fa-undo"></i>
+                                </button>
+                                <button type="button" class="btn btn-info gstg-summary-btn" data-index="${index}" title="View STG summary">
+                                    <i class="fas fa-book-open"></i>
+                                </button>
+                            </div>
+                        </td>
+                    `;
+                    elements.tbody.appendChild(row);
+                });
+                if (elements.saveBtn) {
+                    elements.saveBtn.disabled = !gstgState.suggestions.length;
+                }
+            }
+
+            function updateStatus(index, status) {
+                if (!gstgState.suggestions[index]) return;
+                gstgState.suggestions[index].status = status === 'ruled_out' ? 'ruled_out' : status;
+                gstgState.isDirty = true;
+                renderTable();
+            }
+
+            function openSummaryModal(index) {
+                if (!gstgState.suggestions[index]) return;
+                const suggestion = gstgState.suggestions[index];
+                if (elements.modalTitle) {
+                    elements.modalTitle.textContent = `${suggestion.diagnosis || 'Ghana STG'} — Summary`;
+                }
+                if (elements.modalBody) {
+                    elements.modalBody.innerHTML = `
+                        <p><strong>Body System:</strong> ${suggestion.body_system || 'N/A'}</p>
+                        <p><strong>STG Reference:</strong> ${suggestion.stg_reference || 'N/A'}</p>
+                        <div class="alert alert-light border">
+                            ${suggestion.stg_summary || 'Summary not available for this diagnosis.'}
+                        </div>
+                    `;
+                }
+                if (window.$) {
+                    $('#gstgStgModal').modal('show');
+                }
+            }
+
+            async function handleGenerate() {
+                if (!elements.generateBtn) return;
+                const payload = {
+                    clinical_summary: elements.summary ? elements.summary.value.trim() : '',
+                    age: elements.age && elements.age.value ? Number(elements.age.value) : null,
+                    sex: elements.sex ? (elements.sex.value || null) : null,
+                    key_vitals: elements.vitals ? elements.vitals.value.trim() : '',
+                    key_labs: elements.labs ? elements.labs.value.trim() : ''
+                };
+                if (!payload.clinical_summary) {
+                    setAlert('warning', 'Please enter a brief clinical summary before generating.');
+                    return;
+                }
+                const originalLabel = elements.generateBtn.innerHTML;
+                elements.generateBtn.disabled = true;
+                elements.generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+                setAlert(null, null);
+                try {
+                    const response = await fetch(`/api/v1/encounters/${encounterId}/differentials/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.detail || 'Unable to generate differentials.');
+                    }
+                    gstgState.suggestions = Array.isArray(data.suggestions) ? data.suggestions.map(item => ({ ...item })) : [];
+                    gstgState.notes = data.notes || '';
+                    gstgState.isDirty = false;
+                    if (elements.summary && data.clinical_summary) {
+                        elements.summary.value = data.clinical_summary;
+                    }
+                    if (elements.notes) {
+                        elements.notes.value = gstgState.notes || '';
+                    }
+                    renderTable();
+                    setAlert('success', 'Differentials generated from Ghana STG.');
+                } catch (error) {
+                    setAlert('danger', error.message || 'Failed to generate differentials.');
+                } finally {
+                    elements.generateBtn.disabled = false;
+                    elements.generateBtn.innerHTML = originalLabel;
+                }
+            }
+
+            async function handleSave() {
+                if (!gstgState.suggestions.length) {
+                    setAlert('warning', 'Generate differentials before saving.');
+                    return;
+                }
+                if (!elements.summary || !elements.summary.value.trim()) {
+                    setAlert('warning', 'Clinical summary is required.');
+                    return;
+                }
+                const notesValue = elements.notes ? elements.notes.value.trim() : '';
+                const payload = {
+                    clinical_summary: elements.summary.value.trim(),
+                    notes: notesValue || null,
+                    suggestions: gstgState.suggestions
+                };
+                if (elements.saveBtn) {
+                    elements.saveBtn.disabled = true;
+                    elements.saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+                }
+                try {
+                    const response = await fetch(`/api/v1/encounters/${encounterId}/differentials/save`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        throw new Error(data.detail || 'Unable to save selections.');
+                    }
+                    gstgState.suggestions = Array.isArray(data.suggestions) ? data.suggestions.map(item => ({ ...item })) : [];
+                    gstgState.notes = data.notes || '';
+                    gstgState.isDirty = false;
+                    if (elements.notes) {
+                        elements.notes.value = gstgState.notes || '';
+                    }
+                    renderTable();
+                    setAlert('success', 'Differential selections saved to the encounter.');
+                } catch (error) {
+                    setAlert('danger', error.message || 'Failed to save selections.');
+                } finally {
+                    if (elements.saveBtn) {
+                        elements.saveBtn.disabled = false;
+                        elements.saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i> Save selections';
+                    }
+                }
+            }
+
+            if (elements.generateBtn) {
+                elements.generateBtn.addEventListener('click', handleGenerate);
+            }
+            if (elements.saveBtn) {
+                elements.saveBtn.addEventListener('click', handleSave);
+            }
+            if (elements.resetBtn) {
+                elements.resetBtn.addEventListener('click', function() {
+                    if (!gstgState.suggestions.length) {
+                        return;
+                    }
+                    gstgState.suggestions = gstgState.suggestions.map(item => ({ ...item, status: 'suggested' }));
+                    gstgState.isDirty = true;
+                    renderTable();
+                    setAlert('info', 'Statuses reset to suggested.');
+                });
+            }
+            if (elements.tbody) {
+                elements.tbody.addEventListener('click', function(event) {
+                    const button = event.target.closest('button');
+                    if (!button) return;
+                    const index = Number(button.dataset.index);
+                    if (button.classList.contains('gstg-status-btn')) {
+                        updateStatus(index, button.dataset.status || 'suggested');
+                    } else if (button.classList.contains('gstg-summary-btn')) {
+                        openSummaryModal(index);
+                    }
+                });
+            }
+            if (elements.notes) {
+                elements.notes.addEventListener('input', function() {
+                    gstgState.notes = elements.notes.value;
+                    gstgState.isDirty = true;
+                });
+            }
+            renderTable();
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             attachServiceSelect('labServiceSelect', 'lab_test_name', 'lab_test_code', 'labSelectedPriceText');
             attachServiceSelect('radiologyServiceSelect', 'radiology_study_name', 'radiology_study_code', 'radiologySelectedPriceText');
+            initGstgDifferentialUI();
         });
 
         // Medication Search Autocomplete

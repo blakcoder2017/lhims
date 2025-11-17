@@ -243,28 +243,65 @@ def doctor_queue(
     
     encounter_map = {enc.patient_id: enc for enc in existing_encounters}
     
-    # Enrich appointments with encounter info
+    # Enrich appointments with encounter info and wait time
     queue_items = []
     appointment_patient_ids = set()
     for appointment in appointments:
         appointment_patient_ids.add(appointment.patient_id)
         has_encounter = appointment.patient_id in encounter_map
+        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time_str = appointment_crud.format_wait_time(wait_time)
         queue_items.append({
             "appointment": appointment,
             "has_encounter": has_encounter,
             "encounter": encounter_map.get(appointment.patient_id),
-            "type": "appointment"
+            "type": "appointment",
+            "wait_time": wait_time,
+            "wait_time_str": wait_time_str
         })
     
     # Add patients with encounters but no appointments (from nurse workflow)
     for encounter in encounters_needing_doctor:
         if encounter.patient_id not in appointment_patient_ids:
+            # Calculate wait time from encounter date
+            wait_time = None
+            wait_time_str = "N/A"
+            if encounter.encounter_date:
+                wait_time = datetime.now() - encounter.encounter_date
+                wait_time_str = appointment_crud.format_wait_time(wait_time)
             queue_items.append({
                 "appointment": None,
                 "has_encounter": True,
                 "encounter": encounter,
-                "type": "encounter_only"
+                "type": "encounter_only",
+                "wait_time": wait_time,
+                "wait_time_str": wait_time_str
             })
+    
+    # Get unfulfilled queues from previous days
+    previous_appointments = appointment_crud.get_unfulfilled_queues_previous_days(
+        db, department, search, days_back=7
+    )
+    
+    # Filter previous appointments to only CHECKED_IN or IN_PROGRESS
+    previous_appointments = [
+        appt for appt in previous_appointments 
+        if appt.status.value in [AppointmentStatus.CHECKED_IN.value, AppointmentStatus.IN_PROGRESS.value]
+    ]
+    
+    # Filter out admitted patients from previous queues
+    previous_appointments = [appt for appt in previous_appointments if appt.patient_id not in admitted_patient_ids]
+    
+    # Calculate wait times for previous day queues
+    queue_previous = []
+    for appointment in previous_appointments:
+        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time_str = appointment_crud.format_wait_time(wait_time)
+        queue_previous.append({
+            "appointment": appointment,
+            "wait_time": wait_time,
+            "wait_time_str": wait_time_str
+        })
     
     # Get unique departments for filter
     departments = db.query(Appointment.department).distinct().all()
@@ -276,6 +313,7 @@ def doctor_queue(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "queue_items": queue_items,
+        "queue_previous": queue_previous,
         "departments": departments,
         "selected_department": department,
         "show_assigned_only": show_assigned_only,

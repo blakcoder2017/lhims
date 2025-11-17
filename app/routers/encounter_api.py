@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, status, HTTPException, Form, Request, Qu
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 
 from app.db.database import get_db
@@ -12,7 +12,8 @@ from app.schemas.encounter_schemas import (
     EncounterCreate, EncounterUpdate, Encounter,
     LabOrderCreate, LabOrderUpdate, LabOrder,
     RadiologyOrderCreate, RadiologyOrderUpdate, RadiologyOrder,
-    PrescriptionCreate, PrescriptionUpdate, Prescription
+    PrescriptionCreate, PrescriptionUpdate, Prescription,
+    DifferentialInput, DifferentialResponse, DifferentialSaveRequest
 )
 from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
 from app.models.encounter_models import EncounterStatus, OrderStatus, LabOrder as LabOrderModel, RadiologyOrder as RadiologyOrderModel
@@ -25,11 +26,20 @@ from app.services import (
     create_charge_for_radiology_order,
     create_charge_for_procedure
 )
+from app.services.gstg_differential import generate_differential_suggestions
 
 router = APIRouter(
     prefix="/api/v1/encounters",
     tags=["Encounters"]
 )
+
+
+def _calculate_age_years(dob: Optional[date]) -> Optional[int]:
+    if not dob:
+        return None
+    today = datetime.utcnow().date()
+    years = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    return max(years, 0)
 
 
 # Encounter Endpoints
@@ -81,22 +91,62 @@ def create_encounter_form(
     """
     from app.utils.payment_verification import (
         check_payment_required_and_paid,
-        is_cash_patient
+        is_cash_patient,
+        requires_payment_before_service,
+        has_paid_for_service
     )
     from app.models.billing_models import ChargeType
     
     # Check payment requirement for cash patients (consultation fee)
     if is_cash_patient(db, patient_id):
-        payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
-            db, patient_id, ChargeType.CONSULTATION
-        )
+        payment_required = requires_payment_before_service(db, patient_id, ChargeType.CONSULTATION)
         
-        if payment_required and not payment_paid:
-            # Redirect to payment page
-            return RedirectResponse(
-                url=f"/patients/{patient_id}/pay/consultation?return_to=encounters/new",
-                status_code=status.HTTP_302_FOUND
-            )
+        if payment_required:
+            # Use improved payment check: look for recent consultation charges with payments
+            from app.models.billing_models import Charge, Invoice, Payment, PaymentStatus
+            
+            # Look for any consultation charges, then check if they have payments
+            recent_charges = db.query(Charge).join(Invoice).filter(
+                Invoice.patient_id == patient_id,
+                Charge.charge_type == ChargeType.CONSULTATION,
+                Charge.encounter_id.is_(None),
+                Invoice.is_active == True
+            ).order_by(Charge.created_at.desc()).limit(5).all()
+            
+            recent_paid_charge = None
+            has_paid = False
+            for ch in recent_charges:
+                # Check all payments on this invoice
+                all_payments = db.query(Payment).filter(
+                    Payment.invoice_id == ch.invoice_id,
+                    Payment.status == PaymentStatus.COMPLETED,
+                    Payment.is_active == True
+                ).all()
+                
+                if all_payments:
+                    total_paid_all = sum(p.amount for p in all_payments)
+                    
+                    if total_paid_all >= ch.total_amount:
+                        recent_paid_charge = ch
+                        has_paid = True
+                        break
+            
+            # Fallback: check for today's charges using the standard method
+            if not has_paid:
+                has_paid, charge, invoice = has_paid_for_service(
+                    db, patient_id, ChargeType.CONSULTATION,
+                    encounter_id=None,
+                    check_today_only=True
+                )
+            
+            payment_paid = has_paid
+            
+            if not payment_paid:
+                # Redirect to payment page
+                return RedirectResponse(
+                    url=f"/patients/{patient_id}/pay/consultation?return_to=encounters/new",
+                    status_code=status.HTTP_302_FOUND
+                )
     
     try:
         # Create encounter data
@@ -378,6 +428,146 @@ def delete_encounter_endpoint(
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
     return None
+
+
+@router.get("/{encounter_id}/differentials", response_model=DifferentialResponse)
+def get_saved_differentials(
+    encounter_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """Return saved Ghana STG differential data for an encounter."""
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    saved_payload = encounter_crud.load_differential_data(encounter)
+    default_summary = (
+        encounter.assessment
+        or encounter.history_of_present_illness
+        or encounter.chief_complaint
+        or ""
+    )
+    if not saved_payload:
+        return DifferentialResponse(
+            clinical_summary=default_summary,
+            generated_at=datetime.utcnow(),
+            suggestions=[],
+            notes=None
+        )
+    
+    generated_at = saved_payload.get("generated_at")
+    if isinstance(generated_at, str):
+        try:
+            generated_dt = datetime.fromisoformat(generated_at)
+        except ValueError:
+            generated_dt = datetime.utcnow()
+    elif isinstance(generated_at, datetime):
+        generated_dt = generated_at
+    else:
+        generated_dt = datetime.utcnow()
+    
+    suggestions = saved_payload.get("suggestions", [])
+    return DifferentialResponse(
+        clinical_summary=saved_payload.get("clinical_summary") or default_summary,
+        generated_at=generated_dt,
+        suggestions=suggestions,
+        notes=saved_payload.get("notes")
+    )
+
+
+@router.post("/{encounter_id}/differentials/generate", response_model=DifferentialResponse)
+def generate_differentials(
+    encounter_id: int,
+    payload: DifferentialInput,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """Generate differential diagnoses mapped to the Ghana STG."""
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    summary = payload.clinical_summary.strip() if payload.clinical_summary else None
+    if not summary:
+        summary = (
+            encounter.assessment
+            or encounter.history_of_present_illness
+            or encounter.chief_complaint
+        )
+    if not summary:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clinical summary is required to generate differentials."
+        )
+    
+    patient = encounter.patient
+    resolved_age = payload.age if payload.age is not None else _calculate_age_years(getattr(patient, "date_of_birth", None))
+    resolved_sex = payload.sex or (getattr(patient, "gender", None))
+    
+    suggestions = generate_differential_suggestions(
+        clinical_summary=summary,
+        age=resolved_age,
+        sex=resolved_sex,
+        key_vitals=payload.key_vitals,
+        key_labs=payload.key_labs
+    )
+    
+    saved_payload = encounter_crud.load_differential_data(encounter)
+    if saved_payload:
+        status_map = {
+            (item.get("diagnosis") or "").lower(): item.get("status", "suggested")
+            for item in saved_payload.get("suggestions", [])
+        }
+        for suggestion in suggestions:
+            key = suggestion["diagnosis"].lower()
+            if key in status_map:
+                suggestion["status"] = status_map[key]
+    
+    generated_at = datetime.utcnow()
+    return DifferentialResponse(
+        clinical_summary=summary,
+        generated_at=generated_at,
+        suggestions=suggestions,
+        notes=saved_payload.get("notes") if saved_payload else None
+    )
+
+
+@router.post("/{encounter_id}/differentials/save", response_model=DifferentialResponse)
+def save_differentials(
+    encounter_id: int,
+    payload: DifferentialSaveRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """Persist clinician selections for differential diagnoses."""
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    if not payload.suggestions:
+        raise HTTPException(status_code=400, detail="At least one suggestion is required.")
+    
+    summary = payload.clinical_summary.strip() if payload.clinical_summary else (
+        encounter.assessment
+        or encounter.history_of_present_illness
+        or encounter.chief_complaint
+        or ""
+    )
+    timestamp = datetime.utcnow().isoformat()
+    stored_payload = {
+        "clinical_summary": summary,
+        "generated_at": timestamp,
+        "suggestions": [suggestion.model_dump() for suggestion in payload.suggestions],
+        "notes": payload.notes
+    }
+    encounter_crud.save_differential_data(db, encounter_id, stored_payload)
+    
+    return DifferentialResponse(
+        clinical_summary=summary,
+        generated_at=datetime.fromisoformat(timestamp),
+        suggestions=stored_payload["suggestions"],
+        notes=payload.notes
+    )
 
 
 # Lab Order Endpoints

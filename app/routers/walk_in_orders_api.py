@@ -7,24 +7,79 @@ Front desk can create and check-in walk-in orders.
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Form, status
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
-from sqlalchemy.orm import joinedload
-from typing import Optional, List
-from datetime import datetime
+from sqlalchemy.orm import Session, joinedload
+from typing import Optional, List, Dict
+from datetime import datetime, date
 
 from app.db.database import get_db
 from app.core.deps import get_current_user, role_required
 from app.models.user_models import User
-from app.models.encounter_models import LabOrder, RadiologyOrder, OrderStatus
+from app.models.patient_models import Patient, PaymentMechanism
+from app.models.encounter_models import (
+    LabOrder,
+    RadiologyOrder,
+    OrderStatus,
+    Prescription,
+    EncounterStatus,
+    Encounter,
+)
 from app.models.procedure_models import Procedure, ProcedureStatus
-from app.crud import encounter_crud, procedure_crud, service_pricing_crud
-from app.schemas.encounter_schemas import LabOrderCreate, RadiologyOrderCreate
+from app.models.billing_models import Charge, Invoice
+from app.crud import encounter_crud, procedure_crud, service_pricing_crud, patient_crud
+from app.schemas.encounter_schemas import (
+    LabOrderCreate,
+    RadiologyOrderCreate,
+    EncounterCreate,
+    EncounterUpdate,
+    PrescriptionCreate,
+)
 from app.schemas.procedure_schemas import ProcedureCreate
+from app.schemas.patient_schemas import PatientCreate
 from app.services import (
     create_charge_for_lab_order,
     create_charge_for_radiology_order,
-    create_charge_for_procedure
+    create_charge_for_procedure,
+    create_charge_for_prescription,
 )
+
+
+def ensure_patient(
+    db: Session,
+    patient_id: Optional[int],
+    walk_in_first_name: Optional[str],
+    walk_in_last_name: Optional[str],
+    walk_in_phone: Optional[str] = None,
+) -> Patient:
+    """
+    Return an existing patient or create a minimal walk-in patient record.
+    """
+    if patient_id:
+        patient = db.query(Patient).filter(Patient.id == patient_id, Patient.is_active == True).first()
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        return patient
+    
+    if not walk_in_first_name or not walk_in_last_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide an existing patient or walk-in customer details."
+        )
+    
+    walk_in_data = PatientCreate(
+        first_name=walk_in_first_name.strip().title(),
+        last_name=walk_in_last_name.strip().title(),
+        date_of_birth=date.today(),
+        gender="Unknown",
+        phone_number=walk_in_phone.strip() if walk_in_phone else None,
+        address=None,
+        payment_mechanism=PaymentMechanism.CASH,
+        national_id=None,
+        nhis_number=None,
+        insurance_provider=None,
+        insurance_policy_number=None,
+        languages_spoken=None,
+    )
+    return patient_crud.create_patient(db, walk_in_data)
 
 router = APIRouter(tags=["Walk-in Orders"])
 templates = Jinja2Templates(directory="app/templates")
@@ -34,18 +89,28 @@ templates = Jinja2Templates(directory="app/templates")
 def walk_in_orders_dashboard(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Front Office", "Admin"])),
+    current_user: User = Depends(
+        role_required(
+            ["Front Office", "Admin", "Lab Staff", "Radiology Staff", "Pharmacy Staff"]
+        )
+    ),
     order_type: Optional[str] = Query(None, description="Filter by order type: lab, radiology, procedure")
 ):
-    """Dashboard for front desk to view and manage walk-in orders"""
-    # Get all walk-in orders that haven't been checked in
+    """Dashboard for ancillary departments and front desk to manage walk-in services."""
+    user_role = current_user.role.name
+    can_check_in_orders = user_role in ["Front Office", "Admin"]
+    can_create_lab_orders = user_role in ["Front Office", "Admin", "Lab Staff"]
+    can_create_radiology_orders = user_role in ["Front Office", "Admin", "Radiology Staff"]
+    can_create_procedures = user_role in ["Front Office", "Admin"]
+    can_create_pharmacy_sales = user_role in ["Front Office", "Admin", "Pharmacy Staff"]
+    
+    # Pending walk-in orders awaiting payment confirmation
     walk_in_lab_orders = db.query(LabOrder).options(
         joinedload(LabOrder.patient),
         joinedload(LabOrder.ordered_by)
     ).filter(
         LabOrder.is_walk_in == True,
-        LabOrder.checked_in_at.is_(None),
-        LabOrder.is_active == True
+        LabOrder.checked_in_at.is_(None)
     ).order_by(LabOrder.ordered_at.desc()).all()
     
     walk_in_radiology_orders = db.query(RadiologyOrder).options(
@@ -53,8 +118,7 @@ def walk_in_orders_dashboard(
         joinedload(RadiologyOrder.ordered_by)
     ).filter(
         RadiologyOrder.is_walk_in == True,
-        RadiologyOrder.checked_in_at.is_(None),
-        RadiologyOrder.is_active == True
+        RadiologyOrder.checked_in_at.is_(None)
     ).order_by(RadiologyOrder.ordered_at.desc()).all()
     
     walk_in_procedures = db.query(Procedure).options(
@@ -66,23 +130,75 @@ def walk_in_orders_dashboard(
         Procedure.is_active == True
     ).order_by(Procedure.created_at.desc()).all()
     
-    # Get service pricing for dropdowns
+    walk_in_pharmacy_sales = db.query(Prescription).options(
+        joinedload(Prescription.encounter).joinedload(Encounter.patient),
+        joinedload(Prescription.prescribed_by)
+    ).filter(
+        Prescription.is_walk_in == True,
+        Prescription.checked_in_at.is_(None),
+        Prescription.status.in_([
+            OrderStatus.PENDING.value,
+            OrderStatus.ORDERED.value,
+            OrderStatus.IN_PROGRESS.value
+        ])
+    ).order_by(Prescription.prescribed_at.desc()).all()
+    
+    # Service pricing for dropdown selections
     lab_tests = service_pricing_crud.get_service_pricing_by_charge_type(db, "lab_test")
     radiology_studies = service_pricing_crud.get_service_pricing_by_charge_type(db, "radiology")
     procedures = service_pricing_crud.get_service_pricing_by_charge_type(db, "procedure")
+    pharmacy_items = service_pricing_crud.get_service_pricing_by_charge_type(db, "pharmacy")
+    
+    def build_invoice_map(query_filter) -> Dict[int, Invoice]:
+        charges = db.query(Charge).options(joinedload(Charge.invoice)).filter(*query_filter).all()
+        invoice_map: Dict[int, Invoice] = {}
+        for charge in charges:
+            if charge.invoice:
+                if charge.lab_order_id:
+                    invoice_map[charge.lab_order_id] = charge.invoice
+                elif charge.radiology_order_id:
+                    invoice_map[charge.radiology_order_id] = charge.invoice
+                elif charge.prescription_id:
+                    invoice_map[charge.prescription_id] = charge.invoice
+        return invoice_map
+    
+    lab_invoice_map = {}
+    if walk_in_lab_orders:
+        lab_ids = [order.id for order in walk_in_lab_orders]
+        lab_invoice_map = build_invoice_map([Charge.lab_order_id.in_(lab_ids)])
+    
+    radiology_invoice_map = {}
+    if walk_in_radiology_orders:
+        rad_ids = [order.id for order in walk_in_radiology_orders]
+        radiology_invoice_map = build_invoice_map([Charge.radiology_order_id.in_(rad_ids)])
+    
+    pharmacy_invoice_map = {}
+    if walk_in_pharmacy_sales:
+        pharm_ids = [sale.id for sale in walk_in_pharmacy_sales]
+        pharmacy_invoice_map = build_invoice_map([Charge.prescription_id.in_(pharm_ids)])
     
     context = {
         "request": request,
         "title": "Walk-in Orders",
         "current_user": current_user,
-        "user_role": current_user.role.name,
+        "user_role": user_role,
         "walk_in_lab_orders": walk_in_lab_orders,
         "walk_in_radiology_orders": walk_in_radiology_orders,
         "walk_in_procedures": walk_in_procedures,
+        "walk_in_pharmacy_sales": walk_in_pharmacy_sales,
+        "lab_invoice_map": lab_invoice_map,
+        "radiology_invoice_map": radiology_invoice_map,
+        "pharmacy_invoice_map": pharmacy_invoice_map,
         "order_type": order_type,
         "lab_tests": lab_tests,
         "radiology_studies": radiology_studies,
-        "procedures": procedures
+        "procedures": procedures,
+        "pharmacy_items": pharmacy_items,
+        "can_check_in_orders": can_check_in_orders,
+        "can_create_lab_orders": can_create_lab_orders,
+        "can_create_radiology_orders": can_create_radiology_orders,
+        "can_create_procedures": can_create_procedures,
+        "can_create_pharmacy_sales": can_create_pharmacy_sales,
     }
     return templates.TemplateResponse("front_office/walk_in_orders.html", context)
 
@@ -91,8 +207,11 @@ def walk_in_orders_dashboard(
 def create_walk_in_lab_order(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Front Office", "Admin"])),
-    patient_id: int = Form(...),
+    current_user: User = Depends(role_required(["Front Office", "Admin", "Lab Staff"])),
+    patient_id: Optional[int] = Form(None),
+    walk_in_first_name: Optional[str] = Form(None),
+    walk_in_last_name: Optional[str] = Form(None),
+    walk_in_phone: Optional[str] = Form(None),
     test_name: str = Form(...),
     test_code: Optional[str] = Form(None),
     instructions: Optional[str] = Form(None),
@@ -100,9 +219,11 @@ def create_walk_in_lab_order(
 ):
     """Create a walk-in lab order"""
     try:
+        patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
+        
         lab_order_data = LabOrderCreate(
             encounter_id=None,
-            patient_id=patient_id,
+            patient_id=patient.id,
             ordered_by_id=current_user.id,
             test_name=test_name,
             test_code=test_code if test_code else None,
@@ -133,8 +254,11 @@ def create_walk_in_lab_order(
 def create_walk_in_radiology_order(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Front Office", "Admin"])),
-    patient_id: int = Form(...),
+    current_user: User = Depends(role_required(["Front Office", "Admin", "Radiology Staff"])),
+    patient_id: Optional[int] = Form(None),
+    walk_in_first_name: Optional[str] = Form(None),
+    walk_in_last_name: Optional[str] = Form(None),
+    walk_in_phone: Optional[str] = Form(None),
     study_type: str = Form(...),
     study_code: Optional[str] = Form(None),
     body_part: Optional[str] = Form(None),
@@ -144,9 +268,11 @@ def create_walk_in_radiology_order(
 ):
     """Create a walk-in radiology order"""
     try:
+        patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
+        
         radiology_order_data = RadiologyOrderCreate(
             encounter_id=None,
-            patient_id=patient_id,
+            patient_id=patient.id,
             ordered_by_id=current_user.id,
             study_type=study_type,
             study_code=study_code if study_code else None,
@@ -175,12 +301,82 @@ def create_walk_in_radiology_order(
         )
 
 
+@router.post("/walk-in-orders/pharmacy/create", name="create_walk_in_pharmacy_sale", status_code=status.HTTP_302_FOUND)
+def create_walk_in_pharmacy_sale(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Front Office", "Admin", "Pharmacy Staff"])),
+    patient_id: Optional[int] = Form(None),
+    walk_in_first_name: Optional[str] = Form(None),
+    walk_in_last_name: Optional[str] = Form(None),
+    walk_in_phone: Optional[str] = Form(None),
+    medication_name: str = Form(...),
+    dosage: str = Form(...),
+    frequency: str = Form(...),
+    duration: str = Form(...),
+    quantity: int = Form(1),
+    medication_code: Optional[str] = Form(None),
+    instructions: Optional[str] = Form(None),
+):
+    """Create a walk-in pharmacy sale (prescription without consultation)."""
+    try:
+        patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
+        
+        encounter_data = EncounterCreate(
+            patient_id=patient.id,
+            clinician_id=current_user.id,
+            chief_complaint=f"Walk-in pharmacy sale: {medication_name}",
+            status=EncounterStatus.IN_PROGRESS
+        )
+        encounter = encounter_crud.create_encounter(db, encounter_data)
+        encounter_crud.update_encounter(
+            db,
+            encounter.id,
+            EncounterUpdate(status=EncounterStatus.COMPLETED)
+        )
+        
+        prescription_data = PrescriptionCreate(
+            encounter_id=encounter.id,
+            prescribed_by_id=current_user.id,
+            medication_name=medication_name,
+            medication_code=medication_code if medication_code else None,
+            dosage=dosage,
+            frequency=frequency,
+            duration=duration,
+            quantity=quantity,
+            instructions=instructions if instructions else None,
+            is_walk_in=True
+        )
+        
+        new_prescription = encounter_crud.create_prescription(db, prescription_data)
+        
+        try:
+            create_charge_for_prescription(db, new_prescription, current_user.id)
+        except Exception as billing_error:
+            print(f"Warning: Unable to create walk-in pharmacy charge for prescription {new_prescription.id}: {billing_error}")
+        
+        return RedirectResponse(
+            url="/walk-in-orders?status=pharmacy_sale_created",
+            status_code=status.HTTP_302_FOUND
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/walk-in-orders?error={str(e)}",
+            status_code=status.HTTP_302_FOUND
+        )
+
+
 @router.post("/walk-in-orders/procedure/create", name="create_walk_in_procedure", status_code=status.HTTP_302_FOUND)
 def create_walk_in_procedure(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Front Office", "Admin"])),
-    patient_id: int = Form(...),
+    patient_id: Optional[int] = Form(None),
+    walk_in_first_name: Optional[str] = Form(None),
+    walk_in_last_name: Optional[str] = Form(None),
+    walk_in_phone: Optional[str] = Form(None),
     procedure_name: str = Form(...),
     procedure_code: Optional[str] = Form(None),
     procedure_type: str = Form(...),
@@ -192,8 +388,10 @@ def create_walk_in_procedure(
     try:
         from app.models.procedure_models import ProcedureType
         
+        patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
+        
         procedure_data = ProcedureCreate(
-            patient_id=patient_id,
+            patient_id=patient.id,
             encounter_id=None,
             ordered_by_id=current_user.id,
             procedure_name=procedure_name,
@@ -243,6 +441,18 @@ def check_in_walk_in_lab_order(
         if lab_order.checked_in_at:
             raise ValueError("This order has already been checked in")
         
+        charge = (
+            db.query(Charge)
+            .options(joinedload(Charge.invoice))
+            .filter(Charge.lab_order_id == order_id)
+            .order_by(Charge.created_at.desc())
+            .first()
+        )
+        if not charge or not charge.invoice:
+            raise ValueError("No invoice found for this lab order. Please generate an invoice before checking in.")
+        if charge.invoice.balance > 0:
+            raise ValueError("Payment pending: collect payment and update the invoice before checking in.")
+        
         lab_order.checked_in_at = datetime.now()
         lab_order.checked_in_by_id = current_user.id
         lab_order.status = OrderStatus.ORDERED
@@ -279,6 +489,18 @@ def check_in_walk_in_radiology_order(
         if radiology_order.checked_in_at:
             raise ValueError("This order has already been checked in")
         
+        charge = (
+            db.query(Charge)
+            .options(joinedload(Charge.invoice))
+            .filter(Charge.radiology_order_id == order_id)
+            .order_by(Charge.created_at.desc())
+            .first()
+        )
+        if not charge or not charge.invoice:
+            raise ValueError("No invoice found for this radiology order. Please generate an invoice before checking in.")
+        if charge.invoice.balance > 0:
+            raise ValueError("Payment pending: collect payment and update the invoice before checking in.")
+        
         radiology_order.checked_in_at = datetime.now()
         radiology_order.checked_in_by_id = current_user.id
         radiology_order.status = OrderStatus.ORDERED
@@ -289,6 +511,59 @@ def check_in_walk_in_radiology_order(
             url=f"/walk-in-orders?status=radiology_order_checked_in",
             status_code=status.HTTP_302_FOUND
         )
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/walk-in-orders?error={str(e)}",
+            status_code=status.HTTP_302_FOUND
+        )
+
+
+@router.post("/walk-in-orders/pharmacy/{prescription_id}/check-in", name="check_in_walk_in_pharmacy_sale", status_code=status.HTTP_302_FOUND)
+def check_in_walk_in_pharmacy_sale(
+    request: Request,
+    prescription_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Front Office", "Admin"]))
+):
+    """Confirm payment for a walk-in pharmacy sale."""
+    try:
+        prescription = db.query(Prescription).filter(Prescription.id == prescription_id).first()
+        if not prescription:
+            raise HTTPException(status_code=404, detail="Prescription not found")
+        
+        if not prescription.is_walk_in:
+            raise ValueError("This is not a walk-in pharmacy sale")
+        
+        if prescription.checked_in_at:
+            raise ValueError("This pharmacy sale has already been checked in")
+        
+        charge = (
+            db.query(Charge)
+            .options(joinedload(Charge.invoice))
+            .filter(Charge.prescription_id == prescription_id)
+            .order_by(Charge.created_at.desc())
+            .first()
+        )
+        
+        if not charge or not charge.invoice:
+            raise ValueError("No invoice found for this pharmacy sale. Please create or refresh the invoice before check-in.")
+        
+        if charge.invoice.balance > 0:
+            raise ValueError("Payment pending: please collect payment and update the invoice before checking in.")
+        
+        prescription.checked_in_at = datetime.now()
+        prescription.checked_in_by_id = current_user.id
+        if prescription.status == OrderStatus.PENDING.value:
+            prescription.status = OrderStatus.ORDERED.value
+        
+        db.commit()
+        
+        return RedirectResponse(
+            url="/walk-in-orders?status=pharmacy_sale_checked_in",
+            status_code=status.HTTP_302_FOUND
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         return RedirectResponse(
             url=f"/walk-in-orders?error={str(e)}",

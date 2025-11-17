@@ -43,29 +43,40 @@
 
                 <!-- Workflow Information -->
                 <div class="alert alert-info">
-                    <h5><i class="fas fa-info-circle mr-2"></i>Walk-in Orders Workflow</h5>
-                    <p class="mb-1"><strong>For walk-in patients who need lab tests, radiology studies, or procedures:</strong></p>
-                    <ol class="mb-0">
-                        <li>Search and select the patient</li>
-                        <li>Select the service from the dropdown (or type manually if not in list)</li>
-                        <li>Fill in additional details and click "Create Order"</li>
-                        <li>Once created, click "Check In" to mark the order as ready for processing</li>
+                    <h5><i class="fas fa-info-circle mr-2"></i>Walk-in Services & Payment Flow</h5>
+                    <ol class="mb-2">
+                        <li><strong>Department / Pharmacy Staff:</strong> Search for the patient, capture the service (lab, radiology, pharmacy sale, procedure) and submit.</li>
+                        <li><strong>System:</strong> Automatically creates an invoice & charge. Print/download invoice for the patient.</li>
+                        <li><strong>Front Desk:</strong> Collect payment, print receipt, then click <em>Check In</em> to notify the department that payment is confirmed.</li>
+                        <li><strong>Department:</strong> Receives the receipt and delivers the service or dispenses medication.</li>
                     </ol>
+                    <p class="mb-0"><strong>Reminder:</strong> Orders can only be checked in after the invoice balance is zero (payment confirmed).</p>
                 </div>
 
                 <!-- Create Walk-in Order Buttons -->
                 <div class="row mb-3">
                     <div class="col-md-12">
                         <div class="btn-group" role="group">
+                            {% if can_create_lab_orders %}
                             <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#createLabOrderModal">
-                                <i class="fas fa-vial mr-1"></i> Create Walk-in Lab Order
+                                <i class="fas fa-vial mr-1"></i> Walk-in Lab Order
                             </button>
+                            {% endif %}
+                            {% if can_create_radiology_orders %}
                             <button type="button" class="btn btn-success" data-toggle="modal" data-target="#createRadiologyOrderModal">
-                                <i class="fas fa-x-ray mr-1"></i> Create Walk-in Radiology Order
+                                <i class="fas fa-x-ray mr-1"></i> Walk-in Radiology Order
                             </button>
+                            {% endif %}
+                            {% if can_create_pharmacy_sales %}
+                            <button type="button" class="btn btn-info" data-toggle="modal" data-target="#createPharmacySaleModal">
+                                <i class="fas fa-prescription-bottle-alt mr-1"></i> Walk-in Pharmacy Sale
+                            </button>
+                            {% endif %}
+                            {% if can_create_procedures %}
                             <button type="button" class="btn btn-warning" data-toggle="modal" data-target="#createProcedureModal">
-                                <i class="fas fa-procedures mr-1"></i> Create Walk-in Procedure
+                                <i class="fas fa-procedures mr-1"></i> Walk-in Procedure
                             </button>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -93,6 +104,7 @@
                                                 <th>Priority</th>
                                                 <th>Ordered By</th>
                                                 <th>Ordered At</th>
+                                                <th>Payment</th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -114,11 +126,31 @@
                                                 <td>{{ order.ordered_by.full_name if order.ordered_by else 'N/A' }}</td>
                                                 <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                                 <td>
+                                                    {% set lab_invoice = lab_invoice_map.get(order.id) %}
+                                                    {% if lab_invoice %}
+                                                        {% set lab_balance = lab_invoice.balance | float %}
+                                                        <span class="badge badge-{{ 'success' if lab_balance <= 0 else 'warning' }}">
+                                                            {{ 'Paid' if lab_balance <= 0 else 'Pending Payment' }}
+                                                        </span>
+                                                        <div class="mt-1">
+                                                            <a href="{{ url_for('view_invoice', invoice_id=lab_invoice.id) }}" class="btn btn-xs btn-outline-primary" target="_blank">
+                                                                <i class="fas fa-receipt"></i> View Invoice
+                                                            </a>
+                                                        </div>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">Invoice Pending</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if can_check_in_orders %}
                                                     <form method="POST" action="{{ url_for('check_in_walk_in_lab_order', order_id=order.id) }}" style="display: inline;">
                                                         <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Check in this lab order?');">
                                                             <i class="fas fa-check mr-1"></i> Check In
                                                         </button>
                                                     </form>
+                                                    {% else %}
+                                                    <span class="text-muted text-sm">Awaiting front desk confirmation</span>
+                                                    {% endif %}
                                                 </td>
                                             </tr>
                                             {% endfor %}
@@ -158,6 +190,7 @@
                                                 <th>Priority</th>
                                                 <th>Ordered By</th>
                                                 <th>Ordered At</th>
+                                                <th>Payment</th>
                                                 <th>Actions</th>
                                             </tr>
                                         </thead>
@@ -179,11 +212,31 @@
                                                 <td>{{ order.ordered_by.full_name if order.ordered_by else 'N/A' }}</td>
                                                 <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                                 <td>
+                                                    {% set radiology_invoice = radiology_invoice_map.get(order.id) %}
+                                                    {% if radiology_invoice %}
+                                                        {% set radiology_balance = radiology_invoice.balance | float %}
+                                                        <span class="badge badge-{{ 'success' if radiology_balance <= 0 else 'warning' }}">
+                                                            {{ 'Paid' if radiology_balance <= 0 else 'Pending Payment' }}
+                                                        </span>
+                                                        <div class="mt-1">
+                                                            <a href="{{ url_for('view_invoice', invoice_id=radiology_invoice.id) }}" class="btn btn-xs btn-outline-primary" target="_blank">
+                                                                <i class="fas fa-receipt"></i> View Invoice
+                                                            </a>
+                                                        </div>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">Invoice Pending</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if can_check_in_orders %}
                                                     <form method="POST" action="{{ url_for('check_in_walk_in_radiology_order', order_id=order.id) }}" style="display: inline;">
                                                         <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Check in this radiology order?');">
                                                             <i class="fas fa-check mr-1"></i> Check In
                                                         </button>
                                                     </form>
+                                                    {% else %}
+                                                    <span class="text-muted text-sm">Awaiting front desk confirmation</span>
+                                                    {% endif %}
                                                 </td>
                                             </tr>
                                             {% endfor %}
@@ -193,6 +246,93 @@
                                 {% else %}
                                 <div class="alert alert-info">
                                     <i class="fas fa-info-circle"></i> No pending walk-in radiology orders.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Walk-in Pharmacy Sales -->
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-prescription-bottle-alt mr-1"></i> Walk-in Pharmacy Sales (Pending Payment Confirmation)</h3>
+                                <div class="card-tools">
+                                    <span class="badge badge-info">{{ walk_in_pharmacy_sales|length }}</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if walk_in_pharmacy_sales %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Sale #</th>
+                                                <th>Patient</th>
+                                                <th>Medication</th>
+                                                <th>Quantity</th>
+                                                <th>Ordered By</th>
+                                                <th>Ordered At</th>
+                                                <th>Payment</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for sale in walk_in_pharmacy_sales %}
+                                            <tr>
+                                                <td>#{{ sale.id }}</td>
+                                                <td>
+                                                    {% if sale.encounter and sale.encounter.patient %}
+                                                    <strong>{{ sale.encounter.patient.first_name }} {{ sale.encounter.patient.last_name }}</strong><br>
+                                                    <small class="text-muted">{{ sale.encounter.patient.patient_number or 'N/A' }}</small>
+                                                    {% else %}
+                                                    <span class="text-muted">Patient record unavailable</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <strong>{{ sale.medication_name }}</strong><br>
+                                                    <small class="text-muted">{{ sale.dosage }} • {{ sale.frequency }} • {{ sale.duration }}</small>
+                                                </td>
+                                                <td>{{ sale.quantity or 1 }}</td>
+                                                <td>{{ sale.prescribed_by.full_name if sale.prescribed_by else 'N/A' }}</td>
+                                                <td>{{ sale.prescribed_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>
+                                                    {% set pharmacy_invoice = pharmacy_invoice_map.get(sale.id) %}
+                                                    {% if pharmacy_invoice %}
+                                                        {% set pharmacy_balance = pharmacy_invoice.balance | float %}
+                                                        <span class="badge badge-{{ 'success' if pharmacy_balance <= 0 else 'warning' }}">
+                                                            {{ 'Paid' if pharmacy_balance <= 0 else 'Pending Payment' }}
+                                                        </span>
+                                                        <div class="mt-1">
+                                                            <a href="{{ url_for('view_invoice', invoice_id=pharmacy_invoice.id) }}" class="btn btn-xs btn-outline-primary" target="_blank">
+                                                                <i class="fas fa-receipt"></i> View Invoice
+                                                            </a>
+                                                        </div>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">Invoice Pending</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if can_check_in_orders %}
+                                                    <form method="POST" action="{{ url_for('check_in_walk_in_pharmacy_sale', prescription_id=sale.id) }}" style="display: inline;">
+                                                        <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm payment for this pharmacy sale?');">
+                                                            <i class="fas fa-check mr-1"></i> Check In
+                                                        </button>
+                                                    </form>
+                                                    {% else %}
+                                                    <span class="text-muted text-sm">Awaiting front desk confirmation</span>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> No pending walk-in pharmacy sales.
                                 </div>
                                 {% endif %}
                             </div>
@@ -279,9 +419,29 @@
                         <div class="form-group">
                             <label for="patient_id_lab">Patient *</label>
                             <input type="text" class="form-control" id="patient_search_lab" placeholder="Search patient..." autocomplete="off" required>
-                            <input type="hidden" name="patient_id" id="patient_id_lab" required>
+                            <input type="hidden" name="patient_id" id="patient_id_lab">
                             <small class="form-text text-muted">Start typing to search for patient</small>
                             <div id="patient_search_results_lab" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto; width: 100%;"></div>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input type="checkbox" class="form-check-input walk-in-toggle" id="lab_walk_in_toggle">
+                            <label class="form-check-label" for="lab_walk_in_toggle">Walk-in customer (not registered)</label>
+                        </div>
+                        <div id="lab_walk_in_fields" class="border rounded p-2 mb-3" style="display: none;">
+                            <div class="form-row">
+                                <div class="col-md-6">
+                                    <label>First Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_first_name" placeholder="First name" disabled>
+                                </div>
+                                <div class="col-md-6">
+                                    <label>Last Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_last_name" placeholder="Last name" disabled>
+                                </div>
+                            </div>
+                            <div class="form-group mt-2">
+                                <label>Phone Number</label>
+                                <input type="text" class="form-control walk-in-input" name="walk_in_phone" placeholder="Phone number (optional)" disabled>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="test_name">Test Name *</label>
@@ -334,9 +494,29 @@
                         <div class="form-group">
                             <label for="patient_id_rad">Patient *</label>
                             <input type="text" class="form-control" id="patient_search_rad" placeholder="Search patient..." autocomplete="off" required>
-                            <input type="hidden" name="patient_id" id="patient_id_rad" required>
+                            <input type="hidden" name="patient_id" id="patient_id_rad">
                             <small class="form-text text-muted">Start typing to search for patient</small>
                             <div id="patient_search_results_rad" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto; width: 100%;"></div>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input type="checkbox" class="form-check-input walk-in-toggle" id="rad_walk_in_toggle">
+                            <label class="form-check-label" for="rad_walk_in_toggle">Walk-in customer (not registered)</label>
+                        </div>
+                        <div id="rad_walk_in_fields" class="border rounded p-2 mb-3" style="display: none;">
+                            <div class="form-row">
+                                <div class="col-md-6">
+                                    <label>First Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_first_name" placeholder="First name" disabled>
+                                </div>
+                                <div class="col-md-6">
+                                    <label>Last Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_last_name" placeholder="Last name" disabled>
+                                </div>
+                            </div>
+                            <div class="form-group mt-2">
+                                <label>Phone Number</label>
+                                <input type="text" class="form-control walk-in-input" name="walk_in_phone" placeholder="Phone number (optional)" disabled>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="study_type">Study Type *</label>
@@ -384,6 +564,93 @@
         </div>
     </div>
 
+    <!-- Create Walk-in Pharmacy Sale Modal -->
+    <div class="modal fade" id="createPharmacySaleModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-prescription-bottle-alt mr-1"></i> Create Walk-in Pharmacy Sale</h5>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <form method="POST" action="{{ url_for('create_walk_in_pharmacy_sale') }}">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="patient_id_pharmacy">Patient *</label>
+                            <input type="text" class="form-control" id="patient_search_pharmacy" placeholder="Search patient..." autocomplete="off" required>
+                            <input type="hidden" name="patient_id" id="patient_id_pharmacy">
+                            <small class="form-text text-muted">Start typing to search for patient</small>
+                            <div id="patient_search_results_pharmacy" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto; width: 100%;"></div>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input type="checkbox" class="form-check-input walk-in-toggle" id="pharmacy_walk_in_toggle">
+                            <label class="form-check-label" for="pharmacy_walk_in_toggle">Walk-in customer (not registered)</label>
+                        </div>
+                        <div id="pharmacy_walk_in_fields" class="border rounded p-2 mb-3" style="display: none;">
+                            <div class="form-row">
+                                <div class="col-md-6">
+                                    <label>First Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_first_name" placeholder="First name" disabled>
+                                </div>
+                                <div class="col-md-6">
+                                    <label>Last Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_last_name" placeholder="Last name" disabled>
+                                </div>
+                            </div>
+                            <div class="form-group mt-2">
+                                <label>Phone Number</label>
+                                <input type="text" class="form-control walk-in-input" name="walk_in_phone" placeholder="Phone number (optional)" disabled>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="pharmacy_medication_name">Medication *</label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="medication_name"
+                                   id="pharmacy_medication_name"
+                                   list="pharmacy_medication_options"
+                                   placeholder="Select or type medication"
+                                   required>
+                            <datalist id="pharmacy_medication_options">
+                                {% for item in pharmacy_items %}
+                                <option value="{{ item.service_name }}" data-code="{{ item.service_code or '' }}" label="{{ item.service_name }}{% if item.service_code %} ({{ item.service_code }}){% endif %} - {{ item.currency }} {{ item.unit_price }}"></option>
+                                {% endfor %}
+                            </datalist>
+                            <small class="form-text text-muted">Suggestions are pulled from pharmacy service pricing, but you can also type manually.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="pharmacy_medication_code">Medication Code</label>
+                            <input type="text" class="form-control" name="medication_code" id="pharmacy_medication_code" placeholder="Auto-filled when selecting from list">
+                        </div>
+                        <div class="form-group">
+                            <label for="pharmacy_dosage">Dosage *</label>
+                            <input type="text" class="form-control" name="dosage" id="pharmacy_dosage" placeholder="e.g., 500mg" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="pharmacy_frequency">Frequency *</label>
+                            <input type="text" class="form-control" name="frequency" id="pharmacy_frequency" placeholder="e.g., Twice daily" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="pharmacy_duration">Duration *</label>
+                            <input type="text" class="form-control" name="duration" id="pharmacy_duration" placeholder="e.g., 7 days" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="pharmacy_quantity">Quantity</label>
+                            <input type="number" class="form-control" name="quantity" id="pharmacy_quantity" min="1" value="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="pharmacy_instructions">Instructions</label>
+                            <textarea class="form-control" name="instructions" id="pharmacy_instructions" rows="2" placeholder="Special instructions (optional)"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-info">Create Sale</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Create Walk-in Procedure Modal -->
     <div class="modal fade" id="createProcedureModal" tabindex="-1" role="dialog">
         <div class="modal-dialog" role="document">
@@ -397,9 +664,29 @@
                         <div class="form-group">
                             <label for="patient_id_proc">Patient *</label>
                             <input type="text" class="form-control" id="patient_search_proc" placeholder="Search patient..." autocomplete="off" required>
-                            <input type="hidden" name="patient_id" id="patient_id_proc" required>
+                            <input type="hidden" name="patient_id" id="patient_id_proc">
                             <small class="form-text text-muted">Start typing to search for patient</small>
                             <div id="patient_search_results_proc" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 200px; overflow-y: auto; width: 100%;"></div>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input type="checkbox" class="form-check-input walk-in-toggle" id="proc_walk_in_toggle">
+                            <label class="form-check-label" for="proc_walk_in_toggle">Walk-in customer (not registered)</label>
+                        </div>
+                        <div id="proc_walk_in_fields" class="border rounded p-2 mb-3" style="display: none;">
+                            <div class="form-row">
+                                <div class="col-md-6">
+                                    <label>First Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_first_name" placeholder="First name" disabled>
+                                </div>
+                                <div class="col-md-6">
+                                    <label>Last Name *</label>
+                                    <input type="text" class="form-control walk-in-input" name="walk_in_last_name" placeholder="Last name" disabled>
+                                </div>
+                            </div>
+                            <div class="form-group mt-2">
+                                <label>Phone Number</label>
+                                <input type="text" class="form-control walk-in-input" name="walk_in_phone" placeholder="Phone number (optional)" disabled>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="procedure_name">Procedure Name *</label>
@@ -510,6 +797,51 @@
         setupPatientSearch('patient_search_lab', 'patient_search_results_lab', 'patient_id_lab');
         setupPatientSearch('patient_search_rad', 'patient_search_results_rad', 'patient_id_rad');
         setupPatientSearch('patient_search_proc', 'patient_search_results_proc', 'patient_id_proc');
+        setupPatientSearch('patient_search_pharmacy', 'patient_search_results_pharmacy', 'patient_id_pharmacy');
+        
+        function initWalkInToggle(section) {
+            const toggle = document.getElementById(`${section}_walk_in_toggle`);
+            const patientSearchInput = document.getElementById(`patient_search_${section}`);
+            const patientIdInput = document.getElementById(`patient_id_${section}`);
+            const walkInFields = document.getElementById(`${section}_walk_in_fields`);
+            if (!toggle || !patientIdInput || !walkInFields) return;
+            
+            const walkInInputs = walkInFields.querySelectorAll('input.walk-in-input');
+            
+            const setWalkInState = (enabled) => {
+                if (enabled) {
+                    if (patientSearchInput) {
+                        patientSearchInput.value = '';
+                        patientSearchInput.removeAttribute('required');
+                        patientSearchInput.disabled = true;
+                    }
+                    if (patientIdInput) {
+                        patientIdInput.value = '';
+                    }
+                    walkInFields.style.display = 'block';
+                    walkInInputs.forEach(inp => {
+                        inp.disabled = false;
+                        inp.setAttribute('required', 'required');
+                    });
+                } else {
+                    if (patientSearchInput) {
+                        patientSearchInput.disabled = false;
+                        patientSearchInput.setAttribute('required', 'required');
+                    }
+                    walkInFields.style.display = 'none';
+                    walkInInputs.forEach(inp => {
+                        inp.value = '';
+                        inp.disabled = true;
+                        inp.removeAttribute('required');
+                    });
+                }
+            };
+            
+            setWalkInState(toggle.checked);
+            toggle.addEventListener('change', () => setWalkInState(toggle.checked));
+        }
+        
+        ['lab', 'rad', 'proc', 'pharmacy'].forEach(initWalkInToggle);
         
         // Auto-fill code fields when service is selected
         // Lab test
@@ -544,6 +876,26 @@
                 const selectedOption = this.options[this.selectedIndex];
                 if (selectedOption && selectedOption.dataset.code) {
                     procedureCodeInput.value = selectedOption.dataset.code;
+                }
+            });
+        }
+
+        // Pharmacy medication code auto-fill when selecting from datalist
+        const pharmacyMedicationInput = document.getElementById('pharmacy_medication_name');
+        const pharmacyMedicationCode = document.getElementById('pharmacy_medication_code');
+        const pharmacyMedicationOptions = document.getElementById('pharmacy_medication_options');
+        if (pharmacyMedicationInput && pharmacyMedicationCode && pharmacyMedicationOptions) {
+            pharmacyMedicationInput.addEventListener('input', function() {
+                const value = this.value.trim();
+                let matched = false;
+                Array.from(pharmacyMedicationOptions.options).forEach(option => {
+                    if (option.value === value && option.dataset.code) {
+                        pharmacyMedicationCode.value = option.dataset.code;
+                        matched = true;
+                    }
+                });
+                if (!matched) {
+                    pharmacyMedicationCode.value = '';
                 }
             });
         }

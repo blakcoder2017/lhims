@@ -111,10 +111,17 @@ def billing_dashboard(
         
         patient_id_key = patient.id
         if patient_id_key not in patient_summaries:
+            # Get patient payment mechanism
+            patient_payment_mechanism = None
+            if patient.payment_mechanism:
+                patient_payment_mechanism = getattr(patient.payment_mechanism, "value", patient.payment_mechanism)
+            
             patient_summaries[patient_id_key] = {
                 "patient_id": patient.id,
                 "patient_name": f"{patient.first_name} {patient.last_name}",
                 "patient_number": patient.patient_number or "N/A",
+                "patient_payment_mechanism": patient_payment_mechanism,
+                "is_insurance_patient": patient_payment_mechanism in ["nhis", "private_insurance"],
                 "invoice_count": 0,
                 "open_invoices": 0,
                 "total_billed": Decimal("0.00"),

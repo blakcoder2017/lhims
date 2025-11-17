@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta
+from typing import List, Optional, Tuple
 from app.models.appointment_models import Appointment, AppointmentStatus, AppointmentType
 from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
 from app.models.patient_models import Patient
@@ -80,6 +80,79 @@ def get_appointments_by_department(
         Appointment.priority.asc(),
         Appointment.queue_number.asc(),
         Appointment.scheduled_date.asc()
+    ).all()
+
+
+def calculate_wait_time(appointment: Appointment) -> Optional[timedelta]:
+    """Calculate how long a patient has been waiting in the queue"""
+    if not appointment:
+        return None
+    
+    # Use checked_in_at if available, otherwise use scheduled_date
+    start_time = appointment.checked_in_at or appointment.scheduled_date
+    if not start_time:
+        return None
+    
+    return datetime.now() - start_time
+
+
+def format_wait_time(wait_time: Optional[timedelta]) -> str:
+    """Format wait time as a human-readable string"""
+    if not wait_time:
+        return "N/A"
+    
+    total_seconds = int(wait_time.total_seconds())
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    elif minutes > 0:
+        return f"{minutes}m"
+    else:
+        return "< 1m"
+
+
+def get_unfulfilled_queues_previous_days(
+    db: Session, 
+    department: Optional[str] = None, 
+    search: Optional[str] = None,
+    days_back: int = 7
+) -> List[Appointment]:
+    """Gets unfulfilled queues from previous days (not completed or cancelled)"""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_date = today - timedelta(days=days_back)
+    
+    query = db.query(Appointment).options(joinedload(Appointment.patient)).filter(
+        Appointment.scheduled_date >= start_date,
+        Appointment.scheduled_date < today,
+        Appointment.is_active == True,
+        Appointment.status.in_([
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CHECKED_IN,
+            AppointmentStatus.IN_PROGRESS
+        ])
+    )
+    
+    if department:
+        query = query.filter(Appointment.department == department)
+    
+    if search:
+        search_term = f"%{search.strip()}%"
+        query = query.join(Patient).filter(
+            or_(
+                Patient.first_name.ilike(search_term),
+                Patient.last_name.ilike(search_term),
+                func.concat(Patient.first_name, " ", Patient.last_name).ilike(search_term),
+                Patient.patient_number.ilike(search_term),
+                Patient.phone_number.ilike(search_term)
+            )
+        )
+    
+    return query.order_by(
+        Appointment.scheduled_date.asc(),
+        Appointment.priority.asc(),
+        Appointment.queue_number.asc()
     ).all()
 
 
