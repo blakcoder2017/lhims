@@ -50,6 +50,7 @@ class Medication(Base):
     is_nhis_covered = Column(Boolean, default=False)  # NHIS coverage status
     nhis_code = Column(String(50), nullable=True)  # NHIS medication code
     is_formulary = Column(Boolean, default=True)  # Is it in the formulary
+    is_controlled = Column(Boolean, default=False)  # Is this a controlled medication (requires prescription)
     
     # Pricing
     unit_cost = Column(Numeric(10, 2), nullable=True)  # Cost per unit

@@ -24,6 +24,8 @@ class Encounter(Base):
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True)  # Optional link to appointment
     clinician_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Doctor/nurse who documented
+    opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (for OPD encounters)
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (for IPD encounters)
     
     # Encounter Details
     status = Column(postgresql.ENUM(EncounterStatus, values_callable=lambda x: [e.value for e in x], name='encounterstatus', create_type=False), nullable=False, default=EncounterStatus.IN_PROGRESS)
@@ -58,10 +60,11 @@ class Encounter(Base):
     patient = relationship("Patient", back_populates="encounters")
     appointment = relationship("Appointment", back_populates="encounters")
     clinician = relationship("User", foreign_keys=[clinician_id])
+    opd_visit = relationship("OPDVisit", back_populates="encounters")
+    admission = relationship("Admission", back_populates="encounters", foreign_keys=[admission_id])
     lab_orders = relationship("LabOrder", back_populates="encounter", cascade="all, delete-orphan")
     radiology_orders = relationship("RadiologyOrder", back_populates="encounter", cascade="all, delete-orphan")
     prescriptions = relationship("Prescription", back_populates="encounter", cascade="all, delete-orphan")
-    admission = relationship("Admission", back_populates="encounter", uselist=False)
     procedures = relationship("Procedure", back_populates="encounter", cascade="all, delete-orphan")
     diseases = relationship("EncounterDisease", back_populates="encounter", cascade="all, delete-orphan")
     
@@ -91,6 +94,8 @@ class LabOrder(Base):
     encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=True)  # Optional for walk-in orders
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)  # Direct patient link for walk-in orders
     ordered_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Clinician who ordered
+    opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (denormalized for reporting)
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (denormalized for reporting)
     
     # Walk-in Support
     is_walk_in = Column(Boolean, default=False, server_default='false')  # True if this is a walk-in order
@@ -123,6 +128,8 @@ class LabOrder(Base):
     ordered_by = relationship("User", foreign_keys=[ordered_by_id])
     result_entered_by = relationship("User", foreign_keys=[result_entered_by_id])
     checked_in_by = relationship("User", foreign_keys=[checked_in_by_id])
+    opd_visit = relationship("OPDVisit", foreign_keys=[opd_visit_id])
+    admission = relationship("Admission", foreign_keys=[admission_id])
     samples = relationship("LabSample", back_populates="lab_order")
     qc_records = relationship("QCRecord", back_populates="lab_order")
     
@@ -143,6 +150,8 @@ class RadiologyOrder(Base):
     encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=True)  # Optional for walk-in orders
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)  # Direct patient link for walk-in orders
     ordered_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Clinician who ordered
+    opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (denormalized for reporting)
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (denormalized for reporting)
     
     # Walk-in Support
     is_walk_in = Column(Boolean, default=False, server_default='false')  # True if this is a walk-in order
@@ -177,6 +186,8 @@ class RadiologyOrder(Base):
     ordered_by = relationship("User", foreign_keys=[ordered_by_id])
     report_entered_by = relationship("User", foreign_keys=[report_entered_by_id])
     checked_in_by = relationship("User", foreign_keys=[checked_in_by_id])
+    opd_visit = relationship("OPDVisit", foreign_keys=[opd_visit_id])
+    admission = relationship("Admission", foreign_keys=[admission_id])
     images = relationship("RadiologyImage", back_populates="radiology_order")
     
     def __repr__(self):
@@ -196,6 +207,8 @@ class Prescription(Base):
     encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=False)
     prescribed_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Clinician who prescribed
     medication_id = Column(Integer, ForeignKey("medications.id"), nullable=True)  # Link to inventory medication (optional)
+    opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (denormalized for reporting)
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (denormalized for reporting)
     
     # Prescription Details
     medication_name = Column(String(200), nullable=False)  # Name of medication
@@ -226,6 +239,8 @@ class Prescription(Base):
     prescribed_by = relationship("User", foreign_keys=[prescribed_by_id])
     dispensed_by = relationship("User", foreign_keys=[dispensed_by_id])
     checked_in_by = relationship("User", foreign_keys=[checked_in_by_id])
+    opd_visit = relationship("OPDVisit", foreign_keys=[opd_visit_id])
+    admission = relationship("Admission", foreign_keys=[admission_id])
     medication = relationship("Medication", foreign_keys=[medication_id])  # Link to inventory medication
     inventory_transactions = relationship("InventoryTransaction", back_populates="prescription")
     

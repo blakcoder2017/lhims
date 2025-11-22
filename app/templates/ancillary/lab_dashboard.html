@@ -23,18 +23,51 @@
         <section class="content">
             <div class="container-fluid">
 
-                <!-- Status Filter -->
+                <!-- Payment Notice for Cash Patients -->
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-triangle"></i> Payment Notice</h5>
+                    <p class="mb-0">
+                        <strong>Cash-paying patients must complete payment at the Finance department before lab results can be saved.</strong>
+                        Orders requiring payment are highlighted in yellow with a payment notice.
+                    </p>
+                </div>
+
+                <!-- Status Filter & Search -->
                 <div class="card">
                     <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Orders</h3>
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter & Search Orders</h3>
                     </div>
                     <div class="card-body">
-                        <div class="btn-group" role="group">
-                            <a href="/lab" class="btn btn-sm btn-outline-primary {{ 'active' if not status_filter else '' }}">All Pending</a>
-                            <a href="/lab?status_filter=pending" class="btn btn-sm btn-outline-warning {{ 'active' if status_filter == 'pending' else '' }}">Pending</a>
-                            <a href="/lab?status_filter=in_progress" class="btn btn-sm btn-outline-info {{ 'active' if status_filter == 'in_progress' else '' }}">In Progress</a>
-                            <a href="/lab?status_filter=completed" class="btn btn-sm btn-outline-success {{ 'active' if status_filter == 'completed' else '' }}">Completed</a>
-                        </div>
+                        <form method="GET" action="/lab" class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Search by Patient Name, Patient Number, or Phone Number</label>
+                                    <input type="text" name="search" class="form-control" placeholder="Enter patient name, number, or phone..." value="{{ search or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label>Filter by Status</label>
+                                    <div class="btn-group" role="group">
+                                        <a href="/lab{% if search %}?search={{ search }}{% endif %}" class="btn btn-sm btn-outline-primary {{ 'active' if not status_filter else '' }}">All Pending</a>
+                                        <a href="/lab?status_filter=pending{% if search %}&search={{ search }}{% endif %}" class="btn btn-sm btn-outline-warning {{ 'active' if status_filter == 'pending' else '' }}">Pending</a>
+                                        <a href="/lab?status_filter=in_progress{% if search %}&search={{ search }}{% endif %}" class="btn btn-sm btn-outline-info {{ 'active' if status_filter == 'in_progress' else '' }}">In Progress</a>
+                                        <a href="/lab?status_filter=completed{% if search %}&search={{ search }}{% endif %}" class="btn btn-sm btn-outline-success {{ 'active' if status_filter == 'completed' else '' }}">Completed</a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-12">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-search mr-1"></i> Search
+                                </button>
+                                {% if search or status_filter %}
+                                <a href="/lab" class="btn btn-secondary">
+                                    <i class="fas fa-times mr-1"></i> Clear Filters
+                                </a>
+                                {% endif %}
+                            </div>
+                        </form>
                     </div>
                 </div>
 
@@ -63,7 +96,8 @@
                                 </thead>
                                 <tbody>
                                     {% for order in lab_orders %}
-                                    <tr>
+                                    {% set payment_status = lab_order_payment_status.get(order.id) %}
+                                    <tr {% if payment_status and payment_status.payment_required and not payment_status.payment_paid %}class="table-warning"{% endif %}>
                                         <td><strong>#{{ order.id }}</td>
                                         <td>{{ order.encounter.patient.first_name }} {{ order.encounter.patient.last_name }}</td>
                                         <td><span class="badge badge-primary">{{ order.encounter.patient.patient_number or 'N/A' }}</span></td>
@@ -79,6 +113,9 @@
                                             <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">
                                                 {{ order.status.value.replace('_', ' ').title() }}
                                             </span>
+                                            {% if payment_status and payment_status.payment_required and not payment_status.payment_paid %}
+                                            <br><small class="text-danger"><i class="fas fa-exclamation-circle"></i> Payment Required</small>
+                                            {% endif %}
                                         </td>
                                         <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                         <td>

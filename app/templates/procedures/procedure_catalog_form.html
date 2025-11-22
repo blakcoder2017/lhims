@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>
+                            {% if procedure %}
+                                <i class="fas fa-edit mr-2"></i>Edit Procedure Type
+                            {% else %}
+                                <i class="fas fa-plus-circle mr-2"></i>Create Procedure Type
+                            {% endif %}
+                        </h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('procedure_catalog_dashboard') }}">Procedure Catalog</a></li>
+                            <li class="breadcrumb-item active">{% if procedure %}Edit{% else %}Create{% endif %}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-ban"></i> Error</h5>
+                    {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <form method="POST" action="{% if procedure %}{{ url_for('update_procedure_catalog', catalog_id=procedure.id) }}{% else %}{{ url_for('create_procedure_catalog') }}{% endif %}">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <!-- Basic Information -->
+                            <div class="card card-primary card-outline">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Basic Information</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <label for="procedure_name">Procedure Name <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" id="procedure_name" name="procedure_name" 
+                                               value="{{ procedure.procedure_name if procedure else '' }}" required 
+                                               placeholder="e.g., Appendectomy, Colonoscopy, Biopsy">
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="procedure_code">Procedure Code</label>
+                                                <input type="text" class="form-control" id="procedure_code" name="procedure_code" 
+                                                       value="{{ procedure.procedure_code if procedure else '' }}" 
+                                                       placeholder="e.g., CPT code, ICD-10-PCS">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="procedure_category">Category</label>
+                                                <input type="text" class="form-control" id="procedure_category" name="procedure_category" 
+                                                       value="{{ procedure.procedure_category if procedure else '' }}" 
+                                                       placeholder="e.g., Surgery, Diagnostic, Therapeutic">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="procedure_type">Procedure Type</label>
+                                        <select class="form-control" id="procedure_type" name="procedure_type">
+                                            <option value="">Select Type</option>
+                                            <option value="surgical" {{ 'selected' if procedure and procedure.procedure_type == 'surgical' else '' }}>Surgical</option>
+                                            <option value="non_surgical" {{ 'selected' if procedure and procedure.procedure_type == 'non_surgical' else '' }}>Non-Surgical</option>
+                                            <option value="diagnostic" {{ 'selected' if procedure and procedure.procedure_type == 'diagnostic' else '' }}>Diagnostic</option>
+                                            <option value="therapeutic" {{ 'selected' if procedure and procedure.procedure_type == 'therapeutic' else '' }}>Therapeutic</option>
+                                            <option value="minor" {{ 'selected' if procedure and procedure.procedure_type == 'minor' else '' }}>Minor</option>
+                                            <option value="major" {{ 'selected' if procedure and procedure.procedure_type == 'major' else '' }}>Major</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="description">Description</label>
+                                        <textarea class="form-control" id="description" name="description" rows="3" 
+                                                  placeholder="Detailed description of the procedure">{{ procedure.description if procedure else '' }}</textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="indication">Common Indications</label>
+                                        <textarea class="form-control" id="indication" name="indication" rows="2" 
+                                                  placeholder="Common clinical indications for this procedure">{{ procedure.indication if procedure else '' }}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Duration Information -->
+                            <div class="card card-primary card-outline">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-clock mr-1"></i> Duration Information</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="estimated_duration_minutes">Estimated Duration (minutes)</label>
+                                                <input type="number" class="form-control" id="estimated_duration_minutes" name="estimated_duration_minutes" 
+                                                       value="{{ procedure.estimated_duration_minutes if procedure else '' }}" 
+                                                       min="0" placeholder="e.g., 60">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="typical_duration_minutes">Typical Duration (minutes)</label>
+                                                <input type="number" class="form-control" id="typical_duration_minutes" name="typical_duration_minutes" 
+                                                       value="{{ procedure.typical_duration_minutes if procedure else '' }}" 
+                                                       min="0" placeholder="e.g., 45-75">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Pricing Information -->
+                            <div class="card card-primary card-outline">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-money-bill-wave mr-1"></i> Pricing Information</h3>
+                                </div>
+                                <div class="card-body">
+                                    <h5>Cash Pricing</h5>
+                                    <div class="row">
+                                        <div class="col-md-8">
+                                            <div class="form-group">
+                                                <label for="cash_price">Cash Price</label>
+                                                <input type="number" step="0.01" class="form-control" id="cash_price" name="cash_price" 
+                                                       value="{{ procedure.cash_price if procedure else '' }}" 
+                                                       min="0" placeholder="0.00">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-group">
+                                                <label for="cash_currency">Currency</label>
+                                                <select class="form-control" id="cash_currency" name="cash_currency">
+                                                    <option value="GHS" {{ 'selected' if not procedure or procedure.cash_currency == 'GHS' else '' }}>GHS</option>
+                                                    <option value="USD" {{ 'selected' if procedure and procedure.cash_currency == 'USD' else '' }}>USD</option>
+                                                    <option value="EUR" {{ 'selected' if procedure and procedure.cash_currency == 'EUR' else '' }}>EUR</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <hr>
+
+                                    <h5>NHIS Coverage</h5>
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="nhis_covered" name="nhis_covered" value="true"
+                                                   {{ 'checked' if procedure and procedure.nhis_covered else '' }}>
+                                            <label class="form-check-label" for="nhis_covered">NHIS Covered</label>
+                                        </div>
+                                    </div>
+                                    <div class="row" id="nhisFields" style="display: {{ 'block' if procedure and procedure.nhis_covered else 'none' }};">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="nhis_code">NHIS Code</label>
+                                                <input type="text" class="form-control" id="nhis_code" name="nhis_code" 
+                                                       value="{{ procedure.nhis_code if procedure else '' }}" 
+                                                       placeholder="NHIS procedure code">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="nhis_price">NHIS Price</label>
+                                                <input type="number" step="0.01" class="form-control" id="nhis_price" name="nhis_price" 
+                                                       value="{{ procedure.nhis_price if procedure else '' }}" 
+                                                       min="0" placeholder="0.00">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <hr>
+
+                                    <h5>Private Insurance Coverage</h5>
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="private_insurance_covered" name="private_insurance_covered" value="true"
+                                                   {{ 'checked' if procedure and procedure.private_insurance_covered else '' }}>
+                                            <label class="form-check-label" for="private_insurance_covered">Private Insurance Covered</label>
+                                        </div>
+                                    </div>
+                                    <div class="row" id="privateInsuranceFields" style="display: {{ 'block' if procedure and procedure.private_insurance_covered else 'none' }};">
+                                        <div class="col-md-12">
+                                            <div class="form-group">
+                                                <label for="private_insurance_price">Private Insurance Price</label>
+                                                <input type="number" step="0.01" class="form-control" id="private_insurance_price" name="private_insurance_price" 
+                                                       value="{{ procedure.private_insurance_price if procedure else '' }}" 
+                                                       min="0" placeholder="0.00">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Procedure Details -->
+                            <div class="card card-primary card-outline">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-clipboard-list mr-1"></i> Procedure Details</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <label for="preparation_instructions">Preparation Instructions</label>
+                                        <textarea class="form-control" id="preparation_instructions" name="preparation_instructions" rows="3" 
+                                                  placeholder="Pre-procedure preparation instructions">{{ procedure.preparation_instructions if procedure else '' }}</textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="post_procedure_care">Post-Procedure Care</label>
+                                        <textarea class="form-control" id="post_procedure_care" name="post_procedure_care" rows="3" 
+                                                  placeholder="Post-procedure care instructions">{{ procedure.post_procedure_care if procedure else '' }}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Anesthesia & Location -->
+                            <div class="card card-primary card-outline">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-hospital mr-1"></i> Anesthesia & Location</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="requires_anesthesia" name="requires_anesthesia" value="true"
+                                                   {{ 'checked' if procedure and procedure.requires_anesthesia else '' }}>
+                                            <label class="form-check-label" for="requires_anesthesia">Requires Anesthesia</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group" id="anesthesiaFields" style="display: {{ 'block' if procedure and procedure.requires_anesthesia else 'none' }};">
+                                        <label for="typical_anesthesia_type">Typical Anesthesia Type</label>
+                                        <input type="text" class="form-control" id="typical_anesthesia_type" name="typical_anesthesia_type" 
+                                               value="{{ procedure.typical_anesthesia_type if procedure else '' }}" 
+                                               placeholder="e.g., General, Local, Regional">
+                                    </div>
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="requires_operating_room" name="requires_operating_room" value="true"
+                                                   {{ 'checked' if procedure and procedure.requires_operating_room else '' }}>
+                                            <label class="form-check-label" for="requires_operating_room">Requires Operating Room</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="typical_location">Typical Location</label>
+                                        <input type="text" class="form-control" id="typical_location" name="typical_location" 
+                                               value="{{ procedure.typical_location if procedure else '' }}" 
+                                               placeholder="e.g., Operating Room 1, Procedure Room">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Restrictions -->
+                            <div class="card card-primary card-outline">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-exclamation-triangle mr-1"></i> Restrictions</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="is_specialized" name="is_specialized" value="true"
+                                                   {{ 'checked' if procedure and procedure.is_specialized else '' }}>
+                                            <label class="form-check-label" for="is_specialized">Specialized Procedure (requires special approval)</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="requires_consultation" name="requires_consultation" value="true"
+                                                   {{ 'checked' if procedure and procedure.requires_consultation else '' }}>
+                                            <label class="form-check-label" for="requires_consultation">Requires Pre-Procedure Consultation</label>
+                                        </div>
+                                    </div>
+                                    {% if procedure %}
+                                    <div class="form-group">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" value="true"
+                                                   {{ 'checked' if procedure.is_active else '' }}>
+                                            <label class="form-check-label" for="is_active">Active</label>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-4">
+                            <!-- Help Card -->
+                            <div class="card card-info">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Help</h3>
+                                </div>
+                                <div class="card-body">
+                                    <p><strong>Procedure Catalog</strong> allows you to define procedure types with pricing for cash and insurance packages.</p>
+                                    <ul>
+                                        <li>Set different prices for cash, NHIS, and private insurance</li>
+                                        <li>Define procedure duration and requirements</li>
+                                        <li>Specify anesthesia and location needs</li>
+                                        <li>Set restrictions if needed</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="card-footer">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    <i class="fas fa-save mr-1"></i> {% if procedure %}Update{% else %}Create{% endif %} Procedure Type
+                                </button>
+                                <a href="{{ url_for('procedure_catalog_dashboard') }}" class="btn btn-secondary btn-lg">
+                                    <i class="fas fa-times mr-1"></i> Cancel
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // Toggle NHIS fields
+        document.getElementById('nhis_covered').addEventListener('change', function() {
+            document.getElementById('nhisFields').style.display = this.checked ? 'block' : 'none';
+        });
+
+        // Toggle Private Insurance fields
+        document.getElementById('private_insurance_covered').addEventListener('change', function() {
+            document.getElementById('privateInsuranceFields').style.display = this.checked ? 'block' : 'none';
+        });
+
+        // Toggle Anesthesia fields
+        document.getElementById('requires_anesthesia').addEventListener('change', function() {
+            document.getElementById('anesthesiaFields').style.display = this.checked ? 'block' : 'none';
+        });
+    </script>
+
+{% endblock %}
+

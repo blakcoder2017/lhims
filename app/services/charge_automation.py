@@ -7,6 +7,7 @@ This module automatically creates charges when orders are completed:
 - Prescriptions: Creates charge when prescription is dispensed
 """
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
 from decimal import Decimal
 from datetime import datetime
@@ -86,6 +87,27 @@ def get_or_create_invoice_for_encounter(
     
     invoice = billing_crud.create_invoice(db, invoice_data, created_by_id)
     return invoice
+
+
+def get_radiology_price(db: Session, radiology_order: "RadiologyOrder") -> Decimal:
+    """
+    Get the price for a radiology study from service pricing table.
+    Falls back to default price if not found.
+    """
+    # First, try to get price from service pricing table by study_type
+    if radiology_order.study_type:
+        pricing = service_pricing_crud.get_service_pricing_by_name(db, radiology_order.study_type)
+        if pricing and pricing.charge_type == "radiology":
+            return pricing.unit_price
+    
+    # Try to get default radiology price for the charge type
+    radiology_pricings = service_pricing_crud.get_service_pricing_by_charge_type(db, "radiology")
+    if radiology_pricings:
+        # Use first active radiology pricing as default
+        return radiology_pricings[0].unit_price
+    
+    # Fallback to default
+    return DEFAULT_RADIOLOGY_COST
 
 
 def get_lab_test_price(db: Session, lab_order: LabOrder) -> Decimal:
@@ -192,8 +214,9 @@ def get_service_price(
 def create_charge_for_consultation(
     db: Session,
     patient_id: int,
-    created_by_id: int,
-    encounter_id: Optional[int] = None
+    created_by_id: Optional[int] = None,
+    encounter_id: Optional[int] = None,
+    opd_visit_id: Optional[int] = None
 ) -> Optional[Charge]:
     """
     Ensure a consultation charge exists for the patient (covers vitals & initial encounter).
@@ -201,17 +224,53 @@ def create_charge_for_consultation(
     """
     from app.models.patient_models import Patient
     from app.schemas.billing_schemas import InvoiceCreate
+    from app.models.user_models import User
     
     patient = db.query(Patient).filter(Patient.id == patient_id).first()
     if not patient:
         return None
     
-    # Check if consultation charge already exists for this patient/encounter
-    existing_charge = db.query(Charge).join(Invoice).filter(
+    # If created_by_id is None, try to get a system user as fallback
+    if not created_by_id:
+        # Try to find an admin user as fallback
+        from app.models.user_models import Role
+        admin_role = db.query(Role).filter(Role.name == "Admin").first()
+        if admin_role:
+            admin_user = db.query(User).filter(
+                User.role_id == admin_role.id,
+                User.is_active == True
+            ).first()
+            if admin_user:
+                created_by_id = admin_user.id
+        
+        # If no admin found, use first active user
+        if not created_by_id:
+            first_user = db.query(User).filter(User.is_active == True).first()
+            if first_user:
+                created_by_id = first_user.id
+            else:
+                # If no users exist, this is a system error - return None
+                print("Warning: No active users found for consultation charge creation")
+                return None
+    
+    # Check if consultation charge already exists for this patient/encounter/opd_visit
+    query = db.query(Charge).join(Invoice).filter(
         Invoice.patient_id == patient_id,
-        Charge.charge_type == ChargeType.CONSULTATION,
-        Charge.encounter_id == encounter_id
-    ).first()
+        Charge.charge_type == ChargeType.CONSULTATION
+    )
+    
+    if encounter_id:
+        query = query.filter(Charge.encounter_id == encounter_id)
+    elif opd_visit_id:
+        query = query.filter(Charge.opd_visit_id == opd_visit_id)
+    else:
+        # Check for any consultation charge for this patient today
+        from datetime import date
+        query = query.filter(
+            func.date(Invoice.invoice_date) == date.today()
+        )
+    
+    existing_charge = query.first()
     
     if existing_charge:
         return existing_charge
@@ -222,6 +281,17 @@ def create_charge_for_consultation(
     # Get or create invoice
     if encounter_id:
         invoice = get_or_create_invoice_for_encounter(db, encounter_id, created_by_id)
+    elif opd_visit_id:
+        # Create invoice linked to OPD visit
+        invoice_data = InvoiceCreate(
+            patient_id=patient_id,
+            encounter_id=None,
+            appointment_id=None,
+            opd_visit_id=opd_visit_id,
+            payment_mechanism=patient.payment_mechanism,
+            charges=[]
+        )
+        invoice = billing_crud.create_invoice(db, invoice_data, created_by_id)
     else:
         # Create standalone invoice
         invoice_data = InvoiceCreate(
@@ -240,7 +310,8 @@ def create_charge_for_consultation(
         unit_price=unit_price,
         discount=Decimal('0.00'),
         tax_rate=Decimal('0.00'),
-        encounter_id=encounter_id
+        encounter_id=encounter_id,
+        opd_visit_id=opd_visit_id
     )
     
     charge = billing_crud.add_charge_to_invoice(db, invoice.id, charge_data)
@@ -287,7 +358,12 @@ def create_charge_for_lab_order(
         raise ValueError(f"Patient {patient_id} not found")
     
     # Check if patient is admitted (IPD)
-    is_admitted = ipd_crud.get_current_admission(db, encounter.patient_id) is not None
+    is_admitted = False
+    if encounter:
+        is_admitted = ipd_crud.get_current_admission(db, encounter.patient_id) is not None
+    else:
+        # For walk-in orders without encounter, check directly by patient_id
+        is_admitted = ipd_crud.get_current_admission(db, patient_id) is not None
     
     # Determine if payment is required immediately
     # OPD cash customers: Pay-as-you-go (payment required)
@@ -384,7 +460,12 @@ def create_charge_for_radiology_order(
         raise ValueError(f"Patient {patient_id} not found")
     
     # Check if patient is admitted (IPD)
-    is_admitted = ipd_crud.get_current_admission(db, encounter.patient_id) is not None
+    is_admitted = False
+    if encounter:
+        is_admitted = ipd_crud.get_current_admission(db, encounter.patient_id) is not None
+    else:
+        # For walk-in orders without encounter, check directly by patient_id
+        is_admitted = ipd_crud.get_current_admission(db, patient_id) is not None
     
     # Determine if payment is required immediately
     is_cash_customer = patient.payment_mechanism == PaymentMechanism.CASH

@@ -25,7 +25,7 @@ from app.models.encounter_models import (
 )
 from app.models.procedure_models import Procedure, ProcedureStatus
 from app.models.billing_models import Charge, Invoice
-from app.crud import encounter_crud, procedure_crud, service_pricing_crud, patient_crud
+from app.crud import encounter_crud, procedure_crud, service_pricing_crud, patient_crud, inventory_crud
 from app.schemas.encounter_schemas import (
     LabOrderCreate,
     RadiologyOrderCreate,
@@ -147,7 +147,9 @@ def walk_in_orders_dashboard(
     lab_tests = service_pricing_crud.get_service_pricing_by_charge_type(db, "lab_test")
     radiology_studies = service_pricing_crud.get_service_pricing_by_charge_type(db, "radiology")
     procedures = service_pricing_crud.get_service_pricing_by_charge_type(db, "procedure")
-    pharmacy_items = service_pricing_crud.get_service_pricing_by_charge_type(db, "pharmacy")
+    
+    # Load medications from pharmacy inventory database instead of service pricing
+    medications = inventory_crud.get_medications(db, skip=0, limit=500, search=None)
     
     def build_invoice_map(query_filter) -> Dict[int, Invoice]:
         charges = db.query(Charge).options(joinedload(Charge.invoice)).filter(*query_filter).all()
@@ -193,7 +195,7 @@ def walk_in_orders_dashboard(
         "lab_tests": lab_tests,
         "radiology_studies": radiology_studies,
         "procedures": procedures,
-        "pharmacy_items": pharmacy_items,
+        "medications": medications,  # Changed from pharmacy_items to medications from inventory
         "can_check_in_orders": can_check_in_orders,
         "can_create_lab_orders": can_create_lab_orders,
         "can_create_radiology_orders": can_create_radiology_orders,
@@ -218,7 +220,9 @@ def create_walk_in_lab_order(
     priority: str = Form("routine"),
 ):
     """Create a walk-in lab order"""
+    import traceback
     try:
+        print(f"[DEBUG] create_walk_in_lab_order called with test_name={test_name}")
         patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
         
         lab_order_data = LabOrderCreate(
@@ -234,18 +238,33 @@ def create_walk_in_lab_order(
         
         new_order = encounter_crud.create_lab_order(db, lab_order_data)
         
+        # Create charge for the lab order
         try:
-            create_charge_for_lab_order(db, new_order, current_user.id)
+            create_charge_for_lab_order(db, new_order, current_user.id, check_payment_required=False)
         except Exception as billing_error:
+            import traceback
             print(f"Warning: Unable to create walk-in lab charge for order {new_order.id}: {billing_error}")
+            print(traceback.format_exc())
+            # Don't fail the order creation if charge creation fails - can be created manually later
         
         return RedirectResponse(
-            url=f"/walk-in-orders?status=lab_order_created",
+            url=str(request.url_for("walk_in_orders_dashboard")) + "?status=lab_order_created",
             status_code=status.HTTP_302_FOUND
         )
+    except HTTPException as http_exc:
+        print(f"[DEBUG] HTTPException in create_walk_in_lab_order: {http_exc.status_code} - {http_exc.detail}")
+        raise
     except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Error creating walk-in lab order: {error_msg}")
+        traceback.print_exc()
+        try:
+            redirect_url = str(request.url_for("walk_in_orders_dashboard")) + f"?error={error_msg[:200]}"
+        except Exception as url_error:
+            print(f"[ERROR] Failed to generate redirect URL: {url_error}")
+            redirect_url = "/walk-in-orders?error=Failed to create lab order"
         return RedirectResponse(
-            url=f"/walk-in-orders?error={str(e)}",
+            url=redirect_url,
             status_code=status.HTTP_302_FOUND
         )
 
@@ -267,7 +286,9 @@ def create_walk_in_radiology_order(
     priority: str = Form("routine"),
 ):
     """Create a walk-in radiology order"""
+    import traceback
     try:
+        print(f"[DEBUG] create_walk_in_radiology_order called with study_type={study_type}")
         patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
         
         radiology_order_data = RadiologyOrderCreate(
@@ -285,18 +306,33 @@ def create_walk_in_radiology_order(
         
         new_order = encounter_crud.create_radiology_order(db, radiology_order_data)
         
+        # Create charge for the radiology order
         try:
-            create_charge_for_radiology_order(db, new_order, current_user.id)
+            create_charge_for_radiology_order(db, new_order, current_user.id, check_payment_required=False)
         except Exception as billing_error:
+            import traceback
             print(f"Warning: Unable to create walk-in radiology charge for order {new_order.id}: {billing_error}")
+            print(traceback.format_exc())
+            # Don't fail the order creation if charge creation fails - can be created manually later
         
         return RedirectResponse(
-            url=f"/walk-in-orders?status=radiology_order_created",
+            url=str(request.url_for("walk_in_orders_dashboard")) + "?status=radiology_order_created",
             status_code=status.HTTP_302_FOUND
         )
+    except HTTPException as http_exc:
+        print(f"[DEBUG] HTTPException in create_walk_in_radiology_order: {http_exc.status_code} - {http_exc.detail}")
+        raise
     except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Error creating walk-in radiology order: {error_msg}")
+        traceback.print_exc()
+        try:
+            redirect_url = str(request.url_for("walk_in_orders_dashboard")) + f"?error={error_msg[:200]}"
+        except Exception as url_error:
+            print(f"[ERROR] Failed to generate redirect URL: {url_error}")
+            redirect_url = "/walk-in-orders?error=Failed to create radiology order"
         return RedirectResponse(
-            url=f"/walk-in-orders?error={str(e)}",
+            url=redirect_url,
             status_code=status.HTTP_302_FOUND
         )
 
@@ -319,7 +355,9 @@ def create_walk_in_pharmacy_sale(
     instructions: Optional[str] = Form(None),
 ):
     """Create a walk-in pharmacy sale (prescription without consultation)."""
+    import traceback
     try:
+        print(f"[DEBUG] create_walk_in_pharmacy_sale called with medication_name={medication_name}")
         patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
         
         encounter_data = EncounterCreate(
@@ -350,20 +388,34 @@ def create_walk_in_pharmacy_sale(
         
         new_prescription = encounter_crud.create_prescription(db, prescription_data)
         
+        # Create charge for the prescription
         try:
-            create_charge_for_prescription(db, new_prescription, current_user.id)
+            create_charge_for_prescription(db, new_prescription, current_user.id, check_payment_required=False)
         except Exception as billing_error:
+            import traceback
             print(f"Warning: Unable to create walk-in pharmacy charge for prescription {new_prescription.id}: {billing_error}")
+            print(traceback.format_exc())
+            # Don't fail the prescription creation if charge creation fails - can be created manually later
         
         return RedirectResponse(
-            url="/walk-in-orders?status=pharmacy_sale_created",
+            url=str(request.url_for("walk_in_orders_dashboard")) + "?status=pharmacy_sale_created",
             status_code=status.HTTP_302_FOUND
         )
-    except HTTPException:
+    except HTTPException as http_exc:
+        print(f"[DEBUG] HTTPException in create_walk_in_pharmacy_sale: {http_exc.status_code} - {http_exc.detail}")
         raise
     except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Error creating walk-in pharmacy sale: {error_msg}")
+        traceback.print_exc()
+        # Ensure we can generate the redirect URL even if url_for fails
+        try:
+            redirect_url = str(request.url_for("walk_in_orders_dashboard")) + f"?error={error_msg[:200]}"
+        except Exception as url_error:
+            print(f"[ERROR] Failed to generate redirect URL: {url_error}")
+            redirect_url = "/walk-in-orders?error=Failed to create pharmacy sale"
         return RedirectResponse(
-            url=f"/walk-in-orders?error={str(e)}",
+            url=redirect_url,
             status_code=status.HTTP_302_FOUND
         )
 
@@ -385,7 +437,9 @@ def create_walk_in_procedure(
     location: Optional[str] = Form(None),
 ):
     """Create a walk-in procedure"""
+    import traceback
     try:
+        print(f"[DEBUG] create_walk_in_procedure called with procedure_name={procedure_name}")
         from app.models.procedure_models import ProcedureType
         
         patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
@@ -412,12 +466,23 @@ def create_walk_in_procedure(
             print(f"Warning: Unable to create walk-in procedure charge for procedure {procedure.id}: {billing_error}")
         
         return RedirectResponse(
-            url=f"/walk-in-orders?status=procedure_created",
+            url=str(request.url_for("walk_in_orders_dashboard")) + "?status=procedure_created",
             status_code=status.HTTP_302_FOUND
         )
+    except HTTPException as http_exc:
+        print(f"[DEBUG] HTTPException in create_walk_in_procedure: {http_exc.status_code} - {http_exc.detail}")
+        raise
     except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Error creating walk-in procedure: {error_msg}")
+        traceback.print_exc()
+        try:
+            redirect_url = str(request.url_for("walk_in_orders_dashboard")) + f"?error={error_msg[:200]}"
+        except Exception as url_error:
+            print(f"[ERROR] Failed to generate redirect URL: {url_error}")
+            redirect_url = "/walk-in-orders?error=Failed to create procedure"
         return RedirectResponse(
-            url=f"/walk-in-orders?error={str(e)}",
+            url=redirect_url,
             status_code=status.HTTP_302_FOUND
         )
 

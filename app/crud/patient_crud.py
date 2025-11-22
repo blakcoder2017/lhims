@@ -1,9 +1,10 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, String
 from typing import List, Optional, Tuple
+from datetime import datetime
 
 from app.models.patient_models import Patient
-from app.schemas.patient_schemas import PatientCreate
+from app.schemas.patient_schemas import PatientCreate, PatientUpdate
 
 def generate_patient_number(db: Session) -> str:
     """Generate a unique patient number starting with DGMS followed by sequential number."""
@@ -151,3 +152,33 @@ def get_patients(
     """Get all patients with pagination and filtering"""
     return search_patients(db, query=None, skip=skip, limit=limit, gender=gender, 
                           payment_mechanism=payment_mechanism, sort_by=sort_by, sort_order=sort_order)
+
+def update_patient(db: Session, patient_id: int, patient_update: PatientUpdate) -> Optional[Patient]:
+    """
+    Update an existing patient's biodata and payment mechanism.
+    Only updates fields that are provided (not None).
+    """
+    db_patient = get_patient(db, patient_id)
+    if not db_patient:
+        return None
+    
+    # Update only provided fields
+    update_data = patient_update.model_dump(exclude_unset=True)
+    
+    # Check for duplicate national_id if it's being updated
+    if 'national_id' in update_data and update_data['national_id']:
+        existing_patient = get_patient_by_national_id(db, update_data['national_id'])
+        if existing_patient and existing_patient.id != patient_id:
+            raise ValueError(f"Patient with National ID '{update_data['national_id']}' already exists")
+    
+    # Update fields
+    for field, value in update_data.items():
+        if value is not None:
+            setattr(db_patient, field, value)
+    
+    # Update the updated_at timestamp
+    db_patient.updated_at = datetime.now()
+    
+    db.commit()
+    db.refresh(db_patient)
+    return db_patient

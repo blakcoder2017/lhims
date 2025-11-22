@@ -111,7 +111,7 @@ def register_patient_form(
     
     if is_cash_patient(db, new_patient.id):
         # Cash patient: redirect to consultation fee payment
-        redirect_url = f"/patients/{new_patient.id}/pay/consultation?return_to=triage&from_registration=true"
+        # EMERGENCY: Skip payment, go directly to vitals (stabilize first)
         if is_emergency_case:
             # For emergency cases, create appointment immediately with highest priority
             from app.crud import appointment_crud
@@ -140,7 +140,11 @@ def register_patient_form(
                 AppointmentUpdate(status=AppointmentStatus.CHECKED_IN, checked_in_at=datetime.now())
             )
             
-            redirect_url = f"/patients/{new_patient.id}/pay/consultation?return_to=triage&from_registration=true&emergency=true&appointment_id={new_appointment.id}"
+            # Emergency bypass: Skip payment, go directly to triage
+            redirect_url = f"/patients/{new_patient.id}/triage?status=registered&emergency=true&appointment_id={new_appointment.id}&from_registration=true"
+        else:
+            # Normal cash patient: payment required
+            redirect_url = f"/patients/{new_patient.id}/pay/consultation?return_to=triage&from_registration=true"
     else:
         # Insurance patient: go directly to triage
         redirect_url = f"/patients/{new_patient.id}/triage?status=registered"

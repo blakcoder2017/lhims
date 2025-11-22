@@ -32,6 +32,10 @@ class TriageVitalsBase(BaseModel):
     # Pain scale (1-10)
     pain_scale: Optional[int] = Field(None, description="Pain scale from 1-10", ge=0, le=10)
     
+    # Triage Level Assignment
+    triage_level: Optional[str] = Field(None, description="Triage level: P1/Critical/Red, P2/Urgent/Yellow, P3/Routine/Green")
+    triage_category: Optional[str] = Field(None, description="Triage category: Critical, Urgent, Routine")
+    
     @model_validator(mode='after')
     def validate_blood_pressure(self):
         """Validate and auto-correct blood pressure values if they appear to be swapped."""
@@ -62,6 +66,8 @@ class TriageVitals(TriageVitalsBase):
     id: int
     patient_id: int
     recorded_by_id: int
+    triage_assigned_by_id: Optional[int] = None
+    triage_assigned_at: Optional[datetime] = None
     recorded_at: datetime
 
     class Config:

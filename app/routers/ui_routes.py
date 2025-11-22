@@ -316,9 +316,10 @@ def get_patient_triage_page(
         is_cash_patient,
         has_paid_for_service
     )
-    from app.models.billing_models import ChargeType
+    from app.models.billing_models import ChargeType, InvoiceStatus
     from datetime import datetime, timedelta, date
     from sqlalchemy import func
+    from decimal import Decimal
     
     # Fetch Patient Details
     patient_data = patient_crud.get_patient(db, patient_id=patient_id)
@@ -327,7 +328,32 @@ def get_patient_triage_page(
         return RedirectResponse(url=request.url_for("dashboard"), status_code=status.HTTP_302_FOUND)
     
     # Check if this is a new visit (returning patient)
+    # Initialize is_new_visit from explicit parameter
     is_new_visit = new_visit and new_visit.lower() == 'true'
+    
+    # If accessing from patient list without appointment_id, check if it's a returning patient
+    appointment_id = request.query_params.get("appointment_id")
+    is_coming_from_list = not appointment_id and not is_new_visit
+    
+    # For returning cash patients accessing from patient list, automatically treat as new visit
+    # This ensures each visit requires a new consultation fee payment, even on the same day
+    if is_coming_from_list and is_cash_patient(db, patient_id):
+        # Check if patient has a completed encounter today
+        from app.models.encounter_models import Encounter, EncounterStatus
+        from sqlalchemy import func
+        from datetime import date
+        
+        today = date.today()
+        completed_encounters_today = db.query(Encounter).filter(
+            Encounter.patient_id == patient_id,
+            Encounter.status == EncounterStatus.COMPLETED.value,
+            Encounter.is_active == True,
+            func.date(Encounter.encounter_date) == today
+        ).count()
+        
+        # If there's a completed encounter today, this is a new visit requiring new payment
+        if completed_encounters_today > 0:
+            is_new_visit = True
     
     # Check if payment was just completed or vitals were saved (from redirect)
     status_param = request.query_params.get('status')
@@ -395,40 +421,144 @@ def get_patient_triage_page(
             payment_required = True
             payment_paid = has_paid
         else:
-            # Check for today's consultation payment (for new visits)
-            has_paid, charge, invoice = has_paid_for_service(
-                db, patient_id, ChargeType.CONSULTATION,
-                encounter_id=None,
-                check_today_only=True  # Only check for today's charges
-            )
-            
-            payment_required = True
-            payment_paid = has_paid
-            
-            # If no charge exists for today, create one
-            if not charge and is_new_visit:
+            # For new visits (returning patients), ALWAYS create a NEW charge for THIS visit
+            if is_new_visit:
                 try:
-                    from app.services.charge_automation import create_charge_for_consultation
-                    charge = create_charge_for_consultation(db, patient_id, current_user.id, encounter_id=None)
-                    if charge:
-                        invoice = charge.invoice
-                    payment_paid = False
+                    from app.services.charge_automation import (
+                        create_charge_for_consultation,
+                        get_service_price,
+                        DEFAULT_CONSULTATION_COST
+                    )
+                    from app.crud import billing_crud
+                    from app.schemas.billing_schemas import InvoiceCreate, ChargeCreate
+                    from app.models.patient_models import Patient
+                    from app.models.encounter_models import Encounter, EncounterStatus
+                    from app.models.billing_models import Charge, Invoice
+                    from sqlalchemy import func
+                    from datetime import date
+                    
+                    # For new visits, we MUST create a new charge (not reuse existing)
+                    # Check if there's a completed encounter today - if yes, force new charge
+                    today = date.today()
+                    completed_encounters_today = db.query(Encounter).filter(
+                        Encounter.patient_id == patient_id,
+                        Encounter.status == EncounterStatus.COMPLETED.value,
+                        Encounter.is_active == True,
+                        func.date(Encounter.encounter_date) == today
+                    ).count()
+                    
+                    # Check for existing unpaid consultation charges without encounter_id
+                    existing_charge = db.query(Charge).join(Invoice).filter(
+                        Invoice.patient_id == patient_id,
+                        Charge.charge_type == ChargeType.CONSULTATION,
+                        Charge.encounter_id.is_(None),
+                        Invoice.is_active == True,
+                        Invoice.balance > Decimal('0'),
+                        Invoice.status != InvoiceStatus.PAID
+                    ).order_by(Charge.created_at.desc()).first()
+                    
+                    # If there's an existing unpaid charge and no completed encounter today, use it
+                    # Otherwise, create a new charge
+                    if existing_charge and completed_encounters_today == 0:
+                        charge = existing_charge
+                        invoice = existing_charge.invoice
+                        payment_paid = False  # It's unpaid, so payment required
+                    else:
+                        # Create a NEW charge for this new visit
+                        # This ensures returning patients always get a new charge
+                        patient = db.query(Patient).filter(Patient.id == patient_id).first()
+                        if not patient:
+                            raise ValueError(f"Patient {patient_id} not found")
+                        
+                        # Create a new standalone invoice for this visit
+                        invoice_data = InvoiceCreate(
+                            patient_id=patient_id,
+                            encounter_id=None,
+                            appointment_id=None,
+                            payment_mechanism=patient.payment_mechanism,
+                            charges=[]
+                        )
+                        invoice = billing_crud.create_invoice(db, invoice_data, current_user.id)
+                        
+                        # Create the consultation charge
+                        unit_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_COST)
+                        charge_data = ChargeCreate(
+                            charge_type=ChargeType.CONSULTATION,
+                            description="Consultation Fee (Covers Vitals & Initial Encounter)",
+                            quantity=1,
+                            unit_price=unit_price,
+                            discount=Decimal('0.00'),
+                            tax_rate=Decimal('0.00'),
+                            encounter_id=None
+                        )
+                        charge = billing_crud.add_charge_to_invoice(db, invoice.id, charge_data)
+                        payment_paid = False  # New charge is unpaid
+                    
+                    payment_required = True
                 except Exception as billing_error:
                     print(f"Warning: Unable to create consultation charge for patient {patient_id}: {billing_error}")
-            elif not charge:
-                # Not a new visit, but check if payment is required
-                payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
-                    db, patient_id, ChargeType.CONSULTATION
-                )
-                if payment_required and not charge:
+                    import traceback
+                    traceback.print_exc()
+                    # Fallback: check for any existing charge
+                    has_paid, charge, invoice = has_paid_for_service(
+                        db, patient_id, ChargeType.CONSULTATION,
+                        encounter_id=None,
+                        check_today_only=False
+                    )
+                    payment_required = True
+                    payment_paid = has_paid
+            else:
+                # Not explicitly a new visit
+                # Check if there's a completed encounter today - if yes, need new payment
+                from app.models.encounter_models import Encounter, EncounterStatus
+                from sqlalchemy import func
+                from datetime import date
+                
+                today = date.today()
+                completed_encounters_today = db.query(Encounter).filter(
+                    Encounter.patient_id == patient_id,
+                    Encounter.status == EncounterStatus.COMPLETED.value,
+                    Encounter.is_active == True,
+                    func.date(Encounter.encounter_date) == today
+                ).count()
+                
+                # If there's a completed encounter today, this is a new visit requiring new payment
+                if completed_encounters_today > 0:
+                    # Treat as new visit - create new charge
                     try:
                         from app.services.charge_automation import create_charge_for_consultation
                         charge = create_charge_for_consultation(db, patient_id, current_user.id, encounter_id=None)
                         if charge:
                             invoice = charge.invoice
-                        payment_paid = False
+                            payment_paid = (invoice.balance <= Decimal('0')) or (invoice.status == InvoiceStatus.PAID)
+                        else:
+                            payment_paid = False
+                        payment_required = True
                     except Exception as billing_error:
-                        print(f"Warning: Unable to seed consultation charge for patient {patient_id}: {billing_error}")
+                        print(f"Warning: Unable to create consultation charge for patient {patient_id}: {billing_error}")
+                        payment_required = True
+                        payment_paid = False
+                else:
+                    # No completed encounter today - check for today's consultation payment
+                    has_paid, charge, invoice = has_paid_for_service(
+                        db, patient_id, ChargeType.CONSULTATION,
+                        encounter_id=None,
+                        check_today_only=True  # Only check for today's charges
+                    )
+                    
+                    payment_required = True
+                    payment_paid = has_paid
+                    
+                    # If no charge exists for today, create one
+                    if not charge:
+                        try:
+                            from app.services.charge_automation import create_charge_for_consultation
+                            charge = create_charge_for_consultation(db, patient_id, current_user.id, encounter_id=None)
+                            if charge:
+                                invoice = charge.invoice
+                            payment_paid = False
+                        except Exception as billing_error:
+                            print(f"Warning: Unable to seed consultation charge for patient {patient_id}: {billing_error}")
     else:
         # For insurance patients (NHIS or Private Insurance), create consultation charge and add to their bill
         if is_new_visit:
@@ -480,6 +610,9 @@ def get_patient_triage_page(
         func.date(Appointment.scheduled_date) == datetime.now().date()
     ).first()
     
+    # Determine if patient is cash (for template to check check-in requirements)
+    is_cash_patient_flag = is_cash_patient(db, patient_id)
+    
     context = {
         "request": request,
         "title": f"Triage - {patient_data.first_name} {patient_data.last_name}",
@@ -490,6 +623,7 @@ def get_patient_triage_page(
         "clinicians": clinicians,
         "payment_required": payment_required,
         "payment_paid": payment_paid,
+        "is_cash_patient": is_cash_patient_flag,
         "charge": charge,
         "invoice": invoice,
         "has_recent_vitals": has_recent_vitals,
@@ -519,6 +653,7 @@ def get_new_encounter_page(
         has_paid_for_service
     )
     from app.models.billing_models import ChargeType
+    from app.models.appointment_models import AppointmentStatus
     
     # Fetch Patient Details
     patient_data = patient_crud.get_patient(db, patient_id=patient_id)
@@ -534,70 +669,73 @@ def get_new_encounter_page(
         except (ValueError, TypeError):
             pass
     
-    # Check payment requirement for cash patients (consultation fee)
-    payment_required = False
-    payment_paid = True
-    charge = None
-    invoice = None
+    checked_in_statuses = {AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_PROGRESS}
+    active_appointment = None
+    # Verify complete workflow: vitals + check-in + payment (for ALL users including admins)
+    from app.utils.payment_verification import verify_encounter_workflow
     
-    if is_cash_patient(db, patient_id):
-        payment_required = requires_payment_before_service(db, patient_id, ChargeType.CONSULTATION)
-        
-        if payment_required:
-            # Use improved payment check: look for recent consultation charges with payments
-            from app.models.billing_models import Charge, Invoice, Payment, PaymentStatus
-            
-            # Look for any consultation charges, then check if they have payments
-            recent_charges = db.query(Charge).join(Invoice).filter(
-                Invoice.patient_id == patient_id,
-                Charge.charge_type == ChargeType.CONSULTATION,
-                Charge.encounter_id.is_(None),
-                Invoice.is_active == True
-            ).order_by(Charge.created_at.desc()).limit(5).all()
-            
-            recent_paid_charge = None
-            has_paid = False
-            for ch in recent_charges:
-                # Check all payments on this invoice
-                all_payments = db.query(Payment).filter(
-                    Payment.invoice_id == ch.invoice_id,
-                    Payment.status == PaymentStatus.COMPLETED,
-                    Payment.is_active == True
-                ).all()
-                
-                if all_payments:
-                    total_paid_all = sum(p.amount for p in all_payments)
-                    
-                    if total_paid_all >= ch.total_amount:
-                        recent_paid_charge = ch
-                        has_paid = True
-                        break
-            
-            if recent_paid_charge:
-                charge = recent_paid_charge
-                invoice = recent_paid_charge.invoice
-                payment_paid = has_paid
-            else:
-                # Fallback: check for today's charges using the standard method
-                has_paid, charge, invoice = has_paid_for_service(
-                    db, patient_id, ChargeType.CONSULTATION,
-                    encounter_id=None,
-                    check_today_only=True
-                )
-                payment_paid = has_paid
-                
-                # If no charge exists, create one
-                if not charge:
-                    try:
-                        charge = create_charge_for_consultation(db, patient_id, current_user.id, encounter_id=None)
-                        if charge:
-                            invoice = charge.invoice
-                        payment_paid = False
-                    except Exception as billing_error:
-                        print(f"Warning: Unable to seed consultation charge for patient {patient_id}: {billing_error}")
+    workflow_complete, missing_step, vitals_record, appointment_record, payment_info = verify_encounter_workflow(
+        db, patient_id, check_vitals=True, check_checkin=True, check_payment=True
+    )
+    
+    if not workflow_complete:
+        triage_url = request.url_for("patient_triage", patient_id=patient_id)
+        status_param = "checkin_required"
+        if missing_step == "vitals":
+            status_param = "vitals_required"
+        elif missing_step == "payment":
+            status_param = "payment_required"
+        return RedirectResponse(
+            url=f"{triage_url}?status={status_param}",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Use the verified appointment record
+    appointment_data = appointment_record or appointment_data
+    
+    # Extract payment info from workflow verification
+    payment_paid, charge, invoice = payment_info if payment_info else (True, None, None)
+    payment_required = not payment_paid and is_cash_patient(db, patient_id)
 
     # Load diseases for dropdowns
-    diseases = disease_crud.get_diseases(db, skip=0, limit=1000)
+    try:
+        all_diseases = disease_crud.get_diseases(db, skip=0, limit=10000)  # Increased limit
+        if all_diseases is None:
+            all_diseases = []
+        
+        # Filter out diseases with empty/null names, IDs, or None values
+        diseases = [
+            d for d in all_diseases 
+            if d is not None 
+            and hasattr(d, 'id') 
+            and d.id is not None 
+            and hasattr(d, 'name') 
+            and d.name is not None 
+            and str(d.name).strip() != ''
+        ]
+    except Exception as e:
+        print(f"Error loading diseases: {e}")
+        diseases = []
+    
+    # Get active OPD visit if any
+    from app.crud import opd_crud
+    active_opd_visit = opd_crud.get_active_opd_visit_by_patient(db, patient_id)
+    
+    # Get OPD visit ID from query params if provided
+    opd_visit_id = request.query_params.get("opd_visit_id")
+    if opd_visit_id:
+        try:
+            opd_visit = opd_crud.get_opd_visit(db, int(opd_visit_id))
+            if opd_visit and opd_visit.patient_id == patient_id:
+                active_opd_visit = opd_visit
+        except (ValueError, TypeError):
+            pass
+    
+    # Sync payment status for active OPD visit (fixes cases where payment was made before auto-update was added)
+    if active_opd_visit:
+        opd_crud.sync_opd_visit_payment_status(db, active_opd_visit.id)
+        # Refresh the visit to get updated status
+        db.refresh(active_opd_visit)
 
     context = {
         "request": request,
@@ -606,11 +744,13 @@ def get_new_encounter_page(
         "user_role": current_user.role.name,
         "patient": patient_data,
         "appointment": appointment_data,
+        "active_opd_visit": active_opd_visit,
         "payment_required": payment_required,
         "payment_paid": payment_paid,
         "charge": charge,
         "invoice": invoice,
-        "diseases": diseases
+        "diseases": diseases or [],  # Ensure it's always a list
+        "has_checked_in_appointment": appointment_data is not None
     }
     return templates.TemplateResponse("clinical/new_encounter.html", context)
 
@@ -808,6 +948,45 @@ def get_encounter_page(
             # If parsing fails, treat as plain text
             secondary_diagnoses = [{"description": encounter_data.secondary_diagnosis_codes}]
     
+    # Get encounter diseases from encounter_diseases table
+    from app.crud import disease_crud
+    from app.models.disease_models import EncounterDisease
+    from sqlalchemy.orm import joinedload
+    
+    # Load encounter diseases with disease relationship
+    encounter_diseases_list = db.query(EncounterDisease).options(
+        joinedload(EncounterDisease.disease)
+    ).filter(EncounterDisease.encounter_id == encounter_id).all()
+    
+    # Format encounter diseases for display
+    formatted_diagnoses = []
+    for enc_disease in encounter_diseases_list:
+        if enc_disease.disease_id and enc_disease.disease:
+            # Disease from database
+            diagnosis_info = {
+                "id": enc_disease.disease.id,
+                "name": enc_disease.disease.name,
+                "code": enc_disease.disease.code,
+                "is_primary": enc_disease.is_primary,
+                "custom_name": None
+            }
+        elif enc_disease.custom_name:
+            # Custom disease
+            diagnosis_info = {
+                "id": None,
+                "name": enc_disease.custom_name,
+                "code": None,
+                "is_primary": enc_disease.is_primary,
+                "custom_name": enc_disease.custom_name
+            }
+        else:
+            # Skip if neither disease nor custom_name
+            continue
+        formatted_diagnoses.append(diagnosis_info)
+    
+    # Sort: primary first, then by name
+    formatted_diagnoses.sort(key=lambda x: (not x["is_primary"], x["name"] or ""))
+    
     differential_data = encounter_crud.load_differential_data(encounter_data)
     
     context = {
@@ -830,6 +1009,7 @@ def get_encounter_page(
         "is_admitted": is_admitted,
         "current_admission": current_admission,
         "secondary_diagnoses": secondary_diagnoses,
+        "encounter_diseases": formatted_diagnoses,
         "differential_data": differential_data
     }
     return templates.TemplateResponse("clinical/view_encounter.html", context)
@@ -974,9 +1154,12 @@ def disease_report_page(
     end_date: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     limit: int = Query(100, ge=10, le=500),
+    format: str = Query("html", regex="^(html|pdf|excel|csv)$"),
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Admin", "Doctor", "Clinician", "Management"]))
 ):
+    from fastapi.responses import Response
+    
     start_date_parsed = _parse_date(start_date)
     end_date_parsed = _parse_date(end_date)
     
@@ -1001,6 +1184,7 @@ def disease_report_page(
             if item["encounter_count"]
             else 0
         )
+    
     context = {
         "request": request,
         "title": "Disease Encounter Report",
@@ -1013,6 +1197,47 @@ def disease_report_page(
             "end_date": end_date_parsed,
             "search": search or "",
             "limit": limit
-        }
+        },
+        "start_date": start_date,
+        "end_date": end_date,
+        "search": search,
+        "limit": limit,
+        "report_date": datetime.now()  # Add report_date for template
     }
+    
+    # Handle different formats
+    if format == "pdf":
+        from app.utils.pdf_generator import generate_disease_report_pdf
+        pdf_content = generate_disease_report_pdf(context)
+        start_str = start_date_parsed.strftime("%Y-%m-%d") if start_date_parsed else "all"
+        end_str = end_date_parsed.strftime("%Y-%m-%d") if end_date_parsed else "all"
+        filename = f"disease_report_{start_str}_{end_str}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    elif format == "excel":
+        from app.utils.excel_generator import generate_disease_report_excel
+        excel_content = generate_disease_report_excel(context)
+        start_str = start_date_parsed.strftime("%Y-%m-%d") if start_date_parsed else "all"
+        end_str = end_date_parsed.strftime("%Y-%m-%d") if end_date_parsed else "all"
+        filename = f"disease_report_{start_str}_{end_str}.xlsx"
+        return Response(
+            content=excel_content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    elif format == "csv":
+        from app.utils.csv_generator import generate_disease_report_csv
+        csv_content = generate_disease_report_csv(context)
+        start_str = start_date_parsed.strftime("%Y-%m-%d") if start_date_parsed else "all"
+        end_str = end_date_parsed.strftime("%Y-%m-%d") if end_date_parsed else "all"
+        filename = f"disease_report_{start_str}_{end_str}.csv"
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    
     return templates.TemplateResponse("reports/disease_report.html", context)

@@ -27,6 +27,7 @@ class ProcedureCreate(ProcedureBase):
     """Schema for creating a new procedure"""
     patient_id: int
     encounter_id: Optional[int] = None
+    procedure_catalog_id: Optional[int] = None  # Link to procedure catalog
     ordered_by_id: int
     performed_by_id: Optional[int] = None
     status: ProcedureStatus = Field(default=ProcedureStatus.SCHEDULED)
@@ -37,6 +38,7 @@ class ProcedureUpdate(BaseModel):
     """Schema for updating a procedure"""
     procedure_name: Optional[str] = Field(None, max_length=200)
     procedure_code: Optional[str] = Field(None, max_length=50)
+    procedure_catalog_id: Optional[int] = None  # Link to procedure catalog
     procedure_type: Optional[ProcedureType] = None
     description: Optional[str] = None
     indication: Optional[str] = None
@@ -61,6 +63,7 @@ class Procedure(ProcedureBase):
     procedure_number: str
     patient_id: int
     encounter_id: Optional[int] = None
+    procedure_catalog_id: Optional[int] = None  # Link to procedure catalog
     ordered_by_id: int
     performed_by_id: Optional[int] = None
     is_walk_in: bool = False

@@ -160,37 +160,109 @@
                                     {% endif %}
                                 </div>
                                 
+                                <!-- Discharge Clearance Status -->
+                                {% if ready_for_discharge %}
+                                <div class="card card-outline card-warning mb-3">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0"><i class="fas fa-clipboard-check mr-2"></i>Discharge Clearance</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if is_cash_patient %}
+                                        <!-- Payment Clearance (Cash Patients) -->
+                                        <div class="mb-2">
+                                            <strong>Payment Clearance:</strong>
+                                            {% if clearance and clearance.payment_cleared %}
+                                            <span class="badge badge-success ml-2">
+                                                <i class="fas fa-check-circle"></i> Cleared
+                                                {% if clearance.payment_cleared_at %}
+                                                ({{ clearance.payment_cleared_at.strftime('%Y-%m-%d %H:%M') }})
+                                                {% endif %}
+                                            </span>
+                                            {% else %}
+                                            <span class="badge badge-danger ml-2">
+                                                <i class="fas fa-times-circle"></i> Pending
+                                            </span>
+                                            {% if user_role in ['Admin', 'Finance', 'Front Office'] and invoice_summary and invoice_summary.balance <= 0 %}
+                                            <form method="POST" action="{{ url_for('ipd_clear_payment', admission_id=admission.id) }}" class="d-inline ml-2">
+                                                <button type="submit" class="btn btn-sm btn-success">
+                                                    <i class="fas fa-check mr-1"></i> Clear Payment
+                                                </button>
+                                            </form>
+                                            {% endif %}
+                                            {% endif %}
+                                        </div>
+                                        {% endif %}
+                                        
+                                        <!-- Nursing Clearance (All Patients) -->
+                                        <div class="mb-2">
+                                            <strong>Nursing Clearance:</strong>
+                                            {% if clearance and clearance.nursing_cleared %}
+                                            <span class="badge badge-success ml-2">
+                                                <i class="fas fa-check-circle"></i> Cleared
+                                                {% if clearance.nursing_cleared_at %}
+                                                ({{ clearance.nursing_cleared_at.strftime('%Y-%m-%d %H:%M') }})
+                                                {% endif %}
+                                            </span>
+                                            {% else %}
+                                            <span class="badge badge-danger ml-2">
+                                                <i class="fas fa-times-circle"></i> Pending
+                                            </span>
+                                            {% if user_role in ['Nurse', 'Admin'] %}
+                                            <form method="POST" action="{{ url_for('ipd_clear_nursing', admission_id=admission.id) }}" class="d-inline ml-2">
+                                                <button type="submit" class="btn btn-sm btn-success">
+                                                    <i class="fas fa-check mr-1"></i> Clear Nursing
+                                                </button>
+                                            </form>
+                                            {% endif %}
+                                            {% endif %}
+                                        </div>
+                                        
+                                        {% if clearance and clearance.payment_notes %}
+                                        <small class="text-muted d-block mt-1"><strong>Payment Notes:</strong> {{ clearance.payment_notes }}</small>
+                                        {% endif %}
+                                        {% if clearance and clearance.nursing_notes %}
+                                        <small class="text-muted d-block mt-1"><strong>Nursing Notes:</strong> {{ clearance.nursing_notes }}</small>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                                
                                 <form method="POST" action="{{ url_for('ipd_admission_prepare_discharge', admission_id=admission.id) }}" class="mb-3">
                                     <button type="submit" class="btn btn-block btn-outline-info btn-lg">
                                         <i class="fas fa-calculator mr-2"></i> Prepare Discharge (Ward & Bed Fees)
                                     </button>
                                 </form>
                                 
-                                <form method="POST" action="{{ url_for('ipd_admission_discharge', admission_id=admission.id) }}" onsubmit="return confirm('Are you sure you want to discharge this patient?');">
-                                    <button type="submit" class="btn btn-block btn-success btn-lg mb-3" {% if not ready_for_discharge %}disabled title="Prepare discharge before discharging this patient."{% endif %}>
-                                        <i class="fas fa-sign-out-alt mr-2"></i> Discharge Patient
-                                    </button>
-                                </form>
+                                <a href="{{ url_for('ipd_discharge_form', admission_id=admission.id) }}" class="btn btn-block btn-success btn-lg mb-3" {% if not discharge_ready %}disabled title="Both payment and nursing clearance required before discharge."{% endif %}>
+                                    <i class="fas fa-sign-out-alt mr-2"></i> Discharge Patient
+                                </a>
                                 
                                 <a href="{{ url_for('ipd_admission_transfer_form', admission_id=admission.id) }}" class="btn btn-block btn-warning mb-3">
                                     <i class="fas fa-exchange-alt mr-2"></i> Transfer Patient
                                 </a>
-                                {% elif admission.status.value == 'transferred' %}
-                                <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i> Patient has been transferred.
-                                    {% if admission.transfer_reason and 'EXTERNAL TRANSFER' in admission.transfer_reason %}
-                                    <br><strong><i class="fas fa-hospital-alt"></i> External Transfer to Different Hospital</strong>
-                                    <div class="mt-2">
-                                        {{ admission.transfer_reason|replace('\n', '<br>')|safe }}
-                                    </div>
-                                    {% elif admission.transferred_from_ward_id and admission.transferred_to_ward_id %}
-                                    <br><strong>From:</strong> {{ admission.transferred_from_ward.name if admission.transferred_from_ward else 'N/A' }} 
-                                    → <strong>To:</strong> {{ admission.transferred_to_ward.name if admission.transferred_to_ward else 'N/A' }}
-                                    {% endif %}
-                                    {% if admission.transfer_reason and 'EXTERNAL TRANSFER' not in admission.transfer_reason %}
-                                    <br><strong>Reason:</strong> {{ admission.transfer_reason }}
-                                    {% endif %}
-                                </div>
+                {% elif admission.status.value == 'transferred' %}
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> Patient has been transferred.
+                    {% if admission.transfer_reason and 'EXTERNAL TRANSFER' in admission.transfer_reason %}
+                    <br><strong><i class="fas fa-hospital-alt"></i> External Transfer to Different Hospital</strong>
+                    <div class="mt-2">
+                        {{ admission.transfer_reason|replace('\n', '<br>')|safe }}
+                    </div>
+                    {% if request.query_params.get('report') %}
+                    <div class="mt-3">
+                        <a href="{{ url_for('download_transfer_report', admission_id=admission.id, filename=request.query_params.get('report')) }}" class="btn btn-danger btn-sm" target="_blank">
+                            <i class="fas fa-file-pdf mr-1"></i> Download Medical Transfer Report (PDF)
+                        </a>
+                    </div>
+                    {% endif %}
+                    {% elif admission.transferred_from_ward_id and admission.transferred_to_ward_id %}
+                    <br><strong>From:</strong> {{ admission.transferred_from_ward.name if admission.transferred_from_ward else 'N/A' }} 
+                    → <strong>To:</strong> {{ admission.transferred_to_ward.name if admission.transferred_to_ward else 'N/A' }}
+                    {% endif %}
+                    {% if admission.transfer_reason and 'EXTERNAL TRANSFER' not in admission.transfer_reason %}
+                    <br><strong>Reason:</strong> {{ admission.transfer_reason }}
+                    {% endif %}
+                </div>
                                 {% else %}
                                 <div class="alert alert-info">
                                     <i class="fas fa-info-circle"></i> Patient has been discharged.
@@ -390,8 +462,8 @@
                         <div class="alert alert-info">
                             <i class="fas fa-info-circle"></i> No medications have been prescribed for this patient yet.
                             {% if user_role in ['Doctor', 'Clinician', 'Admin'] %}
-                            {% if admission.encounter_id %}
-                            <a href="/encounters/{{ admission.encounter_id }}#prescriptions" class="alert-link">Create prescription</a>
+                            {% if current_encounter_id %}
+                            <a href="/encounters/{{ current_encounter_id }}#prescriptions" class="alert-link">Add prescription to current encounter</a>
                             {% else %}
                             <a href="/patients/{{ admission.patient_id }}/encounters/new" class="alert-link">Create encounter and prescription</a>
                             {% endif %}
@@ -407,7 +479,7 @@
                     <div class="col-md-12">
                         <div class="card card-info card-outline">
                             <div class="card-header">
-                                <h3 class="card-title"><i class="fas fa-sticky-note mr-1"></i> Admission Notes</h3>
+                                <h3 class="card-title"><i class="fas fa-comments mr-1"></i> Interactive Notes</h3>
                                 {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
                                 <div class="card-tools">
                                     <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#addNoteForm">
@@ -419,7 +491,7 @@
                             <div class="card-body">
                                 {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
                                 <div id="addNoteForm" class="collapse mb-3">
-                                    <form method="POST" action="{{ url_for('add_admission_note', admission_id=admission.id) }}">
+                                    <form method="POST" action="{{ url_for('add_admission_note', admission_id=admission.id) }}" id="newNoteForm">
                                         <div class="form-group">
                                             <label for="note_type">Note Type</label>
                                             <select class="form-control" name="note_type" id="note_type">
@@ -445,38 +517,100 @@
                                 </div>
                                 {% endif %}
                                 
-                                {% if admission_notes %}
-                                <div class="timeline">
-                                    {% for note in admission_notes %}
-                                    <div class="time-label">
-                                        <span class="bg-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %}">
-                                            {{ note.created_at.strftime('%Y-%m-%d %H:%M') }}
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <i class="fas fa-{% if note.note_type == 'doctor' %}user-md{% elif note.note_type == 'nursing' %}user-nurse{% elif note.note_type == 'medication' %}pills{% elif note.note_type == 'vital_signs' %}heartbeat{% else %}sticky-note{% endif %} bg-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %}"></i>
-                                        <div class="timeline-item">
-                                            <span class="time">
-                                                <i class="fas fa-clock"></i> {{ note.created_at.strftime('%H:%M') }}
+                                <div id="notesContainer">
+                                    {% if admission_notes %}
+                                    <div class="timeline">
+                                        {% for note in admission_notes %}
+                                        <div class="time-label">
+                                            <span class="bg-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %}">
+                                                {{ note.created_at.strftime('%Y-%m-%d %H:%M') }}
                                             </span>
-                                            <h3 class="timeline-header">
-                                                <strong>{{ note.created_by.full_name if note.created_by else 'Unknown' }}</strong>
-                                                <span class="badge badge-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %} ml-2">
-                                                    {{ note.note_type|title }}
+                                        </div>
+                                        <div id="note-{{ note.id }}">
+                                            <i class="fas fa-{% if note.note_type == 'doctor' %}user-md{% elif note.note_type == 'nursing' %}user-nurse{% elif note.note_type == 'medication' %}pills{% elif note.note_type == 'vital_signs' %}heartbeat{% else %}sticky-note{% endif %} bg-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %}"></i>
+                                            <div class="timeline-item">
+                                                <span class="time">
+                                                    <i class="fas fa-clock"></i> {{ note.created_at.strftime('%H:%M') }}
                                                 </span>
-                                            </h3>
-                                            <div class="timeline-body">
-                                                {{ note.note|replace('\n', '<br>')|safe }}
+                                                <h3 class="timeline-header">
+                                                    <strong>{{ note.created_by.full_name if note.created_by else 'Unknown' }}</strong>
+                                                    <span class="badge badge-{% if note.note_type == 'doctor' %}primary{% elif note.note_type == 'nursing' %}info{% elif note.note_type == 'medication' %}warning{% elif note.note_type == 'vital_signs' %}success{% else %}secondary{% endif %} ml-2">
+                                                        {{ note.note_type|title }}
+                                                    </span>
+                                                </h3>
+                                                <div class="timeline-body">
+                                                    <div class="note-content">{{ note.note|replace('\n', '<br>')|safe }}</div>
+                                                    {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
+                                                    <div class="mt-2">
+                                                        <button type="button" class="btn btn-sm btn-outline-primary reply-btn" data-note-id="{{ note.id }}" data-note-author="{{ note.created_by.full_name if note.created_by else 'Unknown' }}">
+                                                            <i class="fas fa-reply mr-1"></i> Reply
+                                                        </button>
+                                                    </div>
+                                                    {% endif %}
+                                                </div>
+                                                <!-- Replies Section -->
+                                                {% if note.replies %}
+                                                <div class="timeline-footer" style="margin-top: 10px; padding-left: 20px; border-left: 3px solid #dee2e6;">
+                                                    {% for reply in note.replies|sort(attribute='created_at') %}
+                                                    <div class="timeline-item mt-2" style="background-color: #f8f9fa; padding: 10px; border-radius: 4px;" id="note-{{ reply.id }}">
+                                                        <span class="time">
+                                                            <i class="fas fa-clock"></i> {{ reply.created_at.strftime('%H:%M') }}
+                                                        </span>
+                                                        <h4 class="timeline-header" style="margin-bottom: 5px;">
+                                                            <strong>{{ reply.created_by.full_name if reply.created_by else 'Unknown' }}</strong>
+                                                            <small class="text-muted ml-2">replied</small>
+                                                        </h4>
+                                                        <div class="timeline-body" style="padding: 0;">
+                                                            <div class="note-content">{{ reply.note|replace('\n', '<br>')|safe }}</div>
+                                                            {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
+                                                            <div class="mt-2">
+                                                                <button type="button" class="btn btn-sm btn-outline-primary reply-btn" data-note-id="{{ note.id }}" data-note-author="{{ reply.created_by.full_name if reply.created_by else 'Unknown' }}">
+                                                                    <i class="fas fa-reply mr-1"></i> Reply
+                                                                </button>
+                                                            </div>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                    {% endfor %}
+                                                </div>
+                                                {% endif %}
                                             </div>
                                         </div>
+                                        
+                                        <!-- Reply Form (Hidden by default) -->
+                                        {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
+                                        <div id="replyForm-{{ note.id }}" class="collapse mt-2 ml-5" style="border-left: 3px solid #007bff; padding-left: 15px;">
+                                            <form class="reply-form" data-note-id="{{ note.id }}">
+                                                <input type="hidden" name="parent_note_id" value="{{ note.id }}">
+                                                <div class="form-group mb-2">
+                                                    <textarea class="form-control form-control-sm" name="note" rows="2" placeholder="Type your reply..." required></textarea>
+                                                </div>
+                                                <div class="form-group mb-2">
+                                                    <select class="form-control form-control-sm" name="note_type">
+                                                        <option value="general">General</option>
+                                                        <option value="nursing">Nursing</option>
+                                                        <option value="doctor">Doctor</option>
+                                                        <option value="vital_signs">Vital Signs</option>
+                                                        <option value="medication">Medication</option>
+                                                    </select>
+                                                </div>
+                                                <button type="submit" class="btn btn-sm btn-primary">
+                                                    <i class="fas fa-paper-plane mr-1"></i> Send Reply
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-secondary cancel-reply" data-note-id="{{ note.id }}">
+                                                    Cancel
+                                                </button>
+                                            </form>
+                                        </div>
+                                        {% endif %}
+                                        {% endfor %}
                                     </div>
-                                    {% endfor %}
+                                    {% else %}
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle"></i> No notes have been added to this admission yet.
+                                    </div>
+                                    {% endif %}
                                 </div>
-                                {% else %}
-                                <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i> No notes have been added to this admission yet.
-                                </div>
-                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -486,5 +620,159 @@
     </div>
     <aside class="control-sidebar control-sidebar-dark"></aside>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const admissionId = {{ admission.id }};
+    
+    // Handle reply button clicks
+    document.querySelectorAll('.reply-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const noteId = this.getAttribute('data-note-id');
+            const replyForm = document.getElementById('replyForm-' + noteId);
+            
+            // Close all other reply forms
+            document.querySelectorAll('[id^="replyForm-"]').forEach(function(form) {
+                if (form.id !== 'replyForm-' + noteId) {
+                    $(form).collapse('hide');
+                }
+            });
+            
+            // Toggle current reply form
+            $(replyForm).collapse('toggle');
+        });
+    });
+    
+    // Handle cancel reply buttons
+    document.querySelectorAll('.cancel-reply').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const noteId = this.getAttribute('data-note-id');
+            const replyForm = document.getElementById('replyForm-' + noteId);
+            $(replyForm).collapse('hide');
+            // Clear form
+            const form = replyForm.querySelector('form');
+            form.reset();
+        });
+    });
+    
+    // Handle reply form submissions (AJAX)
+    document.querySelectorAll('.reply-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const noteId = this.getAttribute('data-note-id');
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            
+            // Disable submit button
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sending...';
+            
+            // Add admission_id to form data
+            formData.append('admission_id', admissionId);
+            
+            fetch(`/api/v1/ipd/admissions/${admissionId}/notes`, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Create reply HTML element
+                    const replyHtml = `
+                        <div class="timeline-item mt-2" style="background-color: #f8f9fa; padding: 10px; border-radius: 4px;" id="note-${data.note.id}">
+                            <span class="time">
+                                <i class="fas fa-clock"></i> ${new Date(data.note.created_at).toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'})}
+                            </span>
+                            <h4 class="timeline-header" style="margin-bottom: 5px;">
+                                <strong>${data.note.created_by.full_name}</strong>
+                                <small class="text-muted ml-2">replied</small>
+                            </h4>
+                            <div class="timeline-body" style="padding: 0;">
+                                <div class="note-content">${data.note.note.replace(/\n/g, '<br>')}</div>
+                                {% if user_role in ['Nurse', 'Doctor', 'Admin'] and admission.status.value == 'admitted' %}
+                                <div class="mt-2">
+                                    <button type="button" class="btn btn-sm btn-outline-primary reply-btn" data-note-id="${noteId}" data-note-author="${data.note.created_by.full_name}">
+                                        <i class="fas fa-reply mr-1"></i> Reply
+                                    </button>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Find or create replies container
+                    const noteContainer = document.getElementById('note-' + noteId);
+                    let repliesContainer = noteContainer.querySelector('.timeline-footer');
+                    
+                    if (!repliesContainer) {
+                        // Create replies container
+                        const timelineItem = noteContainer.querySelector('.timeline-item');
+                        repliesContainer = document.createElement('div');
+                        repliesContainer.className = 'timeline-footer';
+                        repliesContainer.style.cssText = 'margin-top: 10px; padding-left: 20px; border-left: 3px solid #dee2e6;';
+                        timelineItem.appendChild(repliesContainer);
+                    }
+                    
+                    // Append reply to container
+                    repliesContainer.insertAdjacentHTML('beforeend', replyHtml);
+                    
+                    // Close reply form and clear it
+                    const replyForm = document.getElementById('replyForm-' + noteId);
+                    $(replyForm).collapse('hide');
+                    this.reset();
+                    
+                    // Re-attach event listeners to new reply button
+                    const newReplyBtn = document.querySelector(`#note-${data.note.id} .reply-btn`);
+                    if (newReplyBtn) {
+                        newReplyBtn.addEventListener('click', function() {
+                            const noteId = this.getAttribute('data-note-id');
+                            const replyForm = document.getElementById('replyForm-' + noteId);
+                            $(replyForm).collapse('toggle');
+                        });
+                    }
+                    
+                    // Show success message
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'alert alert-success alert-dismissible';
+                    alertDiv.innerHTML = `
+                        <button type="button" class="close" data-dismiss="alert">&times;</button>
+                        <i class="fas fa-check-circle"></i> Reply sent successfully!
+                    `;
+                    document.querySelector('.card-body').insertBefore(alertDiv, document.querySelector('.card-body').firstChild);
+                    
+                    // Auto-dismiss alert after 3 seconds
+                    setTimeout(function() {
+                        $(alertDiv).fadeOut(function() {
+                            alertDiv.remove();
+                        });
+                    }, 3000);
+                    
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to send reply'));
+                }
+                
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error sending reply. Please try again.');
+                
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            });
+        });
+    });
+});
+</script>
 {% endblock %}
 

@@ -88,6 +88,80 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Current Admission Cases -->
+                {% if current_admissions %}
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> Current Admission Cases ({{ admissions_count }})</h3>
+                                <div class="card-tools">
+                                    <a href="{{ url_for('ipd_dashboard') }}" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-list"></i> View All Admissions
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>Admission #</th>
+                                                <th>Patient Name</th>
+                                                <th>Patient Number</th>
+                                                <th>Ward</th>
+                                                <th>Bed</th>
+                                                <th>Admission Date</th>
+                                                <th>Days Stayed</th>
+                                                <th>Diagnosis</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for item in current_admissions[:10] %}
+                                            <tr>
+                                                <td><strong>{{ item.admission.admission_number }}</strong></td>
+                                                <td>{{ item.admission.patient.first_name }} {{ item.admission.patient.last_name }}</td>
+                                                <td><span class="badge badge-primary">{{ item.admission.patient.patient_number or 'N/A' }}</span></td>
+                                                <td>{{ item.admission.ward.name if item.admission.ward else 'N/A' }}</td>
+                                                <td>{{ item.admission.bed.bed_number if item.admission.bed else 'N/A' }}</td>
+                                                <td>{{ item.admission.admission_date.strftime('%Y-%m-%d %H:%M') if item.admission.admission_date else 'N/A' }}</td>
+                                                <td>
+                                                    <span class="badge badge-info">{{ item.stay_days }} day{% if item.stay_days != 1 %}s{% endif %}</span>
+                                                </td>
+                                                <td>{{ item.admission.diagnosis or 'N/A' }}</td>
+                                                <td>
+                                                    <span class="badge badge-danger">Admitted</span>
+                                                </td>
+                                                <td>
+                                                    <a href="{{ url_for('ipd_admission_detail', admission_id=item.admission.id) }}" 
+                                                       class="btn btn-sm btn-primary">
+                                                        <i class="fas fa-eye"></i> View Details
+                                                    </a>
+                                                    {% if item.admission.encounter_id %}
+                                                    <a href="{{ url_for('view_encounter', encounter_id=item.admission.encounter_id) }}" 
+                                                       class="btn btn-sm btn-info">
+                                                        <i class="fas fa-file-medical"></i> View Encounter
+                                                    </a>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% if current_admissions|length > 10 %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> Showing first 10 admissions. <a href="{{ url_for('ipd_dashboard') }}">View all {{ admissions_count }} admissions</a>.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
 
                 <!-- Assigned Appointments -->
                 {% if assigned_appointments %}

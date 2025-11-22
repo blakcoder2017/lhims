@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-sign-out-alt mr-2"></i>Discharge Patient: {{ admission.admission_number }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}">Admission</a></li>
+                            <li class="breadcrumb-item active">Discharge</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-circle"></i> Error: {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                <!-- Patient Information -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-info">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-user-injured mr-1"></i> Patient Information</h3>
+                            </div>
+                            <div class="card-body">
+                                <dl class="row mb-0">
+                                    <dt class="col-sm-3">Patient:</dt>
+                                    <dd class="col-sm-9"><strong>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</strong> ({{ admission.patient.patient_number or 'N/A' }})</dd>
+                                    
+                                    <dt class="col-sm-3">Ward:</dt>
+                                    <dd class="col-sm-9">{{ admission.ward.name if admission.ward else 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-3">Bed:</dt>
+                                    <dd class="col-sm-9">{{ admission.bed.bed_number if admission.bed else 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-3">Admission Date:</dt>
+                                    <dd class="col-sm-9">{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') if admission.admission_date else 'N/A' }}</dd>
+                                    
+                                    <dt class="col-sm-3">Days Stayed:</dt>
+                                    <dd class="col-sm-9">
+                                        {% set today = now().date() if now else admission.admission_date.date() %}
+                                        {% set days = ((today - admission.admission_date.date()).days + 1) if admission.admission_date else 0 %}
+                                        <span class="badge badge-info">{{ days }} day{% if days != 1 %}s{% endif %}</span>
+                                    </dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discharge Form -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-clipboard-list mr-1"></i> Discharge Form</h3>
+                            </div>
+                            <form method="POST" action="{{ url_for('ipd_admission_discharge', admission_id=admission.id) }}">
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <label for="discharge_status">Discharge Status *</label>
+                                        <select class="form-control" id="discharge_status" name="discharge_status" required>
+                                            <option value="">-- Select Discharge Status --</option>
+                                            {% for status in discharge_statuses %}
+                                            <option value="{{ status.value }}" {% if status.value == 'normal' %}selected{% endif %}>{{ status.value.title() }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="form-text text-muted">Select how the patient is being discharged: Normal, Death, or Referral</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="discharge_diagnosis">Final Diagnosis *</label>
+                                        <textarea class="form-control" id="discharge_diagnosis" name="discharge_diagnosis" rows="4" placeholder="Enter final diagnosis at discharge...">{% if encounter_diagnosis %}{{ encounter_diagnosis }}{% endif %}</textarea>
+                                        <small class="form-text text-muted">Final diagnosis at discharge (auto-filled from encounter if available)</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="discharge_notes">Discharge Notes & Instructions</label>
+                                        <textarea class="form-control" id="discharge_notes" name="discharge_notes" rows="6" placeholder="Enter discharge notes, instructions, and follow-up care..."></textarea>
+                                        <small class="form-text text-muted">Include discharge instructions, medications, follow-up care, and any other relevant notes</small>
+                                    </div>
+                                </div>
+                                <div class="card-footer">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-check mr-2"></i> Confirm Discharge
+                                    </button>
+                                    <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-secondary">
+                                        <i class="fas fa-times mr-2"></i> Cancel
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

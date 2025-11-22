@@ -25,7 +25,28 @@
                 <!-- Filters -->
                 <div class="card card-primary">
                     <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters</h3>
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters & Export</h3>
+                        <div class="card-tools">
+                            <button onclick="window.print()" class="btn btn-sm btn-info mr-2">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                            {% set base_url = url_for('financial_report') %}
+                            {% set qs = [] %}
+                            {% if start_date %}{% set qs = qs + ['start_date=' ~ start_date] %}{% endif %}
+                            {% if end_date %}{% set qs = qs + ['end_date=' ~ end_date] %}{% endif %}
+                            {% if service_type %}{% set qs = qs + ['service_type=' ~ service_type] %}{% endif %}
+                            {% if payment_mechanism %}{% set qs = qs + ['payment_mechanism=' ~ payment_mechanism] %}{% endif %}
+                            {% set query_str = qs|join('&') %}
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=pdf" class="btn btn-sm btn-danger mr-2">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </a>
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=excel" class="btn btn-sm btn-success mr-2">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </a>
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=csv" class="btn btn-sm btn-secondary">
+                                <i class="fas fa-file-csv"></i> CSV
+                            </a>
+                        </div>
                     </div>
                     <div class="card-body">
                         <form method="GET" action="{{ url_for('financial_report') }}">
@@ -72,9 +93,6 @@
                                     <button type="submit" class="btn btn-primary">
                                         <i class="fas fa-search mr-1"></i> Apply Filters
                                     </button>
-                                    <a href="{{ url_for('financial_report') }}?format=pdf{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}{% if service_type %}&service_type={{ service_type }}{% endif %}{% if payment_mechanism %}&payment_mechanism={{ payment_mechanism }}{% endif %}" class="btn btn-danger">
-                                        <i class="fas fa-file-pdf mr-1"></i> Export PDF
-                                    </a>
                                 </div>
                             </div>
                         </form>
@@ -262,5 +280,11 @@
             </div>
         </section>
     </div>
+
+    <style media="print">
+        .content-header, .card-header .card-tools, .btn, .breadcrumb, .sidebar { display: none !important; }
+        .card { border: none !important; box-shadow: none !important; }
+    </style>
+
 {% endblock %}
 

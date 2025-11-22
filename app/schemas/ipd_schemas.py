@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime, date
 from typing import Optional, List
 from decimal import Decimal
-from app.models.ipd_models import WardStatus, BedStatus, AdmissionStatus
+from app.models.ipd_models import WardStatus, BedStatus, AdmissionStatus, DischargeStatus
 
 
 # Ward Schemas
@@ -122,6 +122,10 @@ class AdmissionUpdate(BaseModel):
     transfer_reason: Optional[str] = None
     transferred_from_ward_id: Optional[int] = None
     transferred_to_ward_id: Optional[int] = None
+    # Discharge Information
+    discharge_status: Optional[DischargeStatus] = None  # Discharge status: normal, death, referral
+    discharge_diagnosis: Optional[str] = None  # Final diagnosis at discharge
+    discharge_notes: Optional[str] = None  # Discharge notes and instructions
 
 
 class Admission(AdmissionBase):

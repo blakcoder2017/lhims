@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-hospital mr-2"></i>IPD Detailed Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">IPD Report</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters and Actions -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters & Export</h3>
+                        <div class="card-tools">
+                            <button onclick="window.print()" class="btn btn-sm btn-info mr-2">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                            {% set base_url = url_for('ipd_detailed_report') %}
+                            {% set qs = [] %}
+                            {% if start_date %}{% set qs = qs + ['start_date=' ~ start_date] %}{% endif %}
+                            {% if end_date %}{% set qs = qs + ['end_date=' ~ end_date] %}{% endif %}
+                            {% if status %}{% set qs = qs + ['status=' ~ status] %}{% endif %}
+                            {% set query_str = qs|join('&') %}
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=pdf" class="btn btn-sm btn-danger mr-2">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </a>
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=excel" class="btn btn-sm btn-success mr-2">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </a>
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=csv" class="btn btn-sm btn-secondary">
+                                <i class="fas fa-file-csv"></i> CSV
+                            </a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('ipd_detailed_report') }}">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Status</label>
+                                        <select name="status" class="form-control">
+                                            <option value="">All Statuses</option>
+                                            <option value="admitted" {% if status == 'admitted' %}selected{% endif %}>Admitted</option>
+                                            <option value="discharged" {% if status == 'discharged' %}selected{% endif %}>Discharged</option>
+                                            <option value="transferred" {% if status == 'transferred' %}selected{% endif %}>Transferred</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search"></i> Generate Report
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Summary Statistics -->
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ total_admissions }}</h3>
+                                <p>Total Admissions</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-hospital"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ discharged_admissions }}</h3>
+                                <p>Discharged</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ active_admissions }}</h3>
+                                <p>Active</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ "%.1f"|format(avg_los) }}</h3>
+                                <p>Avg Length of Stay (days)</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-calendar-alt"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Breakdowns -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Ward Breakdown</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Ward</th>
+                                            <th>Count</th>
+                                            <th>Avg LOS (days)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for ward, data in ward_breakdown.items() %}
+                                        <tr>
+                                            <td>{{ ward }}</td>
+                                            <td>{{ data.count }}</td>
+                                            <td>{{ "%.1f"|format(data.total_los / data.count if data.count > 0 else 0) }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Discharge Status Breakdown</h3>
+                            </div>
+                            <div class="card-body">
+                                {% if discharge_status_breakdown %}
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Status</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for status, count in discharge_status_breakdown.items() %}
+                                        <tr>
+                                            <td>{{ status|title }}</td>
+                                            <td>{{ count }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                                {% else %}
+                                <p class="text-muted">No discharge data available</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detailed Admissions Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Detailed Admissions</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Admission Number</th>
+                                        <th>Patient Name</th>
+                                        <th>Ward</th>
+                                        <th>Bed</th>
+                                        <th>Admission Date</th>
+                                        <th>Discharge Date</th>
+                                        <th>Status</th>
+                                        <th>LOS (days)</th>
+                                        <th>Revenue</th>
+                                        <th>Encounters</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for admission in admissions %}
+                                    <tr>
+                                        <td><strong>{{ admission.admission_number }}</strong></td>
+                                        <td>{{ admission.patient.first_name }} {{ admission.patient.last_name }}</td>
+                                        <td>{{ admission.ward.name if admission.ward else 'N/A' }}</td>
+                                        <td>{{ admission.bed.bed_number if admission.bed else 'N/A' }}</td>
+                                        <td>{{ admission.admission_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ admission.discharge_date.strftime('%Y-%m-%d') if admission.discharge_date else 'N/A' }}</td>
+                                        <td>
+                                            {% if admission.status.value == 'admitted' %}
+                                                <span class="badge badge-success">Admitted</span>
+                                            {% elif admission.status.value == 'discharged' %}
+                                                <span class="badge badge-info">Discharged</span>
+                                            {% elif admission.status.value == 'transferred' %}
+                                                <span class="badge badge-warning">Transferred</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">{{ admission.status.value|title }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {{ admission_los.get(admission.id, 0) if admission_los else 0 }}
+                                        </td>
+                                        <td>GHS {{ "%.2f"|format(admission.invoice.total_amount if admission.invoice else 0.00) }}</td>
+                                        <td>{{ admission.encounters|length }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <style media="print">
+        .content-header, .card-header .card-tools, .btn, .breadcrumb, .sidebar { display: none !important; }
+        .card { border: none !important; box-shadow: none !important; }
+    </style>
+
+{% endblock %}
+

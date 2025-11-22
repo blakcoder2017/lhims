@@ -36,6 +36,9 @@ class LabTest(Base):
     nhis_covered = Column(Boolean, default=False)  # NHIS coverage
     nhis_code = Column(String(50), nullable=True)  # NHIS test code
     
+    # Restrictions
+    is_specialized = Column(Boolean, default=False)  # Is this a specialized test (requires doctor approval)
+    
     # Status
     is_active = Column(Boolean, default=True)  # Is test active
     

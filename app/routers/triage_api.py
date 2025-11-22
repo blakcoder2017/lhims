@@ -15,8 +15,10 @@ from app.utils.payment_verification import (
     check_payment_required_and_paid
 )
 from app.models.billing_models import ChargeType
+from app.models.triage_models import TriageVitals
 from typing import Optional
 from decimal import Decimal
+from datetime import datetime
 from app.services import create_charge_for_consultation
 
 templates = Jinja2Templates(directory="app/templates")
@@ -50,63 +52,104 @@ def record_vitals_form(
     weight: Optional[str] = Form(None),
     height: Optional[str] = Form(None),
     pain_scale: Optional[str] = Form(None),
+    
+    # Triage Level Assignment
+    triage_level: Optional[str] = Form(None),  # P1, P2, P3 or Red, Yellow, Green
+    triage_category: Optional[str] = Form(None),  # Critical, Urgent, Routine
+    auto_calculate_triage: Optional[str] = Form(None),  # "yes" to auto-calculate from vitals
 ):
     """
     Handles HTML form submission for recording comprehensive patient vital signs (Triage) and saves to DB.
     Supports all vital signs: temperature, BP, pulse, respiratory rate, SpO2, weight, height, BMI (auto-calculated), pain scale.
     
     For cash patients: Checks if payment has been made before allowing vitals recording.
+    For emergency patients: Payment is bypassed (stabilize first, payment after).
     """
     from app.models.patient_models import Patient
     
+    # Check if this is an emergency case
+    is_emergency = request.query_params.get('emergency') == 'true' or request.query_params.get('emergency') == '1'
+    
     # Check payment requirement for cash patients
     # Consultation fee now covers both vitals and encounter, so check for CONSULTATION fee
-    # For returning patients, check for TODAY's consultation payment only
+    # For returning patients (new_visit), check for the MOST RECENT charge for THIS visit
+    # Emergency patients bypass payment requirement
     
-    payment_required = requires_payment_before_service(db, patient_id, ChargeType.CONSULTATION)
+    payment_required = requires_payment_before_service(db, patient_id, ChargeType.CONSULTATION, is_emergency=is_emergency)
+    
+    # Check if this is a new visit
+    new_visit_param = request.query_params.get('new_visit')
+    is_new_visit = new_visit_param and new_visit_param.lower() == 'true'
     
     if payment_required:
-        # Improved payment check: look for recent payments (last 2 hours)
-        from datetime import timedelta, datetime
-        from app.models.billing_models import Charge, Invoice, Payment, PaymentStatus
+        # Improved payment check: look for recent consultation charges
+        from datetime import timedelta
+        from app.models.billing_models import Charge, Invoice, Payment, PaymentStatus, InvoiceStatus
         
-        two_hours_ago = datetime.now() - timedelta(hours=2)
-        
-        # Look for any consultation charges, then check if they have recent payments
-        recent_charges = db.query(Charge).join(Invoice).filter(
-            Invoice.patient_id == patient_id,
-            Charge.charge_type == ChargeType.CONSULTATION,
-            Charge.encounter_id.is_(None),
-            Invoice.is_active == True
-        ).order_by(Charge.created_at.desc()).limit(5).all()
+        # For new visits, only check the MOST RECENT charge (the one created for this visit)
+        # For regular visits, check charges from last 24 hours
+        if is_new_visit:
+            # Get the most recent consultation charge (should be the one created for this visit)
+            recent_charges = db.query(Charge).join(Invoice).filter(
+                Invoice.patient_id == patient_id,
+                Charge.charge_type == ChargeType.CONSULTATION,
+                Charge.encounter_id.is_(None),
+                Invoice.is_active == True
+            ).order_by(Charge.created_at.desc()).limit(1).all()
+        else:
+            yesterday = datetime.now() - timedelta(hours=24)
+            # Look for any consultation charges created in the last 24 hours
+            recent_charges = db.query(Charge).join(Invoice).filter(
+                Invoice.patient_id == patient_id,
+                Charge.charge_type == ChargeType.CONSULTATION,
+                Charge.encounter_id.is_(None),
+                Invoice.is_active == True,
+                Charge.created_at >= yesterday
+            ).order_by(Charge.created_at.desc()).limit(10).all()
         
         recent_paid_charge = None
         has_paid = False
+        
         for ch in recent_charges:
-            # Check if this charge has recent payments
-            recent_payments = db.query(Payment).filter(
-                Payment.invoice_id == ch.invoice_id,
+            invoice = ch.invoice
+            
+            # Method 1: Check invoice balance directly (most reliable)
+            if invoice.balance <= Decimal('0'):
+                recent_paid_charge = ch
+                has_paid = True
+                break
+            
+            # Method 2: Check invoice status
+            if invoice.status == InvoiceStatus.PAID:
+                recent_paid_charge = ch
+                has_paid = True
+                break
+            
+            # Method 3: Check if payments cover the charge amount
+            all_payments = db.query(Payment).filter(
+                Payment.invoice_id == invoice.id,
                 Payment.status == PaymentStatus.COMPLETED,
-                Payment.is_active == True,
-                Payment.created_at >= two_hours_ago
+                Payment.is_active == True
             ).all()
             
-            if recent_payments:
-                # Check all payments on this invoice, not just recent ones
-                all_payments = db.query(Payment).filter(
-                    Payment.invoice_id == ch.invoice_id,
-                    Payment.status == PaymentStatus.COMPLETED,
-                    Payment.is_active == True
-                ).all()
+            if all_payments:
                 total_paid_all = sum(p.amount for p in all_payments)
                 
+                # Check if total paid covers the charge amount
                 if total_paid_all >= ch.total_amount:
                     recent_paid_charge = ch
                     has_paid = True
                     break
+                
+                # Also check if invoice balance is covered
+                if total_paid_all >= invoice.total_amount:
+                    recent_paid_charge = ch
+                    has_paid = True
+                    break
         
-        # Fallback: check for today's charges using the standard method
-        if not has_paid:
+        # For new visits, if no paid charge found, we should have already created one in the triage page
+        # For regular visits, fallback to standard check
+        if not has_paid and not is_new_visit:
             has_paid, charge, invoice = has_paid_for_service(
                 db, patient_id, ChargeType.CONSULTATION,
                 encounter_id=None,
@@ -118,15 +161,20 @@ def record_vitals_form(
         payment_paid = has_paid
         
         if not payment_paid:
-            # If no charge exists for today, create one
-            if not recent_paid_charge:
+            # For new visits, charge should already exist (created in triage page)
+            # For regular visits, create one if it doesn't exist
+            if not recent_paid_charge and not is_new_visit:
                 try:
                     create_charge_for_consultation(db, patient_id, current_user.id, encounter_id=None)
                 except Exception as billing_error:
                     print(f"Warning: Unable to seed consultation charge for patient {patient_id}: {billing_error}")
-            # Redirect to consultation fee payment page
+            
+            # Redirect to consultation fee payment page, preserving new_visit parameter
+            new_visit_url_param = ""
+            if is_new_visit and new_visit_param:
+                new_visit_url_param = f"&new_visit={new_visit_param}"
             return RedirectResponse(
-                url=f"/patients/{patient_id}/pay/consultation?return_to=triage",
+                url=f"/patients/{patient_id}/pay/consultation?return_to=triage{new_visit_url_param}",
                 status_code=status.HTTP_302_FOUND
             )
     else:
@@ -164,6 +212,27 @@ def record_vitals_form(
     weight_decimal = Decimal(str(weight_float)) if weight_float is not None else None
     height_decimal = Decimal(str(height_float)) if height_float is not None else None
     
+    # Determine triage level
+    final_triage_level = triage_level
+    final_triage_category = triage_category
+    
+    # Auto-calculate triage level from vitals if requested
+    if auto_calculate_triage and auto_calculate_triage.lower() == "yes":
+        from app.services.triage_level_calculator import calculate_triage_level_from_vitals
+        # Create temporary vitals object for calculation
+        temp_vitals = TriageVitals(
+            temperature=temperature,
+            systolic_bp=systolic_bp_int,
+            diastolic_bp=diastolic_bp_int,
+            pulse_rate=pulse_rate_int,
+            respiratory_rate=respiratory_rate_int,
+            oxygen_saturation=oxygen_saturation_int,
+            pain_scale=pain_scale_int
+        )
+        calculated_level, calculated_category = calculate_triage_level_from_vitals(temp_vitals)
+        final_triage_level = calculated_level
+        final_triage_category = calculated_category
+    
     # 1. Create a data transfer object (DTO)
     vitals_data = TriageVitalsCreate(
         patient_id=patient_id,
@@ -178,10 +247,19 @@ def record_vitals_form(
         weight=weight_decimal,
         height=height_decimal,
         pain_scale=pain_scale_int,
+        triage_level=final_triage_level,
+        triage_category=final_triage_category,
     )
     
     # 2. Save to database (BMI will be calculated automatically in CRUD)
-    triage_crud.create_vitals(db, vitals=vitals_data)
+    db_vitals = triage_crud.create_vitals(db, vitals=vitals_data)
+    
+    # 3. If triage level was assigned, update the triage_assigned_by and triage_assigned_at fields
+    if final_triage_level:
+        db_vitals.triage_assigned_by_id = current_user.id
+        db_vitals.triage_assigned_at = datetime.now()
+        db.commit()
+        db.refresh(db_vitals)
     
     # 3. Only doctors/admins can jump straight to encounter creation. Front desk & nurses should check-in only.
     if create_encounter and create_encounter.lower() == "yes" and current_user.role.name in ["Doctor", "Admin"]:
@@ -191,7 +269,11 @@ def record_vitals_form(
         )
     
     # Default redirect back to triage page to show check-in button
+    # Check if this was a new visit - preserve the new_visit parameter if it exists
+    new_visit_param = ""
+    if request.query_params.get('new_visit'):
+        new_visit_param = f"&new_visit={request.query_params.get('new_visit')}"
     return RedirectResponse(
-        url=f"/patients/{patient_id}/triage?status=vitals_saved", 
+        url=f"/patients/{patient_id}/triage?status=vitals_saved{new_visit_param}", 
         status_code=status.HTTP_302_FOUND
     )

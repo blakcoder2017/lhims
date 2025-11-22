@@ -24,7 +24,9 @@ def get_current_user(
     
     token_data = verify_access_token(access_token, credentials_exception)
     
-    user = db.query(models.User).filter(models.User.id == token_data.id).first()
+    # Eagerly load the role relationship to avoid lazy loading issues
+    from sqlalchemy.orm import joinedload
+    user = db.query(models.User).options(joinedload(models.User.role)).filter(models.User.id == token_data.id).first()
     
     if user is None:
         raise credentials_exception

@@ -27,6 +27,21 @@ class PatientBase(BaseModel):
 class PatientCreate(PatientBase):
     pass
 
+# Schema for updating patient data (all fields optional)
+class PatientUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+    date_of_birth: Optional[date] = None
+    gender: Optional[str] = Field(None, max_length=10)
+    national_id: Optional[str] = Field(None, max_length=50)
+    phone_number: Optional[str] = Field(None, max_length=20)
+    address: Optional[str] = Field(None, max_length=255)
+    payment_mechanism: Optional[PaymentMechanism] = None
+    nhis_number: Optional[str] = Field(None, max_length=50)
+    insurance_provider: Optional[str] = Field(None, max_length=100)
+    insurance_policy_number: Optional[str] = Field(None, max_length=50)
+    languages_spoken: Optional[str] = Field(None, max_length=200)
+
 # Schema for reading patient data from the API (FIXED)
 class Patient(PatientBase):
     id: int

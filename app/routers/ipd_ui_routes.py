@@ -48,6 +48,7 @@ def list_wards(
         "request": request,
         "title": "Ward Management",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "wards": wards,
         "status_filter": status_filter,
         "ward_statuses": [s.value for s in WardStatus]
@@ -138,6 +139,145 @@ def create_ward(
         )
 
 
+@router.get("/ipd/wards/{ward_id}/edit", name="ipd_ward_edit_form")
+def edit_ward_form(
+    request: Request,
+    ward_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin"]))
+):
+    """Show edit ward form"""
+    ward = ipd_crud.get_ward(db, ward_id)
+    if not ward:
+        raise HTTPException(status_code=404, detail="Ward not found")
+    
+    from app.crud import ward_type_crud
+    
+    # Get active ward types for dropdown
+    ward_types, _ = ward_type_crud.get_ward_types(db, active_only=True)
+    
+    context = {
+        "request": request,
+        "title": f"Edit Ward: {ward.name}",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "ward": ward,
+        "ward_statuses": [s.value for s in WardStatus],
+        "ward_types": ward_types
+    }
+    return templates.TemplateResponse("ipd/ward_form.html", context)
+
+
+@router.post("/ipd/wards/{ward_id}/update", name="ipd_ward_update")
+def update_ward(
+    request: Request,
+    ward_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin"])),
+    name: str = Form(...),
+    ward_number: Optional[str] = Form(None),
+    ward_type: Optional[str] = Form(None),
+    capacity: int = Form(0),
+    ward_status: str = Form("active"),
+    floor: Optional[str] = Form(None),
+    building: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    charge_per_day: str = Form(...),
+):
+    """Update an existing ward"""
+    ward = ipd_crud.get_ward(db, ward_id)
+    if not ward:
+        raise HTTPException(status_code=404, detail="Ward not found")
+    
+    try:
+        ward_status_enum = WardStatus(ward_status)
+        
+        # Convert charge_per_day from string to float
+        try:
+            charge_per_day_float = float(charge_per_day.strip()) if charge_per_day.strip() else 0.0
+        except ValueError:
+            charge_per_day_float = 0.0
+        
+        ward_update = WardUpdate(
+            name=name,
+            ward_number=ward_number.strip() if ward_number else None,
+            ward_type=ward_type,
+            capacity=capacity,
+            status=ward_status_enum,
+            floor=floor,
+            building=building,
+            description=description,
+            charge_per_day=charge_per_day_float
+        )
+        
+        updated_ward = ipd_crud.update_ward(db, ward_id, ward_update)
+        if not updated_ward:
+            raise HTTPException(status_code=404, detail="Ward not found")
+        
+        return RedirectResponse(
+            url=str(request.url_for("ipd_wards_list")) + f"?status=ward_updated&ward_id={ward_id}",
+            status_code=status.HTTP_302_FOUND
+        )
+    except Exception as e:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_ward_edit_form", ward_id=ward_id)) + f"?error={str(e)}",
+            status_code=status.HTTP_302_FOUND
+        )
+
+
+@router.post("/ipd/wards/{ward_id}/delete", name="ipd_ward_delete")
+def delete_ward(
+    request: Request,
+    ward_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin"]))
+):
+    """Delete (soft delete) a ward"""
+    ward = ipd_crud.get_ward(db, ward_id)
+    if not ward:
+        raise HTTPException(status_code=404, detail="Ward not found")
+    
+    # Check if ward has active beds
+    from app.models.ipd_models import Bed
+    active_beds = db.query(Bed).filter(
+        Bed.ward_id == ward_id,
+        Bed.is_active == True
+    ).count()
+    
+    if active_beds > 0:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_wards_list")) + f"?error=Cannot delete ward. It has {active_beds} active bed(s). Please remove or deactivate beds first.",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Check if ward has active admissions
+    from app.models.ipd_models import Admission
+    active_admissions = db.query(Admission).filter(
+        Admission.ward_id == ward_id,
+        Admission.status == AdmissionStatus.ADMITTED,
+        Admission.is_active == True
+    ).count()
+    
+    if active_admissions > 0:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_wards_list")) + f"?error=Cannot delete ward. It has {active_admissions} active admission(s). Please discharge or transfer patients first.",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Soft delete the ward
+    success = ipd_crud.delete_ward(db, ward_id)
+    if not success:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_wards_list")) + "?error=Failed to delete ward",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    return RedirectResponse(
+        url=str(request.url_for("ipd_wards_list")) + f"?status=ward_deleted&ward_id={ward_id}",
+        status_code=status.HTTP_302_FOUND
+    )
+
+
 @router.get("/ipd/wards/{ward_id}", name="ipd_ward_detail")
 def ward_detail(
     request: Request,
@@ -157,6 +297,7 @@ def ward_detail(
         "request": request,
         "title": f"Ward: {ward.name}",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "ward": ward,
         "beds": beds,
         "admissions": admissions,
@@ -289,6 +430,139 @@ def create_bed(
         )
 
 
+@router.get("/ipd/beds/{bed_id}/edit", name="ipd_bed_edit_form")
+def edit_bed_form(
+    request: Request,
+    bed_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin"]))
+):
+    """Show edit bed form"""
+    bed = ipd_crud.get_bed(db, bed_id)
+    if not bed:
+        raise HTTPException(status_code=404, detail="Bed not found")
+    
+    from app.crud import bed_type_crud
+    
+    # Get all wards for dropdown
+    wards = ipd_crud.get_wards(db)
+    
+    # Get active bed types for dropdown
+    bed_types, _ = bed_type_crud.get_bed_types(db, active_only=True)
+    
+    context = {
+        "request": request,
+        "title": f"Edit Bed: {bed.bed_number}",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "bed": bed,
+        "wards": wards,
+        "bed_statuses": [s.value for s in BedStatus],
+        "bed_types": bed_types
+    }
+    return templates.TemplateResponse("ipd/bed_form.html", context)
+
+
+@router.post("/ipd/beds/{bed_id}/update", name="ipd_bed_update")
+def update_bed(
+    request: Request,
+    bed_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin"])),
+    ward_id: int = Form(...),
+    bed_number: str = Form(...),
+    bed_name: Optional[str] = Form(None),
+    bed_status: str = Form("available"),
+    bed_type: Optional[str] = Form(None),
+    charge_per_day: str = Form(...),
+    notes: Optional[str] = Form(None),
+):
+    """Update an existing bed"""
+    bed = ipd_crud.get_bed(db, bed_id)
+    if not bed:
+        raise HTTPException(status_code=404, detail="Bed not found")
+    
+    try:
+        bed_status_enum = BedStatus(bed_status)
+        
+        # Convert charge_per_day from string to float
+        try:
+            charge_per_day_float = float(charge_per_day.strip()) if charge_per_day.strip() else 0.0
+        except ValueError:
+            charge_per_day_float = 0.0
+        
+        bed_update = BedUpdate(
+            ward_id=ward_id,
+            bed_number=bed_number,
+            bed_name=bed_name,
+            status=bed_status_enum,
+            bed_type=bed_type,
+            charge_per_day=charge_per_day_float,
+            notes=notes
+        )
+        
+        updated_bed = ipd_crud.update_bed(db, bed_id, bed_update)
+        if not updated_bed:
+            raise HTTPException(status_code=404, detail="Bed not found")
+        
+        return RedirectResponse(
+            url=str(request.url_for("ipd_beds_list")) + f"?status=bed_updated&bed_id={bed_id}",
+            status_code=status.HTTP_302_FOUND
+        )
+    except Exception as e:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_bed_edit_form", bed_id=bed_id)) + f"?error={str(e)}",
+            status_code=status.HTTP_302_FOUND
+        )
+
+
+@router.post("/ipd/beds/{bed_id}/delete", name="ipd_bed_delete")
+def delete_bed(
+    request: Request,
+    bed_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin"]))
+):
+    """Delete (soft delete) a bed"""
+    bed = ipd_crud.get_bed(db, bed_id)
+    if not bed:
+        raise HTTPException(status_code=404, detail="Bed not found")
+    
+    # Check if bed has active admissions
+    from app.models.ipd_models import Admission
+    active_admissions = db.query(Admission).filter(
+        Admission.bed_id == bed_id,
+        Admission.status == AdmissionStatus.ADMITTED,
+        Admission.is_active == True
+    ).count()
+    
+    if active_admissions > 0:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_beds_list")) + f"?error=Cannot delete bed. It has {active_admissions} active admission(s). Please discharge or transfer patients first.",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Check if bed is currently occupied
+    if bed.status == BedStatus.OCCUPIED:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_beds_list")) + f"?error=Cannot delete bed. Bed is currently occupied. Please change bed status first.",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Soft delete the bed
+    success = ipd_crud.delete_bed(db, bed_id)
+    if not success:
+        return RedirectResponse(
+            url=str(request.url_for("ipd_beds_list")) + "?error=Failed to delete bed",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    return RedirectResponse(
+        url=str(request.url_for("ipd_beds_list")) + f"?status=bed_deleted&bed_id={bed_id}",
+        status_code=status.HTTP_302_FOUND
+    )
+
+
 # ==================== Admission Management Routes ====================
 
 @router.get("/ipd/admissions", name="ipd_admissions_list")
@@ -370,6 +644,7 @@ def list_admissions(
         "request": request,
         "title": "Admissions",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "admissions": admissions,
         "wards": wards,
         "search": search,
@@ -420,6 +695,7 @@ def create_admission_form(
         "request": request,
         "title": "Admit Patient",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "patient": patient,
         "patient_id": patient_id,
         "encounter_id": encounter_id,
@@ -547,9 +823,19 @@ def admission_detail(
             "url": f"/billing/invoices/{invoice.id}"
         }
     
-    # Get ALL prescriptions for this patient (not just from admission encounter)
-    # Get prescriptions from admission encounter and any other active prescriptions
+    # Get prescriptions for this admission only
+    # Get prescriptions from admission encounter and any encounters during this admission period
     prescriptions = []
+    
+    # Determine admission period (from admission_date to discharge_date or now if still admitted)
+    from datetime import date
+    admission_start_date = admission.admission_date.date() if isinstance(admission.admission_date, datetime) else admission.admission_date
+    admission_end_date = None
+    if admission.discharge_date:
+        admission_end_date = admission.discharge_date.date() if isinstance(admission.discharge_date, datetime) else admission.discharge_date
+    else:
+        # Still admitted, use today as end date
+        admission_end_date = date.today()
     
     # Get prescriptions from admission encounter
     if admission.encounter_id:
@@ -560,9 +846,9 @@ def admission_detail(
         ).filter(Prescription.encounter_id == admission.encounter_id).all()
         prescriptions.extend(encounter_prescriptions)
     
-    # Also get other active prescriptions for this patient (from other encounters during admission period)
-    # Get prescriptions from encounters on or after admission date
-    # Include cancelled prescriptions for historical/audit purposes
+    # Also get prescriptions from other encounters during THIS admission period only
+    # Only include encounters that fall within the current admission's date range
+    from sqlalchemy import func
     other_prescriptions = db.query(Prescription).options(
         joinedload(Prescription.prescribed_by),
         joinedload(Prescription.dispensed_by),
@@ -570,7 +856,8 @@ def admission_detail(
         joinedload(Prescription.encounter)
     ).join(Encounter).filter(
         Encounter.patient_id == admission.patient_id,
-        Encounter.encounter_date >= admission.admission_date.date()
+        func.date(Encounter.encounter_date) >= admission_start_date,
+        func.date(Encounter.encounter_date) <= admission_end_date
     ).all()
     
     # Add prescriptions that aren't already in the list (avoid duplicates)
@@ -624,13 +911,15 @@ def admission_detail(
             
             prescription_stock_status[presc.id] = is_available
     
-    # Get admission notes (ordered by most recent first)
+    # Get admission notes (ordered by most recent first, with replies grouped)
     from app.models.ipd_models import AdmissionNote
     admission_notes = db.query(AdmissionNote).options(
-        joinedload(AdmissionNote.created_by)
+        joinedload(AdmissionNote.created_by),
+        joinedload(AdmissionNote.replies).joinedload(AdmissionNote.created_by)
     ).filter(
         AdmissionNote.admission_id == admission_id,
-        AdmissionNote.is_active == True
+        AdmissionNote.is_active == True,
+        AdmissionNote.parent_note_id.is_(None)  # Only get top-level notes, replies loaded via relationship
     ).order_by(AdmissionNote.created_at.desc()).all()
     
     # Get drug administrations for this admission, grouped by prescription
@@ -652,6 +941,52 @@ def admission_detail(
     for admin in drug_administrations:
         administrations_by_prescription[admin.prescription_id].append(admin)
     
+    # Check for ongoing encounters (IN_PROGRESS or DETAINED) for this patient during THIS admission only
+    # This helps determine if there's an active encounter to add prescriptions to
+    from app.models.encounter_models import EncounterStatus, Encounter
+    ongoing_encounter = db.query(Encounter).filter(
+        Encounter.patient_id == admission.patient_id,
+        func.date(Encounter.encounter_date) >= admission_start_date,
+        func.date(Encounter.encounter_date) <= admission_end_date,
+        Encounter.status.in_([EncounterStatus.IN_PROGRESS, EncounterStatus.DETAINED]),
+        Encounter.is_active == True
+    ).order_by(Encounter.encounter_date.desc()).first()
+    
+    # Use ongoing encounter if available, otherwise fall back to admission.encounter_id
+    current_encounter_id = None
+    if ongoing_encounter:
+        current_encounter_id = ongoing_encounter.id
+    elif admission.encounter_id:
+        current_encounter_id = admission.encounter_id
+    
+    # Get discharge clearance status
+    from app.crud import discharge_crud
+    from app.utils.payment_verification import is_cash_patient
+    from sqlalchemy.exc import ProgrammingError
+    
+    clearance = None
+    try:
+        clearance = discharge_crud.get_discharge_clearance(db, admission_id)
+    except ProgrammingError as e:
+        # Table might not exist yet - migration not applied
+        if "does not exist" in str(e) or "relation" in str(e).lower():
+            print(f"Warning: discharge_clearances table does not exist yet. Please run migration 0fc735668649.")
+            clearance = None
+        else:
+            raise
+    
+    # Determine if discharge is ready (both clearances complete if required)
+    discharge_ready = False
+    if admission.ready_for_discharge_at:
+        if clearance:
+            if is_cash_patient(db, admission.patient_id):
+                # Cash patient: need both payment and nursing clearance
+                discharge_ready = clearance.payment_cleared and clearance.nursing_cleared
+            else:
+                # Insurance patient: only need nursing clearance
+                discharge_ready = clearance.nursing_cleared
+        # If clearance table doesn't exist, allow discharge anyway (backward compatibility)
+    
     context = {
         "request": request,
         "title": f"Admission: {admission.admission_number}",
@@ -659,12 +994,16 @@ def admission_detail(
         "user_role": current_user.role.name,
         "admission": admission,
         "ready_for_discharge": admission.ready_for_discharge_at is not None,
+        "discharge_ready": discharge_ready,
+        "clearance": clearance,
+        "is_cash_patient": is_cash_patient(db, admission.patient_id),
         "invoice_summary": invoice_summary,
         "prescription_stock_status": prescription_stock_status,
         "prescriptions": prescriptions,
         "admission_notes": admission_notes,
         "drug_administrations": drug_administrations,
-        "administrations_by_prescription": dict(administrations_by_prescription)
+        "administrations_by_prescription": dict(administrations_by_prescription),
+        "current_encounter_id": current_encounter_id  # Add current encounter ID for prescriptions
     }
     return templates.TemplateResponse("ipd/admission_detail.html", context)
 
@@ -687,6 +1026,7 @@ def record_drug_administration_form(
         "request": request,
         "title": "Record Drug Administration",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "admission": admission,
         "prescription_options": prescription_options,
         "default_admin_time": datetime.now().strftime("%Y-%m-%dT%H:%M")
@@ -767,6 +1107,7 @@ def admission_transfer_form(
         "request": request,
         "title": f"Transfer Admission: {admission.admission_number}",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "admission": admission,
         "wards": wards,
         "available_beds": available_beds
@@ -827,6 +1168,109 @@ def transfer_admission(
                 transfer_reason=full_transfer_reason,
                 notes=(admission.notes or "") + f"\n\n[EXTERNAL TRANSFER] Transferred to {external_hospital_name or 'External Hospital'} on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             )
+            
+            # Generate comprehensive medical transfer report
+            try:
+                from app.models.encounter_models import Encounter, LabOrder, RadiologyOrder, Prescription
+                from app.models.triage_models import TriageVitals
+                from app.models.ipd_models import AdmissionNote
+                from app.crud import hospital_settings_crud
+                
+                # Get all related data for the report
+                admission_with_data = db.query(Admission).options(
+                    joinedload(Admission.patient),
+                    joinedload(Admission.ward),
+                    joinedload(Admission.bed),
+                    joinedload(Admission.encounters).joinedload(Encounter.clinician),
+                    joinedload(Admission.admitted_by)
+                ).filter(Admission.id == admission_id).first()
+                
+                # Get encounters with full details
+                encounters = db.query(Encounter).filter(
+                    Encounter.admission_id == admission_id,
+                    Encounter.is_active == True
+                ).order_by(Encounter.encounter_date).all()
+                
+                # Get lab orders
+                lab_orders = []
+                for encounter in encounters:
+                    lab_orders.extend(db.query(LabOrder).filter(LabOrder.encounter_id == encounter.id).all())
+                
+                # Get radiology orders
+                radiology_orders = []
+                for encounter in encounters:
+                    radiology_orders.extend(db.query(RadiologyOrder).filter(RadiologyOrder.encounter_id == encounter.id).all())
+                
+                # Get prescriptions
+                prescriptions = []
+                for encounter in encounters:
+                    prescriptions.extend(db.query(Prescription).filter(Prescription.encounter_id == encounter.id).all())
+                
+                # Get vitals
+                vitals_records = []
+                if admission_with_data and admission_with_data.patient:
+                    vitals_records = db.query(TriageVitals).filter(
+                        TriageVitals.patient_id == admission_with_data.patient.id
+                    ).order_by(TriageVitals.recorded_at.desc()).limit(10).all()
+                
+                # Get admission notes with created_by relationship
+                notes = db.query(AdmissionNote).options(
+                    joinedload(AdmissionNote.created_by)
+                ).filter(
+                    AdmissionNote.admission_id == admission_id,
+                    AdmissionNote.is_active == True
+                ).order_by(AdmissionNote.created_at.desc()).limit(10).all()
+                
+                # Get hospital settings
+                hospital_settings = hospital_settings_crud.get_hospital_settings(db)
+                
+                # Build context for PDF generation
+                transfer_context = {
+                    "admission": admission_with_data or admission,
+                    "patient": admission_with_data.patient if admission_with_data else admission.patient,
+                    "encounters": encounters,
+                    "lab_orders": lab_orders,
+                    "radiology_orders": radiology_orders,
+                    "prescriptions": prescriptions,
+                    "vitals_records": vitals_records,
+                    "notes": notes,
+                    "hospital_settings": hospital_settings,
+                    "current_user": current_user,
+                    "report_date": datetime.now(),
+                    "transfer_info": {
+                        "external_hospital_name": external_hospital_name,
+                        "external_hospital_address": external_hospital_address,
+                        "external_hospital_contact": external_hospital_contact,
+                        "external_ward_department": external_ward_department,
+                        "transfer_reason": transfer_reason
+                    }
+                }
+                
+                # Generate PDF
+                from app.utils.pdf_generator import generate_transfer_medical_report_pdf
+                pdf_content = generate_transfer_medical_report_pdf(transfer_context)
+                
+                # Store PDF in session or return it for download
+                # For now, we'll save it and provide a download link
+                import os
+                from pathlib import Path
+                
+                # Create reports directory if it doesn't exist
+                reports_dir = Path("app/static/reports/transfers")
+                reports_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Save PDF
+                filename = f"transfer_report_{admission.admission_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                filepath = reports_dir / filename
+                with open(filepath, 'wb') as f:
+                    f.write(pdf_content)
+                
+                # Store filename in context for redirect
+                transfer_report_filename = filename
+                
+            except Exception as pdf_error:
+                print(f"Warning: Failed to generate transfer report PDF: {pdf_error}")
+                transfer_report_filename = None
         else:
             # Internal transfer (within hospital)
             if not ward_id or not bed_id:
@@ -844,7 +1288,62 @@ def transfer_admission(
         
         # Reset discharge preparation if transfer occurs
         updated_admission.ready_for_discharge_at = None
+        
+        # Close all ongoing encounters if external transfer
+        if transfer_type == "external":
+            from app.models.encounter_models import EncounterStatus, Encounter
+            from app.schemas.encounter_schemas import EncounterUpdate
+            from app.crud import encounter_crud
+            
+            # Get all ongoing encounters for this admission
+            ongoing_encounters = db.query(Encounter).filter(
+                Encounter.admission_id == admission_id,
+                Encounter.is_active == True,
+                Encounter.status.in_([EncounterStatus.IN_PROGRESS, EncounterStatus.DETAINED])
+            ).all()
+            
+            # Close all ongoing encounters
+            closed_count = 0
+            for encounter in ongoing_encounters:
+                try:
+                    encounter_update = EncounterUpdate(
+                        status=EncounterStatus.COMPLETED,
+                        completed_at=datetime.now()
+                    )
+                    encounter_crud.update_encounter(db, encounter.id, encounter_update)
+                    closed_count += 1
+                    print(f"✓ Closed encounter {encounter.id} on transfer of admission {admission_id}")
+                except Exception as e:
+                    print(f"✗ Warning: Failed to close encounter {encounter.id}: {e}")
+            
+            # Also close the admission's linked encounter if it exists and wasn't already closed
+            if admission.encounter_id:
+                linked_encounter = encounter_crud.get_encounter(db, admission.encounter_id)
+                if linked_encounter and linked_encounter.status != EncounterStatus.COMPLETED:
+                    try:
+                        encounter_update = EncounterUpdate(
+                            status=EncounterStatus.COMPLETED,
+                            completed_at=datetime.now()
+                        )
+                        encounter_crud.update_encounter(db, admission.encounter_id, encounter_update)
+                        closed_count += 1
+                        print(f"✓ Closed admission-linked encounter {admission.encounter_id} on transfer")
+                    except Exception as e:
+                        print(f"✗ Warning: Failed to close admission-linked encounter {admission.encounter_id}: {e}")
+            
+            if closed_count > 0:
+                print(f"✓ Closed {closed_count} encounter(s) on transfer of admission {admission_id}")
+        
         db.commit()
+        
+        # For external transfers, include PDF download link
+        if transfer_type == "external":
+            # Check if report was generated
+            if 'transfer_report_filename' in locals() and transfer_report_filename:
+                return RedirectResponse(
+                    url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + f"?status=transferred&report={transfer_report_filename}",
+                    status_code=status.HTTP_302_FOUND
+                )
         
         return RedirectResponse(
             url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + "?status=transferred",
@@ -855,6 +1354,40 @@ def transfer_admission(
                 url=str(request.url_for("ipd_admission_transfer_form", admission_id=admission_id)) + f"?error={str(e)}",
             status_code=status.HTTP_302_FOUND
         )
+
+
+@router.get("/ipd/admissions/{admission_id}/transfer-report/{filename}", name="download_transfer_report")
+def download_transfer_report(
+    request: Request,
+    admission_id: int,
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor"]))
+):
+    """Download transfer medical report PDF"""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    
+    # Verify admission exists
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    
+    # Security: Verify filename matches expected pattern
+    if not filename.startswith(f"transfer_report_{admission.admission_number}_"):
+        raise HTTPException(status_code=403, detail="Invalid report filename")
+    
+    # Get file path
+    filepath = Path("app/static/reports/transfers") / filename
+    
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Transfer report not found")
+    
+    return FileResponse(
+        path=str(filepath),
+        filename=filename,
+        media_type="application/pdf"
+    )
 
 
 @router.post("/ipd/admissions/{admission_id}/prepare-discharge", name="ipd_admission_prepare_discharge")
@@ -873,6 +1406,15 @@ def prepare_admission_discharge(
         # Sync ward/bed charges and ensure invoice is linked
         calculate_ward_bed_charges(db, admission, current_user.id)
         invoice = get_or_create_invoice_for_admission(db, admission, current_user.id)
+        
+        # Auto-clear payment if invoice is paid (for cash patients)
+        from app.utils.payment_verification import is_cash_patient
+        from app.crud import discharge_crud
+        
+        if is_cash_patient(db, admission.patient_id):
+            if invoice and invoice.balance <= 0:
+                # Payment already settled, auto-clear payment
+                discharge_crud.clear_payment(db, admission_id, current_user.id, "Payment verified during discharge preparation")
         
         admission.ready_for_discharge_at = datetime.now()
         db.commit()
@@ -894,12 +1436,95 @@ def prepare_admission_discharge(
         )
 
 
+@router.post("/ipd/admissions/{admission_id}/clear-payment", name="ipd_clear_payment")
+def clear_payment(
+    request: Request,
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin", "Finance", "Front Office"])),
+    notes: Optional[str] = Form(None)
+):
+    """Mark payment as cleared for discharge"""
+    from app.crud import discharge_crud
+    
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    
+    clearance = discharge_crud.clear_payment(db, admission_id, current_user.id, notes)
+    
+    return RedirectResponse(
+        url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + "?status=payment_cleared",
+        status_code=status.HTTP_302_FOUND
+    )
+
+
+@router.post("/ipd/admissions/{admission_id}/clear-nursing", name="ipd_clear_nursing")
+def clear_nursing(
+    request: Request,
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Nurse", "Admin"])),
+    notes: Optional[str] = Form(None)
+):
+    """Mark nursing clearance as complete for discharge"""
+    from app.crud import discharge_crud
+    
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    
+    clearance = discharge_crud.clear_nursing(db, admission_id, current_user.id, notes)
+    
+    return RedirectResponse(
+        url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + "?status=nursing_cleared",
+        status_code=status.HTTP_302_FOUND
+    )
+
+
+@router.get("/ipd/admissions/{admission_id}/discharge-form", name="ipd_discharge_form")
+def discharge_form(
+    request: Request,
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor"]))
+):
+    """Show discharge form with discharge status, diagnosis, and notes"""
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    
+    from app.models.ipd_models import DischargeStatus
+    
+    # Get encounter diagnosis if available
+    encounter_diagnosis = None
+    if admission.encounter_id:
+        from app.crud import encounter_crud
+        encounter = encounter_crud.get_encounter(db, admission.encounter_id)
+        if encounter:
+            encounter_diagnosis = encounter.diagnosis
+    
+    context = {
+        "request": request,
+        "title": f"Discharge Patient: {admission.admission_number}",
+        "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
+        "admission": admission,
+        "discharge_statuses": [s for s in DischargeStatus],
+        "encounter_diagnosis": encounter_diagnosis
+    }
+    return templates.TemplateResponse("ipd/discharge_form.html", context)
+
+
 @router.post("/ipd/admissions/{admission_id}/discharge", name="ipd_admission_discharge")
 def discharge_admission(
     request: Request,
     admission_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor"]))
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor"])),
+    discharge_status: Optional[str] = Form(None),
+    discharge_diagnosis: Optional[str] = Form(None),
+    discharge_notes: Optional[str] = Form(None)
 ):
     """Discharge a patient and process billing"""
     try:
@@ -930,11 +1555,15 @@ def discharge_admission(
             invoice = get_or_create_invoice_for_admission(db, admission, current_user.id)
             db.refresh(admission)
         
-        # Check if cash patient has unsettled bills - prevent discharge if bills not settled
+        # Check discharge clearance (payment and nursing clearance)
+        from app.crud import discharge_crud
         from app.utils.payment_verification import is_cash_patient
         from app.crud import billing_crud
         from app.models.billing_models import InvoiceStatus
         
+        clearance = discharge_crud.get_discharge_clearance(db, admission_id)
+        
+        # For cash patients: Check payment clearance
         if is_cash_patient(db, admission.patient_id):
             # Get all invoices for this admission
             patient_invoices = billing_crud.get_invoices_by_patient(db, admission.patient_id)
@@ -954,26 +1583,102 @@ def discharge_admission(
                         f"?error=Cannot discharge patient. Outstanding bills of GHS {total_unpaid:.2f} must be settled first. Please process payment before discharge.",
                     status_code=status.HTTP_302_FOUND
                 )
+            
+            # Check payment clearance
+            if not clearance or not clearance.payment_cleared:
+                return RedirectResponse(
+                    url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + 
+                        "?error=Payment clearance required before discharge. Please clear payment first.",
+                    status_code=status.HTTP_302_FOUND
+                )
         
-        # Discharge the patient
+        # Check nursing clearance (required for all patients)
+        if not clearance or not clearance.nursing_cleared:
+            return RedirectResponse(
+                url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + 
+                    "?error=Nursing clearance required before discharge. Please get nursing clearance first.",
+                status_code=status.HTTP_302_FOUND
+            )
+        
+        # Discharge the patient with discharge information
+        from app.models.ipd_models import DischargeStatus
+        from app.schemas.ipd_schemas import AdmissionUpdate
+        
+        # Parse discharge status
+        discharge_status_enum = None
+        if discharge_status:
+            try:
+                discharge_status_enum = DischargeStatus(discharge_status)
+            except ValueError:
+                pass  # Invalid status, will be ignored
+        
+        # Update admission with discharge information
+        admission_update = AdmissionUpdate(
+            discharge_status=discharge_status_enum,
+            discharge_diagnosis=discharge_diagnosis.strip() if discharge_diagnosis else None,
+            discharge_notes=discharge_notes.strip() if discharge_notes else None,
+            discharged_by_id=current_user.id,
+            discharge_date=datetime.now()
+        )
+        admission = ipd_crud.update_admission(db, admission_id, admission_update)
+        
+        # Now actually discharge (change status)
         admission = ipd_crud.discharge_patient(db, admission_id, current_user.id)
         if not admission:
             raise HTTPException(status_code=404, detail="Admission not found")
         admission.ready_for_discharge_at = None
         
-        # Automatically complete the encounter if it's still in progress
-        if admission.encounter_id:
-            from app.crud import encounter_crud
-            from app.models.encounter_models import EncounterStatus
-            from app.schemas.encounter_schemas import EncounterUpdate
-            
-            encounter = encounter_crud.get_encounter(db, admission.encounter_id)
-            if encounter and encounter.status == EncounterStatus.IN_PROGRESS:
+        # Automatically complete ALL encounters that are still in progress or detained for this patient
+        from app.crud import encounter_crud
+        from app.models.encounter_models import EncounterStatus, Encounter
+        from app.schemas.encounter_schemas import EncounterUpdate
+        
+        # Find ALL ongoing encounters for this patient (not just during admission period)
+        # This ensures that any encounter associated with the patient is closed on discharge
+        ongoing_encounters = db.query(Encounter).filter(
+            Encounter.patient_id == admission.patient_id,
+            Encounter.status.in_([EncounterStatus.IN_PROGRESS, EncounterStatus.DETAINED]),
+            Encounter.is_active == True
+        ).all()
+        
+        # Close all ongoing encounters
+        closed_count = 0
+        for encounter in ongoing_encounters:
+            try:
                 encounter_update = EncounterUpdate(
-                    status=EncounterStatus.COMPLETED,
-                    completed_at=datetime.now()
+                    status=EncounterStatus.COMPLETED
                 )
-                encounter_crud.update_encounter(db, admission.encounter_id, encounter_update)
+                result = encounter_crud.update_encounter(db, encounter.id, encounter_update)
+                if result:
+                    closed_count += 1
+                    print(f"✓ Closed encounter {encounter.id} on discharge of admission {admission_id}")
+                else:
+                    print(f"✗ Warning: Failed to close encounter {encounter.id}")
+            except Exception as e:
+                print(f"✗ Error closing encounter {encounter.id}: {e}")
+        
+        # Also close the admission's linked encounter if it exists and wasn't already closed
+        # Check this separately since it might not be IN_PROGRESS or DETAINED but should still be closed
+        if admission.encounter_id:
+            try:
+                linked_encounter = encounter_crud.get_encounter(db, admission.encounter_id)
+                if linked_encounter and linked_encounter.status != EncounterStatus.COMPLETED:
+                    # Check if we already closed it in the loop above
+                    if linked_encounter.id not in [e.id for e in ongoing_encounters]:
+                        encounter_update = EncounterUpdate(
+                            status=EncounterStatus.COMPLETED
+                        )
+                        result = encounter_crud.update_encounter(db, admission.encounter_id, encounter_update)
+                        if result:
+                            closed_count += 1
+                            print(f"✓ Closed admission-linked encounter {admission.encounter_id} on discharge")
+                        else:
+                            print(f"✗ Warning: Failed to close admission-linked encounter {admission.encounter_id}")
+            except Exception as e:
+                print(f"✗ Error closing admission-linked encounter {admission.encounter_id}: {e}")
+        
+        if closed_count > 0:
+            print(f"✓ Closed {closed_count} encounter(s) on discharge of admission {admission_id}")
         
         # Commit both discharge and encounter completion
         db.commit()
@@ -1008,13 +1713,25 @@ def add_admission_note(
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Nurse", "Doctor", "Admin"])),
     note: str = Form(...),
-    note_type: Optional[str] = Form("general")
+    note_type: Optional[str] = Form("general"),
+    parent_note_id: Optional[int] = Form(None)  # For replies
 ):
-    """Add a note to an admission"""
+    """Add a note to an admission, or reply to an existing note"""
     try:
         admission = ipd_crud.get_admission(db, admission_id)
         if not admission:
             raise HTTPException(status_code=404, detail="Admission not found")
+        
+        # If replying, verify parent note exists and belongs to this admission
+        if parent_note_id:
+            from app.models.ipd_models import AdmissionNote
+            parent_note = db.query(AdmissionNote).filter(
+                AdmissionNote.id == parent_note_id,
+                AdmissionNote.admission_id == admission_id,
+                AdmissionNote.is_active == True
+            ).first()
+            if not parent_note:
+                raise HTTPException(status_code=404, detail="Parent note not found")
         
         # Create admission note
         from app.models.ipd_models import AdmissionNote
@@ -1022,7 +1739,8 @@ def add_admission_note(
             admission_id=admission_id,
             created_by_id=current_user.id,
             note=note.strip(),
-            note_type=note_type or "general"
+            note_type=note_type or "general",
+            parent_note_id=parent_note_id
         )
         
         db.add(admission_note)
@@ -1034,9 +1752,90 @@ def add_admission_note(
             status_code=status.HTTP_302_FOUND
         )
     except Exception as e:
+        db.rollback()
         return RedirectResponse(
             url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + f"?error={str(e)}",
             status_code=status.HTTP_302_FOUND
+        )
+
+
+@router.post("/api/v1/ipd/admissions/{admission_id}/notes", name="api_add_admission_note")
+def api_add_admission_note(
+    request: Request,
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Nurse", "Doctor", "Admin"])),
+    note: str = Form(...),
+    note_type: Optional[str] = Form("general"),
+    parent_note_id: Optional[int] = Form(None)
+):
+    """API endpoint to add a note (for AJAX requests)"""
+    from fastapi.responses import JSONResponse
+    from app.models.ipd_models import AdmissionNote
+    
+    try:
+        admission = ipd_crud.get_admission(db, admission_id)
+        if not admission:
+            return JSONResponse(
+                status_code=404,
+                content={"success": False, "error": "Admission not found"}
+            )
+        
+        # If replying, verify parent note exists
+        if parent_note_id:
+            parent_note = db.query(AdmissionNote).filter(
+                AdmissionNote.id == parent_note_id,
+                AdmissionNote.admission_id == admission_id,
+                AdmissionNote.is_active == True
+            ).first()
+            if not parent_note:
+                return JSONResponse(
+                    status_code=404,
+                    content={"success": False, "error": "Parent note not found"}
+                )
+        
+        # Create note
+        admission_note = AdmissionNote(
+            admission_id=admission_id,
+            created_by_id=current_user.id,
+            note=note.strip(),
+            note_type=note_type or "general",
+            parent_note_id=parent_note_id
+        )
+        
+        db.add(admission_note)
+        db.commit()
+        db.refresh(admission_note)
+        
+        # Load relationships for response
+        from sqlalchemy.orm import joinedload
+        note_with_user = db.query(AdmissionNote).options(
+            joinedload(AdmissionNote.created_by)
+        ).filter(AdmissionNote.id == admission_note.id).first()
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "note": {
+                    "id": admission_note.id,
+                    "note": admission_note.note,
+                    "note_type": admission_note.note_type,
+                    "parent_note_id": admission_note.parent_note_id,
+                    "created_at": admission_note.created_at.isoformat(),
+                    "created_by": {
+                        "id": current_user.id,
+                        "full_name": current_user.full_name,
+                        "username": current_user.username
+                    }
+                }
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
         )
 
 
@@ -1086,6 +1885,7 @@ def list_doctor_duties(
         "request": request,
         "title": "Doctor Duties",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "duties": duties,
         "doctors": doctors,
         "doctor_id": doctor_id,
@@ -1193,18 +1993,21 @@ def ipd_dashboard(
     current_user: User = Depends(get_current_user)
 ):
     """IPD dashboard showing ward occupancy and statistics"""
+    from app.models.ipd_models import Bed
+    from sqlalchemy import func
+    
     wards = ipd_crud.get_wards(db)
     
-    # Calculate statistics
+    # Calculate statistics using actual bed counts, not ward capacity
     total_wards = len(wards)
-    total_beds = 0
-    occupied_beds = 0
-    available_beds = 0
     
-    for ward in wards:
-        total_beds += ward.capacity
-        occupied_beds += ward.current_occupancy
-        available_beds += (ward.capacity - ward.current_occupancy)
+    # Get actual bed counts from database
+    total_beds = db.query(func.count(Bed.id)).filter(Bed.is_active == True).scalar() or 0
+    occupied_beds = db.query(func.count(Bed.id)).filter(
+        Bed.is_active == True,
+        Bed.status == BedStatus.OCCUPIED
+    ).scalar() or 0
+    available_beds = total_beds - occupied_beds
     
     # Get current admissions
     from app.models.ipd_models import Admission
@@ -1220,6 +2023,7 @@ def ipd_dashboard(
         "request": request,
         "title": "IPD Dashboard",
         "current_user": current_user,
+        "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "wards": wards,
         "total_wards": total_wards,
         "total_beds": total_beds,

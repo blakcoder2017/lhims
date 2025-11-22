@@ -45,12 +45,17 @@ def doctor_dashboard(
     today_start = datetime.combine(today, datetime.min.time())
     today_end = datetime.combine(today, datetime.max.time())
     
-    # Get all currently admitted patients (exclude them from dashboard)
-    admitted_patients = db.query(Admission).filter(
+    # Get all currently admitted patients - INCLUDING them in dashboard for doctors
+    current_admissions = db.query(Admission).options(
+        joinedload(Admission.patient),
+        joinedload(Admission.ward),
+        joinedload(Admission.bed),
+        joinedload(Admission.initial_encounter)
+    ).filter(
         Admission.status == AdmissionStatus.ADMITTED,
         Admission.is_active == True
-    ).all()
-    admitted_patient_ids = {admission.patient_id for admission in admitted_patients}
+    ).order_by(Admission.admission_date.desc()).all()
+    admitted_patient_ids = {admission.patient_id for admission in current_admissions}
     
     # Get appointments assigned to this doctor
     assigned_appointments = db.query(Appointment).options(
@@ -112,6 +117,16 @@ def doctor_dashboard(
         func.date(Encounter.encounter_date) == today
     ).count()
     
+    # Calculate length of stay for current admissions
+    from datetime import datetime
+    admissions_with_stay_days = []
+    for admission in current_admissions:
+        stay_days = (datetime.now().date() - admission.admission_date.date()).days + 1 if admission.admission_date else 0
+        admissions_with_stay_days.append({
+            "admission": admission,
+            "stay_days": stay_days
+        })
+    
     context = {
         "request": request,
         "title": "Doctor Dashboard",
@@ -122,7 +137,9 @@ def doctor_dashboard(
         "pending_encounters": pending_encounters,
         "completed_encounters_today": completed_encounters_today,
         "assigned_count": len(assigned_appointments),
-        "pending_encounters_count": len(pending_encounters)
+        "pending_encounters_count": len(pending_encounters),
+        "current_admissions": admissions_with_stay_days,  # Include current admission cases
+        "admissions_count": len(current_admissions)
     }
     return templates.TemplateResponse("doctor/dashboard.html", context)
 
@@ -243,22 +260,41 @@ def doctor_queue(
     
     encounter_map = {enc.patient_id: enc for enc in existing_encounters}
     
-    # Enrich appointments with encounter info and wait time
+    # Enrich appointments with encounter info, wait time, and triage level
     queue_items = []
     appointment_patient_ids = set()
+    from app.models.triage_models import TriageVitals
+    from app.services.triage_level_calculator import get_triage_level_priority
+    
     for appointment in appointments:
         appointment_patient_ids.add(appointment.patient_id)
         has_encounter = appointment.patient_id in encounter_map
         wait_time = appointment_crud.calculate_wait_time(appointment)
         wait_time_str = appointment_crud.format_wait_time(wait_time)
+        
+        # Get most recent vitals with triage level for this patient
+        latest_vitals = db.query(TriageVitals).filter(
+            TriageVitals.patient_id == appointment.patient_id
+        ).order_by(TriageVitals.recorded_at.desc()).first()
+        
+        triage_level = latest_vitals.triage_level if latest_vitals else None
+        triage_category = latest_vitals.triage_category if latest_vitals else None
+        triage_priority = get_triage_level_priority(triage_level)
+        
         queue_items.append({
             "appointment": appointment,
             "has_encounter": has_encounter,
             "encounter": encounter_map.get(appointment.patient_id),
             "type": "appointment",
             "wait_time": wait_time,
-            "wait_time_str": wait_time_str
+            "wait_time_str": wait_time_str,
+            "triage_level": triage_level,
+            "triage_category": triage_category,
+            "triage_priority": triage_priority
         })
+    
+    # Sort queue items by triage level first (P1 > P2 > P3), then by arrival time
+    queue_items.sort(key=lambda x: (x.get("triage_priority", 4), x["appointment"].checked_in_at or x["appointment"].scheduled_date))
     
     # Add patients with encounters but no appointments (from nurse workflow)
     for encounter in encounters_needing_doctor:

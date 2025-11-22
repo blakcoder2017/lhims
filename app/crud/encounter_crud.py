@@ -14,7 +14,31 @@ from app.schemas.encounter_schemas import (
 
 # Encounter CRUD Operations
 def create_encounter(db: Session, encounter: EncounterCreate):
-    """Creates a new clinical encounter in the database."""
+    """
+    Creates a new clinical encounter in the database.
+    Validates OPD/IPD linkage before creation.
+    Auto-creates OPD visit if needed for OPD encounters.
+    """
+    from app.services.opd_validation import validate_encounter_creation, auto_link_opd_visit
+    
+    # Auto-link or create OPD visit if not provided and this is an OPD encounter (not IPD)
+    if not encounter.opd_visit_id and not encounter.admission_id:
+        # Try to auto-link/create OPD visit (will create if doesn't exist)
+        opd_visit_id = auto_link_opd_visit(db, encounter.patient_id, encounter.appointment_id)
+        if opd_visit_id:
+            encounter.opd_visit_id = opd_visit_id
+    
+    # Validate encounter creation
+    is_valid, error_message = validate_encounter_creation(
+        db,
+        encounter.patient_id,
+        encounter.opd_visit_id,
+        encounter.admission_id
+    )
+    
+    if not is_valid:
+        raise ValueError(error_message)
+    
     db_encounter = Encounter(**encounter.model_dump())
     db.add(db_encounter)
     db.commit()
@@ -101,10 +125,18 @@ def create_lab_order(db: Session, lab_order: LabOrderCreate):
     
     # For non-walk-in orders, get patient_id from encounter if not provided
     if not order_data.get('is_walk_in') and not order_data.get('patient_id') and order_data.get('encounter_id'):
-        from app.models.encounter_models import Encounter
-        encounter = db.query(Encounter).filter(Encounter.id == order_data['encounter_id']).first()
+        encounter = get_encounter(db, order_data['encounter_id'])
         if encounter:
             order_data['patient_id'] = encounter.patient_id
+    
+    # Auto-link opd_visit_id and admission_id from encounter if not provided
+    if order_data.get("encounter_id") and not order_data.get("opd_visit_id") and not order_data.get("admission_id"):
+        encounter = get_encounter(db, order_data["encounter_id"])
+        if encounter:
+            if encounter.opd_visit_id:
+                order_data["opd_visit_id"] = encounter.opd_visit_id
+            if encounter.admission_id:
+                order_data["admission_id"] = encounter.admission_id
     
     db_lab_order = LabOrder(**order_data)
     db.add(db_lab_order)
@@ -154,10 +186,18 @@ def create_radiology_order(db: Session, radiology_order: RadiologyOrderCreate):
     
     # For non-walk-in orders, get patient_id from encounter if not provided
     if not order_data.get('is_walk_in') and not order_data.get('patient_id') and order_data.get('encounter_id'):
-        from app.models.encounter_models import Encounter
-        encounter = db.query(Encounter).filter(Encounter.id == order_data['encounter_id']).first()
+        encounter = get_encounter(db, order_data['encounter_id'])
         if encounter:
             order_data['patient_id'] = encounter.patient_id
+    
+    # Auto-link opd_visit_id and admission_id from encounter if not provided
+    if order_data.get("encounter_id") and not order_data.get("opd_visit_id") and not order_data.get("admission_id"):
+        encounter = get_encounter(db, order_data["encounter_id"])
+        if encounter:
+            if encounter.opd_visit_id:
+                order_data["opd_visit_id"] = encounter.opd_visit_id
+            if encounter.admission_id:
+                order_data["admission_id"] = encounter.admission_id
     
     db_radiology_order = RadiologyOrder(**order_data)
     db.add(db_radiology_order)
@@ -199,7 +239,18 @@ def update_radiology_order(db: Session, radiology_order_id: int, radiology_order
 # Prescription CRUD Operations
 def create_prescription(db: Session, prescription: PrescriptionCreate):
     """Creates a new prescription."""
-    db_prescription = Prescription(**prescription.model_dump())
+    prescription_data = prescription.model_dump()
+    
+    # Auto-link opd_visit_id and admission_id from encounter if not provided
+    if prescription_data.get("encounter_id") and not prescription_data.get("opd_visit_id") and not prescription_data.get("admission_id"):
+        encounter = get_encounter(db, prescription_data["encounter_id"])
+        if encounter:
+            if encounter.opd_visit_id:
+                prescription_data["opd_visit_id"] = encounter.opd_visit_id
+            if encounter.admission_id:
+                prescription_data["admission_id"] = encounter.admission_id
+    
+    db_prescription = Prescription(**prescription_data)
     db.add(db_prescription)
     db.commit()
     db.refresh(db_prescription)

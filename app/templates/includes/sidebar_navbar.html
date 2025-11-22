@@ -86,11 +86,11 @@
                     </li>
                     {% endif %}
 
-                    {% if user_role in ['Admin', 'Front Office', 'Lab Staff', 'Radiology Staff', 'Pharmacy Staff'] %}
+                    {% if user_role in ['Admin', 'Front Office', 'Finance', 'Pharmacy Staff', 'Lab Staff', 'Radiology Staff'] %}
                     <li class="nav-item">
-                        <a href="{{ url_for('walk_in_orders_dashboard') }}" class="nav-link {{ 'active' if request.url.path.startswith('/walk-in-orders') else '' }}">
-                            <i class="nav-icon fas fa-walking"></i>
-                            <p>Walk-in Orders</p>
+                        <a href="{{ url_for('direct_service_requests_dashboard') }}" class="nav-link {{ 'active' if request.url.path.startswith('/direct-service-requests') else '' }}">
+                            <i class="nav-icon fas fa-shopping-cart"></i>
+                            <p>Direct Service Requests</p>
                         </a>
                     </li>
                     {% endif %}
@@ -182,6 +182,32 @@
                                 <a href="{{ url_for('differential_registry') }}" class="nav-link {{ 'active' if request.url.path.startswith('/encounters/differentials') else '' }}">
                                     <i class="fas fa-project-diagram nav-icon"></i>
                                     <p>G-STG Differentials</p>
+                                </a>
+                            </li>
+                            {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
+                            <li class="nav-item">
+                                <a href="{{ url_for('procedures_list') }}" class="nav-link {{ 'active' if request.url.path.startswith('/procedures') and not request.url.path.startswith('/procedures/catalog') else '' }}">
+                                    <i class="fas fa-procedures nav-icon"></i>
+                                    <p>Procedures</p>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </li>
+                    {% endif %}
+
+                    <!-- OPD (Outpatient Department) Section -->
+                    {% if user_role in ['Admin', 'Front Office', 'Doctor', 'Nurse', 'Clinician'] %}
+                    <li class="nav-item has-treeview">
+                        <a href="#" class="nav-link">
+                            <i class="nav-icon fas fa-clinic-medical"></i>
+                            <p>OPD (Outpatient) <i class="right fas fa-angle-left"></i></p>
+                        </a>
+                        <ul class="nav nav-treeview">
+                            <li class="nav-item">
+                                <a href="{{ url_for('opd_dashboard') }}" class="nav-link">
+                                    <i class="fas fa-tachometer-alt nav-icon"></i>
+                                    <p>OPD Dashboard</p>
                                 </a>
                             </li>
                         </ul>
@@ -388,29 +414,41 @@
                     </li>
                     {% endif %}
 
-                    {% if user_role in ['Admin', 'Management'] %}
+                    <!-- Procedures Section -->
+                    {% if user_role in ['Admin', 'Doctor', 'Clinician', 'Nurse'] %}
                     <li class="nav-item has-treeview">
                         <a href="#" class="nav-link">
-                            <i class="nav-icon fas fa-cogs"></i>
-                            <p>System Admin <i class="right fas fa-angle-left"></i></p>
+                            <i class="nav-icon fas fa-procedures"></i>
+                            <p>Procedures<i class="right fas fa-angle-left"></i></p>
                         </a>
                         <ul class="nav nav-treeview">
-                            <li class="nav-item"><a href="/admin/users" class="nav-link"><i class="fas fa-user-cog nav-icon"></i><p>User & Role Management</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('doctors_list') }}" class="nav-link"><i class="fas fa-user-md nav-icon"></i><p>Doctors List</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('hospital_settings') }}" class="nav-link"><i class="fas fa-hospital nav-icon"></i><p>Hospital Settings</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('service_pricing_management') }}" class="nav-link"><i class="fas fa-tags nav-icon"></i><p>Service Pricing</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('diseases_management') }}" class="nav-link"><i class="fas fa-virus nav-icon"></i><p>Diseases</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('insurance_providers_list') }}" class="nav-link"><i class="fas fa-shield-alt nav-icon"></i><p>Insurance Providers</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('ward_types_list') }}" class="nav-link"><i class="fas fa-hospital-alt nav-icon"></i><p>Ward Types</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('departments_list') }}" class="nav-link"><i class="fas fa-building nav-icon"></i><p>Departments</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('shift_types_list') }}" class="nav-link"><i class="fas fa-clock nav-icon"></i><p>Shift Types</p></a></li>
-                            <li class="nav-item"><a href="{{ url_for('bed_types_list') }}" class="nav-link"><i class="fas fa-bed nav-icon"></i><p>Bed Types</p></a></li>
-                            <li class="nav-item"><a href="/admin/roles/permissions" class="nav-link"><i class="fas fa-user-shield nav-icon"></i><p>Role Permissions</p></a></li>
-                            <li class="nav-item"><a href="/admin/settings" class="nav-link"><i class="fas fa-database nav-icon"></i><p>DB/System Settings</p></a></li>
-                            <li class="nav-item"><a href="/admin/audit-logs" class="nav-link"><i class="fas fa-history nav-icon"></i><p>Audit Logs</p></a></li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('procedures_list') }}" class="nav-link">
+                                    <i class="fas fa-list nav-icon"></i>
+                                    <p>Procedures List</p>
+                                </a>
+                            </li>
+                            {% if user_role in ['Admin', 'Doctor'] %}
+                            <li class="nav-item">
+                                <a href="{{ url_for('procedure_catalog_dashboard') }}" class="nav-link {{ 'active' if request.url.path.startswith('/procedures/catalog') else '' }}">
+                                    <i class="fas fa-book-medical nav-icon"></i>
+                                    <p>Procedure Catalog</p>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
+                            <li class="nav-item">
+                                <a href="{{ url_for('procedure_create_form') }}" class="nav-link">
+                                    <i class="fas fa-plus-circle nav-icon"></i>
+                                    <p>New Procedure</p>
+                                </a>
+                            </li>
+                            {% endif %}
                         </ul>
                     </li>
                     {% endif %}
+
+                    
                     
                     <!-- Finance Section -->
                     {% if user_role in ['Admin', 'Finance', 'Front Office'] %}
@@ -437,14 +475,23 @@
                                 <ul class="nav nav-treeview">
                                     <li class="nav-item">
                                         <a href="{{ url_for('claims_dashboard') }}" class="nav-link">
-                                            <i class="fas fa-shield-alt nav-icon"></i>
-                                            <p>NHIS Claims</p>
+                                            <i class="fas fa-file-invoice-dollar nav-icon"></i>
+                                            <p>Insurance Claims Dashboard</p>
+                                            <span class="badge badge-info badge-sm ml-2">Unified</span>
                                         </a>
                                     </li>
                                     <li class="nav-item">
-                                        <a href="/claims/private-insurance" class="nav-link">
+                                        <a href="{{ url_for('claims_dashboard') }}?provider_filter=nhis" class="nav-link">
+                                            <i class="fas fa-hospital nav-icon"></i>
+                                            <p>NHIS Claims</p>
+                                            <span class="badge badge-primary badge-sm ml-2">NHIS</span>
+                                        </a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a href="{{ url_for('claims_dashboard') }}?provider_filter=private_insurance" class="nav-link">
                                             <i class="fas fa-umbrella nav-icon"></i>
                                             <p>Private Insurance Claims</p>
+                                            <span class="badge badge-success badge-sm ml-2">Private</span>
                                         </a>
                                     </li>
                                 </ul>
@@ -502,6 +549,50 @@
                                 </a>
                             </li>
                             {% endif %}
+                            {% if user_role in ['Admin', 'Finance', 'Management', 'Pharmacy Staff'] %}
+                            <li class="nav-item">
+                                <a href="{{ url_for('pharmacy_report') }}" class="nav-link {{ 'active' if request.url.path.startswith('/reports/pharmacy') else '' }}">
+                                    <i class="fas fa-pills nav-icon"></i>
+                                    <p>Pharmacy Report</p>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if user_role in ['Admin', 'Finance', 'Management', 'Lab Staff'] %}
+                            <li class="nav-item">
+                                <a href="{{ url_for('lab_report') }}" class="nav-link {{ 'active' if request.url.path.startswith('/reports/lab') else '' }}">
+                                    <i class="fas fa-flask nav-icon"></i>
+                                    <p>Lab Report</p>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if user_role in ['Admin', 'Finance', 'Management', 'Radiology Staff'] %}
+                            <li class="nav-item">
+                                <a href="{{ url_for('radiology_report') }}" class="nav-link {{ 'active' if request.url.path.startswith('/reports/radiology') else '' }}">
+                                    <i class="fas fa-x-ray nav-icon"></i>
+                                    <p>Radiology Report</p>
+                                </a>
+                            </li>
+                            {% endif %}
+                            {% if user_role in ['Admin', 'Finance', 'Management', 'Doctor', 'Front Office'] %}
+                            <li class="nav-item">
+                                <a href="{{ url_for('opd_detailed_report') }}" class="nav-link">
+                                    <i class="fas fa-clinic-medical nav-icon"></i>
+                                    <p>OPD Detailed Report</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('ipd_detailed_report') }}" class="nav-link">
+                                    <i class="fas fa-hospital nav-icon"></i>
+                                    <p>IPD Detailed Report</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('procedure_report') }}" class="nav-link {{ 'active' if request.url.path.startswith('/reports/procedures') else '' }}">
+                                    <i class="fas fa-procedures nav-icon"></i>
+                                    <p>Procedure Report</p>
+                                </a>
+                            </li>
+                            {% endif %}
                             {% if user_role in ['Admin', 'Finance'] %}
                             <li class="nav-item">
                                 <a href="{{ url_for('expense_report') }}" class="nav-link">
@@ -510,6 +601,30 @@
                                 </a>
                             </li>
                             {% endif %}
+                        </ul>
+                    </li>
+                    {% endif %}
+                    {% if user_role in ['Admin', 'Management'] %}
+                    <li class="nav-item has-treeview">
+                        <a href="#" class="nav-link">
+                            <i class="nav-icon fas fa-cogs"></i>
+                            <p>System Admin <i class="right fas fa-angle-left"></i></p>
+                        </a>
+                        <ul class="nav nav-treeview">
+                            <li class="nav-item"><a href="/admin/users" class="nav-link"><i class="fas fa-user-cog nav-icon"></i><p>User & Role Management</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('doctors_list') }}" class="nav-link"><i class="fas fa-user-md nav-icon"></i><p>Doctors List</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('hospital_settings') }}" class="nav-link"><i class="fas fa-hospital nav-icon"></i><p>Hospital Settings</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('service_pricing_management') }}" class="nav-link"><i class="fas fa-tags nav-icon"></i><p>Service Pricing</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('diseases_management') }}" class="nav-link"><i class="fas fa-virus nav-icon"></i><p>Diseases</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('insurance_providers_list') }}" class="nav-link"><i class="fas fa-shield-alt nav-icon"></i><p>Insurance Providers</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('ward_types_list') }}" class="nav-link"><i class="fas fa-hospital-alt nav-icon"></i><p>Ward Types</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('departments_list') }}" class="nav-link"><i class="fas fa-building nav-icon"></i><p>Departments</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('shift_types_list') }}" class="nav-link"><i class="fas fa-clock nav-icon"></i><p>Shift Types</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('bed_types_list') }}" class="nav-link"><i class="fas fa-bed nav-icon"></i><p>Bed Types</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('procedure_catalog_dashboard') }}" class="nav-link {{ 'active' if request.url.path.startswith('/procedures/catalog') else '' }}"><i class="fas fa-procedures nav-icon"></i><p>Procedure Catalog</p></a></li>
+                            <li class="nav-item"><a href="/admin/roles/permissions" class="nav-link"><i class="fas fa-user-shield nav-icon"></i><p>Role Permissions</p></a></li>
+                            <li class="nav-item"><a href="/admin/settings" class="nav-link"><i class="fas fa-database nav-icon"></i><p>DB/System Settings</p></a></li>
+                            <li class="nav-item"><a href="/admin/audit-logs" class="nav-link"><i class="fas fa-history nav-icon"></i><p>Audit Logs</p></a></li>
                         </ul>
                     </li>
                     {% endif %}

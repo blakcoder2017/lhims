@@ -136,6 +136,11 @@
                                                             <a href="{{ url_for('view_invoice', invoice_id=lab_invoice.id) }}" class="btn btn-xs btn-outline-primary" target="_blank">
                                                                 <i class="fas fa-receipt"></i> View Invoice
                                                             </a>
+                                                            {% if lab_balance > 0 and can_check_in_orders %}
+                                                            <a href="{{ url_for('pay_lab', patient_id=order.patient_id, order_id=order.id, return_to='walk-in-orders') }}" class="btn btn-xs btn-success mt-1">
+                                                                <i class="fas fa-money-bill-wave"></i> Pay Now
+                                                            </a>
+                                                            {% endif %}
                                                         </div>
                                                     {% else %}
                                                         <span class="badge badge-secondary">Invoice Pending</span>
@@ -222,6 +227,11 @@
                                                             <a href="{{ url_for('view_invoice', invoice_id=radiology_invoice.id) }}" class="btn btn-xs btn-outline-primary" target="_blank">
                                                                 <i class="fas fa-receipt"></i> View Invoice
                                                             </a>
+                                                            {% if radiology_balance > 0 and can_check_in_orders %}
+                                                            <a href="{{ url_for('pay_radiology', patient_id=order.patient_id, order_id=order.id, return_to='walk-in-orders') }}" class="btn btn-xs btn-success mt-1">
+                                                                <i class="fas fa-money-bill-wave"></i> Pay Now
+                                                            </a>
+                                                            {% endif %}
                                                         </div>
                                                     {% else %}
                                                         <span class="badge badge-secondary">Invoice Pending</span>
@@ -309,6 +319,11 @@
                                                             <a href="{{ url_for('view_invoice', invoice_id=pharmacy_invoice.id) }}" class="btn btn-xs btn-outline-primary" target="_blank">
                                                                 <i class="fas fa-receipt"></i> View Invoice
                                                             </a>
+                                                            {% if pharmacy_balance > 0 and can_check_in_orders %}
+                                                            <a href="{{ url_for('pay_pharmacy', patient_id=sale.encounter.patient_id if sale.encounter and sale.encounter.patient else 0, prescription_id=sale.id, return_to='walk-in-orders') }}" class="btn btn-xs btn-success mt-1">
+                                                                <i class="fas fa-money-bill-wave"></i> Pay Now
+                                                            </a>
+                                                            {% endif %}
                                                         </div>
                                                     {% else %}
                                                         <span class="badge badge-secondary">Invoice Pending</span>
@@ -607,19 +622,12 @@
                                    class="form-control"
                                    name="medication_name"
                                    id="pharmacy_medication_name"
-                                   list="pharmacy_medication_options"
-                                   placeholder="Select or type medication"
+                                   placeholder="Search medication by name, code, or brand..."
+                                   autocomplete="off"
                                    required>
-                            <datalist id="pharmacy_medication_options">
-                                {% for item in pharmacy_items %}
-                                <option value="{{ item.service_name }}" data-code="{{ item.service_code or '' }}" label="{{ item.service_name }}{% if item.service_code %} ({{ item.service_code }}){% endif %} - {{ item.currency }} {{ item.unit_price }}"></option>
-                                {% endfor %}
-                            </datalist>
-                            <small class="form-text text-muted">Suggestions are pulled from pharmacy service pricing, but you can also type manually.</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="pharmacy_medication_code">Medication Code</label>
-                            <input type="text" class="form-control" name="medication_code" id="pharmacy_medication_code" placeholder="Auto-filled when selecting from list">
+                            <input type="hidden" name="medication_code" id="pharmacy_medication_code">
+                            <div id="pharmacy_medication_results" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 300px; overflow-y: auto; width: 100%; background: white; border: 1px solid #ddd; border-radius: 4px; margin-top: 2px;"></div>
+                            <small class="form-text text-muted">Start typing to search medications from pharmacy inventory database.</small>
                         </div>
                         <div class="form-group">
                             <label for="pharmacy_dosage">Dosage *</label>
@@ -880,22 +888,94 @@
             });
         }
 
-        // Pharmacy medication code auto-fill when selecting from datalist
+        // Pharmacy medication search from inventory database
         const pharmacyMedicationInput = document.getElementById('pharmacy_medication_name');
         const pharmacyMedicationCode = document.getElementById('pharmacy_medication_code');
-        const pharmacyMedicationOptions = document.getElementById('pharmacy_medication_options');
-        if (pharmacyMedicationInput && pharmacyMedicationCode && pharmacyMedicationOptions) {
+        const pharmacyMedicationResults = document.getElementById('pharmacy_medication_results');
+        
+        if (pharmacyMedicationInput && pharmacyMedicationCode && pharmacyMedicationResults) {
+            let searchTimeout;
+            
             pharmacyMedicationInput.addEventListener('input', function() {
-                const value = this.value.trim();
-                let matched = false;
-                Array.from(pharmacyMedicationOptions.options).forEach(option => {
-                    if (option.value === value && option.dataset.code) {
-                        pharmacyMedicationCode.value = option.dataset.code;
-                        matched = true;
-                    }
-                });
-                if (!matched) {
+                const query = this.value.trim();
+                
+                // Clear previous timeout
+                clearTimeout(searchTimeout);
+                
+                // Hide results if query is too short
+                if (query.length < 2) {
+                    pharmacyMedicationResults.style.display = 'none';
                     pharmacyMedicationCode.value = '';
+                    return;
+                }
+                
+                // Debounce search
+                searchTimeout = setTimeout(() => {
+                    fetch(`/api/v1/inventory/medications/search?search=${encodeURIComponent(query)}&limit=20`)
+                        .then(response => response.json())
+                        .then(data => {
+                            pharmacyMedicationResults.innerHTML = '';
+                            
+                            // Handle both array response and object with medications property
+                            const medications = Array.isArray(data) ? data : (data.medications || []);
+                            
+                            if (medications && medications.length > 0) {
+                                medications.forEach(medication => {
+                                    const item = document.createElement('a');
+                                    item.href = '#';
+                                    item.className = 'list-group-item list-group-item-action';
+                                    
+                                    // Build display text with medication details
+                                    let displayText = `<strong>${medication.name}</strong>`;
+                                    if (medication.brand_name) {
+                                        displayText += ` <small class="text-muted">(${medication.brand_name})</small>`;
+                                    }
+                                    if (medication.generic_name) {
+                                        displayText += `<br><small class="text-info">${medication.generic_name}</small>`;
+                                    }
+                                    if (medication.medication_code) {
+                                        displayText += ` <small class="text-muted">[${medication.medication_code}]</small>`;
+                                    }
+                                    if (medication.strength) {
+                                        displayText += ` <small class="text-muted">- ${medication.strength}</small>`;
+                                    }
+                                    if (medication.unit_price) {
+                                        displayText += ` <span class="badge badge-success float-right">GHS ${parseFloat(medication.unit_price).toFixed(2)}</span>`;
+                                    }
+                                    
+                                    item.innerHTML = displayText;
+                                    
+                                    item.addEventListener('click', function(e) {
+                                        e.preventDefault();
+                                        pharmacyMedicationInput.value = medication.name;
+                                        pharmacyMedicationCode.value = medication.medication_code || '';
+                                        
+                                        // Auto-fill dosage if strength is available
+                                        if (medication.strength && !document.getElementById('pharmacy_dosage').value) {
+                                            document.getElementById('pharmacy_dosage').value = medication.strength;
+                                        }
+                                        
+                                        pharmacyMedicationResults.style.display = 'none';
+                                    });
+                                    
+                                    pharmacyMedicationResults.appendChild(item);
+                                });
+                                pharmacyMedicationResults.style.display = 'block';
+                            } else {
+                                pharmacyMedicationResults.style.display = 'none';
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error searching medications:', error);
+                            pharmacyMedicationResults.style.display = 'none';
+                        });
+                }, 300); // 300ms debounce
+            });
+            
+            // Hide results when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!pharmacyMedicationInput.contains(e.target) && !pharmacyMedicationResults.contains(e.target)) {
+                    pharmacyMedicationResults.style.display = 'none';
                 }
             });
         }

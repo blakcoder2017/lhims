@@ -28,14 +28,21 @@
                 <div class="row mb-3">
                     <div class="col-12">
                         {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
-                        <a href="{{ url_for('patient_triage', patient_id=patient.id) }}?new_visit=true" class="btn btn-warning btn-lg">
-                            <i class="fas fa-redo mr-1"></i> Start New Visit
-                        </a>
+                        <form method="POST" action="{{ url_for('start_new_opd_visit', patient_id=patient.id) }}" style="display: inline;">
+                            <button type="submit" class="btn btn-warning btn-lg">
+                                <i class="fas fa-redo mr-1"></i> Start New Visit
+                            </button>
+                        </form>
                         {% endif %}
-                        {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
+                        {% if workflow_complete %}
                         <a href="{{ url_for('new_encounter', patient_id=patient.id) }}" class="btn btn-success">
                             <i class="fas fa-notes-medical mr-1"></i> New Encounter
                         </a>
+                        {% else %}
+                        <button class="btn btn-secondary" type="button" disabled
+                                title="{% if missing_step == 'vitals' %}Record vitals first{% elif missing_step == 'checkin' %}Patient must be checked in{% elif missing_step == 'payment' %}Payment required{% else %}Complete workflow: Record vitals, check-in, and payment{% endif %}">
+                            <i class="fas fa-notes-medical mr-1"></i> New Encounter
+                        </button>
                         {% endif %}
                         <button onclick="window.print()" class="btn btn-primary">
                             <i class="fas fa-print mr-1"></i> Print Records
@@ -51,12 +58,130 @@
                 </div>
                 {% endif %}
                 
+                {% if request.query_params.get('status') == 'opd_visit_completed' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check-circle"></i> OPD Visit Completed!</h5>
+                    The OPD visit has been successfully marked as completed.
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('status') in ['pharmacy_request_created', 'lab_request_created', 'radiology_request_created', 'procedure_request_created'] %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Service Request Created!</h5>
+                    The direct service request has been created successfully. Payment can be processed at the front desk.
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-ban"></i> Error</h5>
+                    {{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+                
+                <!-- Direct Service Requests Section -->
+                {% if user_role in ['Admin', 'Front Office', 'Finance', 'Pharmacy Staff', 'Lab Staff', 'Radiology Staff'] %}
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title">
+                                    <i class="fas fa-shopping-cart mr-2"></i>Direct Service Requests
+                                </h3>
+                                <div class="card-tools">
+                                    <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                                        <i class="fas fa-minus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted mb-3">
+                                    <i class="fas fa-info-circle mr-1"></i>
+                                    Request services directly without consultation. All direct requests are cash-only payments.
+                                </p>
+                                <div class="row">
+                                    <!-- Pharmacy Request Card -->
+                                    {% if user_role in ['Admin', 'Front Office', 'Finance', 'Pharmacy Staff'] %}
+                                    <div class="col-md-3 col-sm-6 mb-3">
+                                        <div class="card bg-gradient-primary h-100" style="cursor: pointer;" onclick="$('#pharmacyRequestModal').modal('show')">
+                                            <div class="card-body text-center">
+                                                <i class="fas fa-pills fa-3x mb-3"></i>
+                                                <h5 class="font-weight-bold">Pharmacy</h5>
+                                                <p class="mb-0 small">Request Medication</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <!-- Lab Request Card -->
+                                    {% if user_role in ['Admin', 'Front Office', 'Finance', 'Lab Staff'] %}
+                                    <div class="col-md-3 col-sm-6 mb-3">
+                                        <div class="card bg-gradient-success h-100" style="cursor: pointer;" onclick="$('#labRequestModal').modal('show')">
+                                            <div class="card-body text-center">
+                                                <i class="fas fa-vial fa-3x mb-3"></i>
+                                                <h5 class="font-weight-bold">Laboratory</h5>
+                                                <p class="mb-0 small">Request Lab Test</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <!-- Radiology Request Card -->
+                                    {% if user_role in ['Admin', 'Front Office', 'Finance', 'Radiology Staff'] %}
+                                    <div class="col-md-3 col-sm-6 mb-3">
+                                        <div class="card bg-gradient-warning h-100" style="cursor: pointer;" onclick="$('#radiologyRequestModal').modal('show')">
+                                            <div class="card-body text-center">
+                                                <i class="fas fa-x-ray fa-3x mb-3"></i>
+                                                <h5 class="font-weight-bold">Radiology</h5>
+                                                <p class="mb-0 small">Request Imaging</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <!-- Procedure Request Card -->
+                                    {% if user_role in ['Admin', 'Front Office', 'Finance'] %}
+                                    <div class="col-md-3 col-sm-6 mb-3">
+                                        <div class="card bg-gradient-danger h-100" style="cursor: pointer;" onclick="$('#procedureRequestModal').modal('show')">
+                                            <div class="card-body text-center">
+                                                <i class="fas fa-procedures fa-3x mb-3"></i>
+                                                <h5 class="font-weight-bold">Procedure</h5>
+                                                <p class="mb-0 small">Request Procedure</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('status') == 'patient_updated' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Patient Updated!</h5>
+                    Patient biodata and payment mechanism have been successfully updated.
+                </div>
+                {% endif %}
+                
                 <!-- Patient Demographics Card -->
                 <div class="row">
                     <div class="col-md-4">
                         <div class="card card-primary card-outline">
                             <div class="card-header">
                                 <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient Demographics</h3>
+                                {% if user_role in ['Admin', 'Front Office'] %}
+                                <div class="card-tools">
+                                    <a href="{{ url_for('edit_patient_form', patient_id=patient.id) }}" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-edit mr-1"></i> Edit
+                                    </a>
+                                </div>
+                                {% endif %}
                             </div>
                             <div class="card-body">
                                 <table class="table table-sm">
@@ -112,11 +237,16 @@
                                     {% endif %}
                                 </table>
                                 <div class="mt-3">
-                                    {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
+                                    {% if workflow_complete %}
                                     <a href="{{ url_for('new_encounter', patient_id=patient.id) }}" 
                                        class="btn btn-success btn-sm btn-block mb-2">
                                         <i class="fas fa-notes-medical mr-1"></i> New Encounter
                                     </a>
+                                    {% else %}
+                                    <button class="btn btn-secondary btn-sm btn-block mb-2" type="button" disabled
+                                            title="{% if missing_step == 'vitals' %}Record vitals first{% elif missing_step == 'checkin' %}Patient must be checked in{% elif missing_step == 'payment' %}Payment required{% else %}Complete workflow: Record vitals, check-in, and payment{% endif %}">
+                                        <i class="fas fa-notes-medical mr-1"></i> New Encounter
+                                    </button>
                                     {% endif %}
                                     <a href="{{ url_for('patient_triage', patient_id=patient.id) }}" 
                                        class="btn btn-info btn-sm btn-block">
@@ -159,7 +289,16 @@
                             </div>
                         </div>
                         <div class="row mt-2">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-primary elevation-1"><i class="fas fa-clipboard-list"></i></span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">OPD Visits</span>
+                                        <span class="info-box-number">{{ opd_visits_count }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
                                 <div class="info-box">
                                     <span class="info-box-icon bg-danger elevation-1"><i class="fas fa-hospital"></i></span>
                                     <div class="info-box-content">
@@ -168,6 +307,30 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="col-md-4">
+                                {% if active_opd_visit %}
+                                <div class="info-box bg-info">
+                                    <span class="info-box-icon bg-white elevation-1"><i class="fas fa-clipboard-check"></i></span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Active OPD Visit</span>
+                                        <span class="info-box-number">{{ active_opd_visit.opd_number }}</span>
+                                        <span class="progress-description">
+                                            Status: {{ active_opd_visit.status.value.title() }}, Payment: {{ active_opd_visit.payment_status.title() }}
+                                        </span>
+                                    </div>
+                                </div>
+                                {% else %}
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-secondary elevation-1"><i class="fas fa-clipboard"></i></span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Active OPD Visit</span>
+                                        <span class="info-box-number">None</span>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="row mt-2">
                             <div class="col-md-6">
                                 {% if current_admission %}
                                 <div class="info-box bg-warning">
@@ -270,14 +433,84 @@
                     </div>
                 </div>
 
-                <!-- Blood Pressure Chart -->
-                {% if bp_chart_data.dates %}
-                <div class="card card-primary card-outline">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-chart-line mr-1"></i> Blood Pressure Trend</h3>
+                <!-- Vital Signs Trends -->
+                {% if vitals_chart_data.dates %}
+                <div class="row">
+                    <!-- Blood Pressure Chart -->
+                    <div class="col-lg-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-chart-line mr-1"></i> Blood Pressure Trend</h3>
+                            </div>
+                            <div class="card-body">
+                                <div style="position: relative; height: 300px; width: 100%;">
+                                    <canvas id="bpChart"></canvas>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Normal BP: 90-140/60-90 mmHg
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="card-body">
-                        <canvas id="bpChart" style="height: 300px;"></canvas>
+                    
+                    <!-- Temperature, Pulse, Respiratory Rate Chart -->
+                    <div class="col-lg-6">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-thermometer-half mr-1"></i> Temperature, Pulse & Respiratory Rate</h3>
+                            </div>
+                            <div class="card-body">
+                                <div style="position: relative; height: 300px; width: 100%;">
+                                    <canvas id="vitalsChart1"></canvas>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Normal ranges: Temp 36.1-37.2°C | Pulse 60-100 bpm | Resp 12-20/min
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Oxygen Saturation & Pain Scale Chart -->
+                <div class="row">
+                    <div class="col-lg-6">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-lungs mr-1"></i> Oxygen Saturation</h3>
+                            </div>
+                            <div class="card-body">
+                                <div style="position: relative; height: 250px; width: 100%;">
+                                    <canvas id="spo2Chart"></canvas>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Normal SpO2: ≥95%
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-lg-6">
+                        <div class="card card-warning card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-exclamation-triangle mr-1"></i> Pain Scale</h3>
+                            </div>
+                            <div class="card-body">
+                                <div style="position: relative; height: 250px; width: 100%;">
+                                    <canvas id="painChart"></canvas>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Pain Scale: 0 = No pain, 10 = Severe pain
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 {% endif %}
@@ -292,12 +525,12 @@
                         <div class="timeline">
                             {% for item in timeline %}
                             <div class="time-label">
-                                <span class="bg-{% if item.type == 'appointment' %}primary{% elif item.type == 'admission' %}danger{% elif item.type == 'medication' %}warning{% else %}success{% endif %}">
+                                <span class="bg-{% if item.type == 'appointment' %}primary{% elif item.type == 'admission' %}danger{% elif item.type == 'opd_visit' %}info{% elif item.type == 'medication' %}warning{% else %}success{% endif %}">
                                     {{ item.date.strftime('%B %d, %Y') }}
                                 </span>
                             </div>
                             <div>
-                                <i class="fas fa-{% if item.type == 'appointment' %}calendar-check{% elif item.type == 'admission' %}hospital{% elif item.type == 'encounter' %}stethoscope{% elif item.type == 'medication' %}pills{% else %}heartbeat{% endif %} bg-{% if item.type == 'appointment' %}blue{% elif item.type == 'admission' %}red{% elif item.type == 'encounter' %}purple{% elif item.type == 'medication' %}orange{% else %}green{% endif %}"></i>
+                                <i class="fas fa-{% if item.type == 'appointment' %}calendar-check{% elif item.type == 'admission' %}hospital{% elif item.type == 'opd_visit' %}clipboard-list{% elif item.type == 'encounter' %}stethoscope{% elif item.type == 'medication' %}pills{% else %}heartbeat{% endif %} bg-{% if item.type == 'appointment' %}blue{% elif item.type == 'admission' %}red{% elif item.type == 'opd_visit' %}cyan{% elif item.type == 'encounter' %}purple{% elif item.type == 'medication' %}orange{% else %}green{% endif %}"></i>
                                 <div class="timeline-item">
                                     <span class="time"><i class="fas fa-clock"></i> {{ item.date.strftime('%I:%M %p') }}</span>
                                     <h3 class="timeline-header">{{ item.title }}</h3>
@@ -406,6 +639,51 @@
                                         <a href="{{ url_for('view_encounter', encounter_id=item.details.id) }}" class="btn btn-sm btn-primary">
                                             <i class="fas fa-eye"></i> View Encounter
                                         </a>
+                                        {% elif item.type == 'opd_visit' %}
+                                        <table class="table table-sm table-bordered">
+                                            <tr>
+                                                <th>OPD Number:</th>
+                                                <td><strong>{{ item.details.opd_number }}</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <th>Status:</th>
+                                                <td>
+                                                    {% if item.details.status.value == 'active' %}
+                                                        <span class="badge badge-info">Active</span>
+                                                    {% elif item.details.status.value == 'completed' %}
+                                                        <span class="badge badge-success">Completed</span>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">Cancelled</span>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <th>Payment Status:</th>
+                                                <td>
+                                                    {% if item.details.payment_status == 'paid' %}
+                                                        <span class="badge badge-success">Paid</span>
+                                                    {% elif item.details.payment_status == 'pending' %}
+                                                        <span class="badge badge-warning">Pending</span>
+                                                    {% elif item.details.payment_status == 'emergency' %}
+                                                        <span class="badge badge-danger">Emergency</span>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">{{ item.details.payment_status.title() }}</span>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% if item.details.visit_type %}
+                                            <tr>
+                                                <th>Visit Type:</th>
+                                                <td>{{ item.details.visit_type.replace('_', ' ').title() }}</td>
+                                            </tr>
+                                            {% endif %}
+                                            {% if item.details.total_charges %}
+                                            <tr>
+                                                <th>Total Charges:</th>
+                                                <td><strong>GHS {{ "{:,.2f}".format(item.details.total_charges) }}</strong></td>
+                                            </tr>
+                                            {% endif %}
+                                        </table>
                                         {% elif item.type == 'vitals' %}
                                         <table class="table table-sm table-bordered">
                                             <tr>
@@ -507,6 +785,121 @@
                     </div>
                 </div>
 
+                <!-- OPD Visits History -->
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-clipboard-list mr-1"></i> OPD Visits History</h3>
+                        {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
+                        <div class="card-tools">
+                            <form method="POST" action="{{ url_for('start_new_opd_visit', patient_id=patient.id) }}" style="display: inline;">
+                                <button type="submit" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-plus mr-1"></i> Start New Visit
+                                </button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        {% if active_opd_visit %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info-circle"></i> Active OPD Visit</h5>
+                            <p>
+                                <strong>OPD Number:</strong> {{ active_opd_visit.opd_number }}<br>
+                                <strong>Visit Date:</strong> {{ active_opd_visit.visit_date.strftime('%Y-%m-%d %H:%M') }}<br>
+                                <strong>Status:</strong> 
+                                {% if active_opd_visit.status.value == 'active' %}
+                                    <span class="badge badge-info">Active</span>
+                                {% elif active_opd_visit.status.value == 'completed' %}
+                                    <span class="badge badge-success">Completed</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">Cancelled</span>
+                                {% endif %}<br>
+                                <strong>Payment Status:</strong> 
+                                {% if active_opd_visit.payment_status == 'paid' %}
+                                    <span class="badge badge-success">Paid</span>
+                                {% elif active_opd_visit.payment_status == 'pending' %}
+                                    <span class="badge badge-warning">Pending</span>
+                                {% elif active_opd_visit.payment_status == 'emergency' %}
+                                    <span class="badge badge-danger">Emergency</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">{{ active_opd_visit.payment_status.title() }}</span>
+                                {% endif %}
+                            </p>
+                            {% if active_opd_visit.status.value == 'active' and user_role in ['Admin', 'Front Office', 'Nurse', 'Doctor', 'Clinician'] %}
+                            <form method="POST" action="{{ url_for('complete_opd_visit', patient_id=patient.id, opd_visit_id=active_opd_visit.id) }}" style="display: inline;">
+                                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Are you sure you want to complete this OPD visit? This action cannot be undone.');">
+                                    <i class="fas fa-check-circle mr-1"></i> Complete Visit
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        
+                        {% if opd_visits %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>OPD Number</th>
+                                        <th>Visit Date</th>
+                                        <th>Status</th>
+                                        <th>Payment Status</th>
+                                        <th>Visit Type</th>
+                                        <th>Total Charges</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for opd_visit in opd_visits %}
+                                    <tr>
+                                        <td><strong>{{ opd_visit.opd_number }}</strong></td>
+                                        <td>{{ opd_visit.visit_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>
+                                            {% if opd_visit.status.value == 'active' %}
+                                                <span class="badge badge-info">Active</span>
+                                            {% elif opd_visit.status.value == 'completed' %}
+                                                <span class="badge badge-success">Completed</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">Cancelled</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if opd_visit.payment_status == 'paid' %}
+                                                <span class="badge badge-success">Paid</span>
+                                            {% elif opd_visit.payment_status == 'pending' %}
+                                                <span class="badge badge-warning">Pending</span>
+                                            {% elif opd_visit.payment_status == 'emergency' %}
+                                                <span class="badge badge-danger">Emergency</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">{{ opd_visit.payment_status.title() }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ opd_visit.visit_type.replace('_', ' ').title() if opd_visit.visit_type else 'N/A' }}</td>
+                                        <td><strong>GHS {{ "{:,.2f}".format(opd_visit.total_charges) }}</strong></td>
+                                        <td>
+                                            {% if opd_visit.status.value == 'active' %}
+                                            <a href="{{ url_for('patient_triage', patient_id=patient.id) }}?opd_visit_id={{ opd_visit.id }}" class="btn btn-sm btn-info">
+                                                <i class="fas fa-edit"></i> Continue Visit
+                                            </a>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> No OPD Visits</h5>
+                            This patient has no OPD visit history.
+                            {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
+                            <a href="#" onclick="document.querySelector('form[action*=\"start_new_opd_visit\"]').submit(); return false;">Start a new visit</a>.
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
                 <!-- Admissions History -->
                 <div class="card card-primary card-outline">
                     <div class="card-header">
@@ -602,6 +995,7 @@
                                 <thead>
                                     <tr>
                                         <th>Date & Time</th>
+                                        <th>Triage</th>
                                         <th>Temp (°C)</th>
                                         <th>BP (mmHg)</th>
                                         <th>Pulse (bpm)</th>
@@ -618,6 +1012,21 @@
                                     {% for vital in vitals_history %}
                                     <tr>
                                         <td>{{ vital.recorded_at.strftime('%Y-%m-%d %I:%M %p') }}</td>
+                                        <td>
+                                            {% if vital.triage_level %}
+                                                {% if vital.triage_level == 'P1' or vital.triage_category == 'Critical' %}
+                                                    <span class="badge badge-danger">{{ vital.triage_level }} - {{ vital.triage_category or 'Critical' }}</span>
+                                                {% elif vital.triage_level == 'P2' or vital.triage_category == 'Urgent' %}
+                                                    <span class="badge badge-warning">{{ vital.triage_level }} - {{ vital.triage_category or 'Urgent' }}</span>
+                                                {% elif vital.triage_level == 'P3' or vital.triage_category == 'Routine' %}
+                                                    <span class="badge badge-success">{{ vital.triage_level }} - {{ vital.triage_category or 'Routine' }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-info">{{ vital.triage_level }}{% if vital.triage_category %} - {{ vital.triage_category }}{% endif %}</span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="text-muted">—</span>
+                                            {% endif %}
+                                        </td>
                                         <td>
                                             {% if vital.temperature %}
                                                 {% if vital.temperature < 36.1 or vital.temperature > 37.2 %}
@@ -708,65 +1117,860 @@
 {% endblock %}
 
 {% block extra_js %}
-{% if bp_chart_data.dates %}
+{% if vitals_chart_data.dates %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 <script>
-    // Blood Pressure Chart
-    const ctx = document.getElementById('bpChart').getContext('2d');
-    const bpChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: {{ bp_chart_data.dates | tojson }},
-            datasets: [
-                {
-                    label: 'Systolic BP (mmHg)',
-                    data: {{ bp_chart_data.systolic | tojson }},
-                    borderColor: 'rgb(255, 99, 132)',
-                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                    tension: 0.1,
-                    fill: false
-                },
-                {
-                    label: 'Diastolic BP (mmHg)',
-                    data: {{ bp_chart_data.diastolic | tojson }},
-                    borderColor: 'rgb(54, 162, 235)',
-                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                    tension: 0.1,
-                    fill: false
-                }
-            ]
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+            mode: 'index',
+            intersect: false,
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: {
-                    beginAtZero: false,
-                    title: {
-                        display: true,
-                        text: 'Blood Pressure (mmHg)'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: 'Date & Time'
-                    }
-                }
+        plugins: {
+            legend: {
+                display: true,
+                position: 'top'
             },
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top'
-                },
+            tooltip: {
+                mode: 'index',
+                intersect: false
+            }
+        },
+        scales: {
+            x: {
+                display: true,
                 title: {
                     display: true,
-                    text: 'Blood Pressure Over Time'
+                    text: 'Date & Time'
+                },
+                ticks: {
+                    maxRotation: 45,
+                    minRotation: 45
                 }
             }
         }
+    };
+    
+    // Blood Pressure Chart with reference ranges
+    const bpCtx = document.getElementById('bpChart');
+    if (bpCtx) {
+        const bpChart = new Chart(bpCtx.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: {{ vitals_chart_data.dates | tojson }},
+                datasets: [
+                    {
+                        label: 'Systolic BP (mmHg)',
+                        data: {{ vitals_chart_data.systolic | tojson }},
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Diastolic BP (mmHg)',
+                        data: {{ vitals_chart_data.diastolic | tojson }},
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Normal Systolic (140)',
+                        data: Array({{ vitals_chart_data.dates | length }}).fill(140),
+                        borderColor: 'rgba(255, 99, 132, 0.3)',
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        pointHoverRadius: 0
+                    },
+                    {
+                        label: 'Normal Diastolic (90)',
+                        data: Array({{ vitals_chart_data.dates | length }}).fill(90),
+                        borderColor: 'rgba(54, 162, 235, 0.3)',
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        pointHoverRadius: 0
+                    }
+                ]
+            },
+            options: {
+                ...chartOptions,
+                scales: {
+                    ...chartOptions.scales,
+                    y: {
+                        beginAtZero: false,
+                        min: 50,
+                        max: 200,
+                        title: {
+                            display: true,
+                            text: 'Blood Pressure (mmHg)'
+                        }
+                    }
+                },
+                plugins: {
+                    ...chartOptions.plugins,
+                    title: {
+                        display: true,
+                        text: 'Blood Pressure Over Time',
+                        font: {
+                            size: 16,
+                            weight: 'bold'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Temperature, Pulse & Respiratory Rate Chart
+    const vitalsCtx1 = document.getElementById('vitalsChart1');
+    if (vitalsCtx1) {
+        const vitalsChart1 = new Chart(vitalsCtx1.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: {{ vitals_chart_data.dates | tojson }},
+                datasets: [
+                    {
+                        label: 'Temperature (°C)',
+                        data: {{ vitals_chart_data.temperature | tojson }},
+                        borderColor: 'rgb(255, 159, 64)',
+                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        yAxisID: 'y-temp'
+                    },
+                    {
+                        label: 'Pulse Rate (bpm)',
+                        data: {{ vitals_chart_data.pulse_rate | tojson }},
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        yAxisID: 'y-pulse'
+                    },
+                    {
+                        label: 'Respiratory Rate (/min)',
+                        data: {{ vitals_chart_data.respiratory_rate | tojson }},
+                        borderColor: 'rgb(153, 102, 255)',
+                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        yAxisID: 'y-resp'
+                    }
+                ]
+            },
+            options: {
+                ...chartOptions,
+                scales: {
+                    ...chartOptions.scales,
+                    'y-temp': {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Temperature (°C)'
+                        },
+                        min: 35,
+                        max: 42
+                    },
+                    'y-pulse': {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Pulse (bpm) / Resp Rate (/min)'
+                        },
+                        min: 0,
+                        max: 150,
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    },
+                    'y-resp': {
+                        type: 'linear',
+                        display: false,
+                        position: 'right'
+                    }
+                },
+                plugins: {
+                    ...chartOptions.plugins,
+                    title: {
+                        display: true,
+                        text: 'Temperature, Pulse & Respiratory Rate',
+                        font: {
+                            size: 16,
+                            weight: 'bold'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Oxygen Saturation Chart
+    const spo2Ctx = document.getElementById('spo2Chart');
+    if (spo2Ctx) {
+        const spo2Chart = new Chart(spo2Ctx.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: {{ vitals_chart_data.dates | tojson }},
+                datasets: [
+                    {
+                        label: 'SpO2 (%)',
+                        data: {{ vitals_chart_data.oxygen_saturation | tojson }},
+                        borderColor: 'rgb(40, 167, 69)',
+                        backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                        tension: 0.3,
+                        fill: true,
+                        pointRadius: 5,
+                        pointHoverRadius: 7,
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Normal Threshold (95%)',
+                        data: Array({{ vitals_chart_data.dates | length }}).fill(95),
+                        borderColor: 'rgba(40, 167, 69, 0.3)',
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        pointHoverRadius: 0
+                    }
+                ]
+            },
+            options: {
+                ...chartOptions,
+                scales: {
+                    ...chartOptions.scales,
+                    y: {
+                        min: 85,
+                        max: 100,
+                        title: {
+                            display: true,
+                            text: 'Oxygen Saturation (%)'
+                        }
+                    }
+                },
+                plugins: {
+                    ...chartOptions.plugins,
+                    title: {
+                        display: true,
+                        text: 'Oxygen Saturation Over Time',
+                        font: {
+                            size: 16,
+                            weight: 'bold'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Pain Scale Chart
+    const painCtx = document.getElementById('painChart');
+    if (painCtx) {
+        const painChart = new Chart(painCtx.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: {{ vitals_chart_data.dates | tojson }},
+                datasets: [
+                    {
+                        label: 'Pain Scale (0-10)',
+                        data: {{ vitals_chart_data.pain_scale | tojson }},
+                        backgroundColor: function(context) {
+                            const value = context.parsed.y;
+                            if (value === null || value === undefined) return 'rgba(0, 0, 0, 0)';
+                            if (value >= 7) return 'rgba(220, 53, 69, 0.8)';  // Severe (red)
+                            if (value >= 4) return 'rgba(255, 193, 7, 0.8)';  // Moderate (yellow)
+                            return 'rgba(40, 167, 69, 0.8)';  // Mild (green)
+                        },
+                        borderColor: function(context) {
+                            const value = context.parsed.y;
+                            if (value === null || value === undefined) return 'rgba(0, 0, 0, 0)';
+                            if (value >= 7) return 'rgb(220, 53, 69)';
+                            if (value >= 4) return 'rgb(255, 193, 7)';
+                            return 'rgb(40, 167, 69)';
+                        },
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                ...chartOptions,
+                scales: {
+                    ...chartOptions.scales,
+                    y: {
+                        beginAtZero: true,
+                        max: 10,
+                        title: {
+                            display: true,
+                            text: 'Pain Scale (0-10)'
+                        },
+                        ticks: {
+                            stepSize: 1
+                        }
+                    }
+                },
+                plugins: {
+                    ...chartOptions.plugins,
+                    title: {
+                        display: true,
+                        text: 'Pain Scale Over Time',
+                        font: {
+                            size: 16,
+                            weight: 'bold'
+                        }
+                    }
+                }
+            }
+        });
+    }
+</script>
+{% endif %}
+
+<!-- Direct Service Request Modals -->
+{% if user_role in ['Admin', 'Front Office', 'Finance', 'Pharmacy Staff', 'Lab Staff', 'Radiology Staff'] %}
+
+<!-- Pharmacy Request Modal -->
+{% if user_role in ['Admin', 'Front Office', 'Finance', 'Pharmacy Staff'] %}
+<div class="modal fade" id="pharmacyRequestModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-primary">
+                <h4 class="modal-title"><i class="fas fa-pills mr-2"></i>Direct Pharmacy Request</h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <form id="pharmacyRequestForm" method="POST" action="{{ url_for('create_direct_pharmacy_request', patient_id=patient.id) }}">
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        <strong>Note:</strong> This is a direct request without consultation. Controlled medications require a doctor's prescription.
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pharmacy_medication_search">Search Medication *</label>
+                        <input type="text" 
+                               class="form-control" 
+                               id="pharmacy_medication_search"
+                               placeholder="Type to search medications..."
+                               autocomplete="off">
+                        <input type="hidden" name="medication_id" id="pharmacy_medication_id" required>
+                        <div id="pharmacy_medication_results" class="list-group mt-2" style="display: none; max-height: 200px; overflow-y: auto; position: absolute; z-index: 1000; width: 100%; background: white; border: 1px solid #ddd; border-radius: 4px;"></div>
+                        <small class="form-text text-muted">Start typing to search medications from inventory</small>
+                    </div>
+                    
+                    <div id="pharmacy_restriction_alert" class="alert alert-warning" style="display: none;">
+                        <i class="fas fa-exclamation-triangle mr-1"></i>
+                        <span id="pharmacy_restriction_message"></span>
+                    </div>
+                    
+                    <div id="pharmacy_pricing_display" class="alert alert-success" style="display: none;">
+                        <i class="fas fa-money-bill-wave mr-1"></i>
+                        <strong>Estimated Price:</strong> GHS <span id="pharmacy_price_value">0.00</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pharmacy_dosage_direct">Dosage *</label>
+                        <input type="text" class="form-control" name="dosage" id="pharmacy_dosage_direct" placeholder="e.g., 500mg" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pharmacy_frequency_direct">Frequency *</label>
+                        <input type="text" class="form-control" name="frequency" id="pharmacy_frequency_direct" placeholder="e.g., Twice daily" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pharmacy_duration_direct">Duration *</label>
+                        <input type="text" class="form-control" name="duration" id="pharmacy_duration_direct" placeholder="e.g., 7 days" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pharmacy_quantity_direct">Quantity</label>
+                        <input type="number" class="form-control" name="quantity" id="pharmacy_quantity_direct" min="1" value="1">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pharmacy_instructions_direct">Instructions</label>
+                        <textarea class="form-control" name="instructions" id="pharmacy_instructions_direct" rows="2" placeholder="Special instructions (optional)"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="pharmacy_submit_btn">
+                        <i class="fas fa-check mr-1"></i> Create Request
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Lab Request Modal -->
+{% if user_role in ['Admin', 'Front Office', 'Finance', 'Lab Staff'] %}
+<div class="modal fade" id="labRequestModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-success">
+                <h4 class="modal-title"><i class="fas fa-vial mr-2"></i>Direct Lab Test Request</h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <form id="labRequestForm" method="POST" action="{{ url_for('create_direct_lab_request', patient_id=patient.id) }}">
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        <strong>Note:</strong> Specialized tests require a doctor's approval.
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="lab_test_name_direct">Test Name *</label>
+                        <input type="text" 
+                               class="form-control" 
+                               name="test_name" 
+                               id="lab_test_name_direct"
+                               placeholder="Enter test name (e.g., CBC, Blood Glucose)"
+                               required>
+                        <input type="hidden" name="test_code" id="lab_test_code_direct">
+                    </div>
+                    
+                    <div id="lab_restriction_alert" class="alert alert-warning" style="display: none;">
+                        <i class="fas fa-exclamation-triangle mr-1"></i>
+                        <span id="lab_restriction_message"></span>
+                    </div>
+                    
+                    <div id="lab_pricing_display" class="alert alert-success" style="display: none;">
+                        <i class="fas fa-money-bill-wave mr-1"></i>
+                        <strong>Estimated Price:</strong> GHS <span id="lab_price_value">0.00</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="lab_instructions_direct">Instructions</label>
+                        <textarea class="form-control" name="instructions" id="lab_instructions_direct" rows="2" placeholder="Special instructions (optional)"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="lab_priority_direct">Priority</label>
+                        <select class="form-control" name="priority" id="lab_priority_direct">
+                            <option value="routine">Routine</option>
+                            <option value="urgent">Urgent</option>
+                            <option value="stat">Stat</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success" id="lab_submit_btn">
+                        <i class="fas fa-check mr-1"></i> Create Request
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Radiology Request Modal -->
+{% if user_role in ['Admin', 'Front Office', 'Finance', 'Radiology Staff'] %}
+<div class="modal fade" id="radiologyRequestModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h4 class="modal-title"><i class="fas fa-x-ray mr-2"></i>Direct Radiology Request</h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <form id="radiologyRequestForm" method="POST" action="{{ url_for('create_direct_radiology_request', patient_id=patient.id) }}">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="radiology_study_type_direct">Study Type *</label>
+                        <input type="text" 
+                               class="form-control" 
+                               name="study_type" 
+                               id="radiology_study_type_direct"
+                               placeholder="e.g., Chest X-Ray, CT Scan"
+                               required>
+                        <input type="hidden" name="study_code" id="radiology_study_code_direct">
+                    </div>
+                    
+                    <div id="radiology_pricing_display" class="alert alert-success" style="display: none;">
+                        <i class="fas fa-money-bill-wave mr-1"></i>
+                        <strong>Estimated Price:</strong> GHS <span id="radiology_price_value">0.00</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="radiology_body_part_direct">Body Part</label>
+                        <input type="text" class="form-control" name="body_part" id="radiology_body_part_direct" placeholder="e.g., Chest, Abdomen">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="radiology_clinical_indication_direct">Clinical Indication</label>
+                        <textarea class="form-control" name="clinical_indication" id="radiology_clinical_indication_direct" rows="2" placeholder="Reason for the study (optional)"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="radiology_instructions_direct">Instructions</label>
+                        <textarea class="form-control" name="instructions" id="radiology_instructions_direct" rows="2" placeholder="Special instructions (optional)"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="radiology_priority_direct">Priority</label>
+                        <select class="form-control" name="priority" id="radiology_priority_direct">
+                            <option value="routine">Routine</option>
+                            <option value="urgent">Urgent</option>
+                            <option value="stat">Stat</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning" id="radiology_submit_btn">
+                        <i class="fas fa-check mr-1"></i> Create Request
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Procedure Request Modal -->
+{% if user_role in ['Admin', 'Front Office', 'Finance'] %}
+<div class="modal fade" id="procedureRequestModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header bg-danger">
+                <h4 class="modal-title"><i class="fas fa-procedures mr-2"></i>Direct Procedure Request</h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <form id="procedureRequestForm" method="POST" action="{{ url_for('create_direct_procedure_request', patient_id=patient.id) }}">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="procedure_name_direct">Procedure Name *</label>
+                        <input type="text" 
+                               class="form-control" 
+                               name="procedure_name" 
+                               id="procedure_name_direct"
+                               placeholder="e.g., Dressing Change, Suture Removal"
+                               required>
+                        <input type="hidden" name="procedure_code" id="procedure_code_direct">
+                    </div>
+                    
+                    <div id="procedure_pricing_display" class="alert alert-success" style="display: none;">
+                        <i class="fas fa-money-bill-wave mr-1"></i>
+                        <strong>Estimated Price:</strong> GHS <span id="procedure_price_value">0.00</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="procedure_type_direct">Procedure Type *</label>
+                        <select class="form-control" name="procedure_type" id="procedure_type_direct" required>
+                            <option value="diagnostic">Diagnostic</option>
+                            <option value="therapeutic">Therapeutic</option>
+                            <option value="surgical">Surgical</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="procedure_description_direct">Description</label>
+                        <textarea class="form-control" name="description" id="procedure_description_direct" rows="2" placeholder="Procedure description (optional)"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="procedure_indication_direct">Indication</label>
+                        <textarea class="form-control" name="indication" id="procedure_indication_direct" rows="2" placeholder="Reason for procedure (optional)"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="procedure_location_direct">Location</label>
+                        <input type="text" class="form-control" name="location" id="procedure_location_direct" placeholder="e.g., Procedure Room 1">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger" id="procedure_submit_btn">
+                        <i class="fas fa-check mr-1"></i> Create Request
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- JavaScript for Direct Service Requests -->
+<script>
+    const patientId = {{ patient.id }};
+    
+    // Pharmacy Request Handling
+    {% if user_role in ['Admin', 'Front Office', 'Finance', 'Pharmacy Staff'] %}
+    (function() {
+        const searchInput = document.getElementById('pharmacy_medication_search');
+        const resultsDiv = document.getElementById('pharmacy_medication_results');
+        const medicationIdInput = document.getElementById('pharmacy_medication_id');
+        const restrictionAlert = document.getElementById('pharmacy_restriction_alert');
+        const pricingDisplay = document.getElementById('pharmacy_pricing_display');
+        const priceValue = document.getElementById('pharmacy_price_value');
+        const submitBtn = document.getElementById('pharmacy_submit_btn');
+        let searchTimeout;
+        
+        if (searchInput) {
+            searchInput.addEventListener('input', function() {
+                const query = this.value.trim();
+                clearTimeout(searchTimeout);
+                
+                if (query.length < 2) {
+                    resultsDiv.style.display = 'none';
+                    return;
+                }
+                
+                searchTimeout = setTimeout(() => {
+                    fetch(`/api/v1/inventory/medications/search?search=${encodeURIComponent(query)}&limit=20`)
+                        .then(response => response.json())
+                        .then(data => {
+                            resultsDiv.innerHTML = '';
+                            const medications = Array.isArray(data) ? data : (data.medications || []);
+                            
+                            if (medications.length > 0) {
+                                medications.forEach(med => {
+                                    const item = document.createElement('a');
+                                    item.href = '#';
+                                    item.className = 'list-group-item list-group-item-action';
+                                    item.innerHTML = `<strong>${med.name}</strong>${med.brand_name ? ` <small>(${med.brand_name})</small>` : ''}${med.medication_code ? ` <small class="text-muted">[${med.medication_code}]</small>` : ''}${med.unit_price ? ` <span class="badge badge-success float-right">GHS ${parseFloat(med.unit_price).toFixed(2)}</span>` : ''}`;
+                                    
+                                    item.addEventListener('click', function(e) {
+                                        e.preventDefault();
+                                        searchInput.value = med.name;
+                                        medicationIdInput.value = med.id;
+                                        resultsDiv.style.display = 'none';
+                                        
+                                        // Check restriction and pricing
+                                        checkPharmacyRestriction(med.id);
+                                        
+                                        // Auto-fill dosage if strength available
+                                        if (med.strength && !document.getElementById('pharmacy_dosage_direct').value) {
+                                            document.getElementById('pharmacy_dosage_direct').value = med.strength;
+                                        }
+                                    });
+                                    
+                                    resultsDiv.appendChild(item);
+                                });
+                                resultsDiv.style.display = 'block';
+                            } else {
+                                resultsDiv.style.display = 'none';
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error searching medications:', error);
+                            resultsDiv.style.display = 'none';
+                        });
+                }, 300);
+            });
+        }
+        
+        function checkPharmacyRestriction(medicationId) {
+            fetch(`/api/v1/patients/${patientId}/direct-requests/check-medication?medication_id=${medicationId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.restricted) {
+                        restrictionAlert.style.display = 'block';
+                        restrictionAlert.querySelector('#pharmacy_restriction_message').textContent = data.reason;
+                        submitBtn.disabled = true;
+                        pricingDisplay.style.display = 'none';
+                    } else {
+                        restrictionAlert.style.display = 'none';
+                        submitBtn.disabled = false;
+                        
+                        if (data.price) {
+                            priceValue.textContent = parseFloat(data.price).toFixed(2);
+                            pricingDisplay.style.display = 'block';
+                        } else {
+                            pricingDisplay.style.display = 'none';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking restriction:', error);
+                });
+        }
+        
+        // Hide results when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!searchInput.contains(e.target) && !resultsDiv.contains(e.target)) {
+                resultsDiv.style.display = 'none';
+            }
+        });
+    })();
+    {% endif %}
+    
+    // Lab Request Handling
+    {% if user_role in ['Admin', 'Front Office', 'Finance', 'Lab Staff'] %}
+    (function() {
+        const testNameInput = document.getElementById('lab_test_name_direct');
+        const testCodeInput = document.getElementById('lab_test_code_direct');
+        const restrictionAlert = document.getElementById('lab_restriction_alert');
+        const pricingDisplay = document.getElementById('lab_pricing_display');
+        const priceValue = document.getElementById('lab_price_value');
+        const submitBtn = document.getElementById('lab_submit_btn');
+        let checkTimeout;
+        
+        if (testNameInput) {
+            testNameInput.addEventListener('input', function() {
+                const testName = this.value.trim();
+                clearTimeout(checkTimeout);
+                
+                if (testName.length < 2) {
+                    restrictionAlert.style.display = 'none';
+                    pricingDisplay.style.display = 'none';
+                    return;
+                }
+                
+                checkTimeout = setTimeout(() => {
+                    const testCode = testCodeInput.value || null;
+                    const url = `/api/v1/patients/${patientId}/direct-requests/check-lab-test?test_name=${encodeURIComponent(testName)}${testCode ? `&test_code=${encodeURIComponent(testCode)}` : ''}`;
+                    
+                    fetch(url)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.restricted) {
+                                restrictionAlert.style.display = 'block';
+                                restrictionAlert.querySelector('#lab_restriction_message').textContent = data.reason;
+                                submitBtn.disabled = true;
+                                pricingDisplay.style.display = 'none';
+                            } else {
+                                restrictionAlert.style.display = 'none';
+                                submitBtn.disabled = false;
+                                
+                                if (data.price) {
+                                    priceValue.textContent = parseFloat(data.price).toFixed(2);
+                                    pricingDisplay.style.display = 'block';
+                                } else {
+                                    pricingDisplay.style.display = 'none';
+                                }
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error checking lab test:', error);
+                        });
+                }, 500);
+            });
+        }
+    })();
+    {% endif %}
+    
+    // Radiology Request Handling
+    {% if user_role in ['Admin', 'Front Office', 'Finance', 'Radiology Staff'] %}
+    (function() {
+        const studyTypeInput = document.getElementById('radiology_study_type_direct');
+        const studyCodeInput = document.getElementById('radiology_study_code_direct');
+        const pricingDisplay = document.getElementById('radiology_pricing_display');
+        const priceValue = document.getElementById('radiology_price_value');
+        let checkTimeout;
+        
+        if (studyTypeInput) {
+            studyTypeInput.addEventListener('input', function() {
+                const studyType = this.value.trim();
+                clearTimeout(checkTimeout);
+                
+                if (studyType.length < 2) {
+                    pricingDisplay.style.display = 'none';
+                    return;
+                }
+                
+                checkTimeout = setTimeout(() => {
+                    const studyCode = studyCodeInput.value || null;
+                    const url = `/api/v1/patients/${patientId}/direct-requests/check-radiology?study_type=${encodeURIComponent(studyType)}${studyCode ? `&study_code=${encodeURIComponent(studyCode)}` : ''}`;
+                    
+                    fetch(url)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.price) {
+                                priceValue.textContent = parseFloat(data.price).toFixed(2);
+                                pricingDisplay.style.display = 'block';
+                            } else {
+                                pricingDisplay.style.display = 'none';
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error checking radiology pricing:', error);
+                        });
+                }, 500);
+            });
+        }
+    })();
+    {% endif %}
+    
+    // Procedure Request Handling
+    {% if user_role in ['Admin', 'Front Office', 'Finance'] %}
+    (function() {
+        const procedureNameInput = document.getElementById('procedure_name_direct');
+        const procedureCodeInput = document.getElementById('procedure_code_direct');
+        const pricingDisplay = document.getElementById('procedure_pricing_display');
+        const priceValue = document.getElementById('procedure_price_value');
+        let checkTimeout;
+        
+        if (procedureNameInput) {
+            procedureNameInput.addEventListener('input', function() {
+                const procedureName = this.value.trim();
+                clearTimeout(checkTimeout);
+                
+                if (procedureName.length < 2) {
+                    pricingDisplay.style.display = 'none';
+                    return;
+                }
+                
+                checkTimeout = setTimeout(() => {
+                    const procedureCode = procedureCodeInput.value || null;
+                    const url = `/api/v1/patients/${patientId}/direct-requests/check-procedure?procedure_name=${encodeURIComponent(procedureName)}${procedureCode ? `&procedure_code=${encodeURIComponent(procedureCode)}` : ''}`;
+                    
+                    fetch(url)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.price) {
+                                priceValue.textContent = parseFloat(data.price).toFixed(2);
+                                pricingDisplay.style.display = 'block';
+                            } else {
+                                pricingDisplay.style.display = 'none';
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error checking procedure pricing:', error);
+                        });
+                }, 500);
+            });
+        }
+    })();
+    {% endif %}
+    
+    // Reset modals when closed
+    $('.modal').on('hidden.bs.modal', function() {
+        $(this).find('form')[0].reset();
+        $(this).find('.alert').hide();
+        $(this).find('input[type="hidden"]').val('');
+        $(this).find('button[type="submit"]').prop('disabled', false);
     });
 </script>
 {% endif %}
+
 {% endblock %}
 

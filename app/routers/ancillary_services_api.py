@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, status, HTTPException, Form, Request, Query
+from fastapi import APIRouter, Depends, status, HTTPException, Form, Request, Query, File, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+import os
+import uuid
 
 from app.db.database import get_db
 from app.core.deps import get_current_user, role_required
@@ -23,11 +25,14 @@ def lab_dashboard(
     request: Request,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Lab Staff", "Admin", "Doctor", "Nurse", "Clinician"])),
-    status_filter: Optional[str] = Query(None, description="Filter by order status")
+    status_filter: Optional[str] = Query(None, description="Filter by order status"),
+    search: Optional[str] = Query(None, description="Search by patient name, patient number, or phone number")
 ):
     """
     Laboratory dashboard showing pending and completed lab orders.
     """
+    from sqlalchemy import or_
+    
     # Query for lab orders
     query = db.query(LabOrder).options(
         joinedload(LabOrder.encounter).joinedload(Encounter.patient),
@@ -48,7 +53,64 @@ def lab_dashboard(
             LabOrder.status.in_([OrderStatus.PENDING.value, OrderStatus.IN_PROGRESS.value])
         )
     
+    # Search by patient name, patient number, or phone number
+    if search:
+        search_term = f"%{search.strip()}%"
+        # For walk-in orders, patient_id is directly on LabOrder
+        # For encounter-based orders, patient is via Encounter
+        query = query.outerjoin(Encounter).outerjoin(Patient, 
+            or_(LabOrder.patient_id == Patient.id, Encounter.patient_id == Patient.id)
+        ).filter(
+            or_(
+                Patient.first_name.ilike(search_term),
+                Patient.last_name.ilike(search_term),
+                Patient.patient_number.ilike(search_term),
+                Patient.phone_number.ilike(search_term),
+                (Patient.first_name + ' ' + Patient.last_name).ilike(search_term)
+            )
+        )
+    
     lab_orders = query.order_by(LabOrder.ordered_at.desc()).limit(100).all()
+    
+    # Check payment status for each lab order (for cash patients)
+    from app.utils.payment_verification import is_cash_patient, check_payment_required_and_paid
+    from app.models.billing_models import Charge, ChargeType, Invoice
+    lab_order_payment_status = {}
+    
+    for order in lab_orders:
+        patient_id = None
+        if order.encounter and order.encounter.patient:
+            patient_id = order.encounter.patient.id
+        elif order.patient_id:
+            patient_id = order.patient_id
+        
+        if patient_id and is_cash_patient(db, patient_id):
+            # Check if there's a charge for this lab order
+            charge = db.query(Charge).filter(
+                Charge.lab_order_id == order.id,
+                Charge.charge_type == ChargeType.LAB_TEST,
+                Charge.invoice.has(Invoice.is_active == True)
+            ).first()
+            
+            if charge:
+                invoice = charge.invoice
+                payment_required, payment_paid, _, _ = check_payment_required_and_paid(
+                    db, patient_id, ChargeType.LAB_TEST,
+                    encounter_id=order.encounter_id if order.encounter else None,
+                    lab_order_id=order.id
+                )
+                if payment_required and not payment_paid:
+                    lab_order_payment_status[order.id] = {
+                        "payment_required": True,
+                        "payment_paid": False,
+                        "invoice_id": invoice.id,
+                        "balance": invoice.balance
+                    }
+                else:
+                    lab_order_payment_status[order.id] = {
+                        "payment_required": payment_required,
+                        "payment_paid": True
+                    }
     
     context = {
         "request": request,
@@ -56,7 +118,9 @@ def lab_dashboard(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "lab_orders": lab_orders,
-        "status_filter": status_filter
+        "lab_order_payment_status": lab_order_payment_status,
+        "status_filter": status_filter,
+        "search": search
     }
     return templates.TemplateResponse("ancillary/lab_dashboard.html", context)
 
@@ -83,6 +147,54 @@ def view_lab_order(
     if not lab_order:
         raise HTTPException(status_code=404, detail="Lab order not found")
     
+    # Check payment status for cash patients
+    from app.utils.payment_verification import (
+        is_cash_patient,
+        check_payment_required_and_paid,
+        requires_payment_before_service
+    )
+    from app.models.billing_models import ChargeType
+    
+    patient = lab_order.encounter.patient
+    payment_required = False
+    payment_paid = True
+    payment_notice = None
+    unpaid_invoice = None
+    paid_invoice = None
+    
+    if is_cash_patient(db, patient.id):
+        # First, ensure charge exists for this lab order (if not already created)
+        # This allows us to always check payment status
+        from app.services import create_charge_for_lab_order
+        try:
+            create_charge_for_lab_order(db, lab_order, current_user.id, check_payment_required=False)
+        except Exception as e:
+            # Charge might already exist, continue
+            pass
+        
+        # Check payment requirement and status
+        payment_required = requires_payment_before_service(
+            db, patient.id, ChargeType.LAB_TEST
+        )
+        
+        if payment_required:
+            payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+                db, patient.id, ChargeType.LAB_TEST,
+                encounter_id=lab_order.encounter_id,
+                lab_order_id=order_id
+            )
+            
+            if invoice:
+                if payment_paid:
+                    paid_invoice = invoice
+                    payment_notice = f"Payment Status: Patient has paid for this lab order. Invoice #{invoice.invoice_number} - Amount: GHS {invoice.total_amount:.2f}"
+                else:
+                    unpaid_invoice = invoice
+                    payment_notice = f"Payment Required: Patient has not paid for this lab order. Outstanding balance: GHS {invoice.balance:.2f}"
+            else:
+                # Charge might not exist yet or still being created
+                payment_notice = "Payment Status: Checking payment status..."
+    
     # Get samples for this order
     samples = db.query(LabSample).filter(
         LabSample.lab_order_id == order_id,
@@ -96,7 +208,12 @@ def view_lab_order(
         "user_role": current_user.role.name,
         "lab_order": lab_order,
         "patient": lab_order.encounter.patient,
-        "samples": samples
+        "samples": samples,
+        "payment_required": payment_required,
+        "payment_paid": payment_paid,
+        "payment_notice": payment_notice,
+        "unpaid_invoice": unpaid_invoice,
+        "paid_invoice": paid_invoice
     }
     return templates.TemplateResponse("ancillary/lab_order_detail.html", context)
 
@@ -107,7 +224,8 @@ def enter_lab_result(
     order_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Lab Staff", "Admin"])),
-    result: str = Form(...)
+    result: str = Form(...),
+    files: Optional[List[UploadFile]] = File(None)
 ):
     """
     Enter lab test results.
@@ -128,6 +246,7 @@ def enter_lab_result(
     patient_id = encounter.patient_id
     
     # Check payment requirement for cash patients (lab test fee)
+    # Payment must be made before saving results for cash patients
     if is_cash_patient(db, patient_id):
         payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
             db, patient_id, ChargeType.LAB_TEST, 
@@ -135,9 +254,11 @@ def enter_lab_result(
         )
         
         if payment_required and not payment_paid:
-            # Redirect to payment page
+            # Block saving - redirect back with payment required error
+            invoice_id = invoice.id if invoice else None
+            invoice_balance = invoice.balance if invoice else None
             return RedirectResponse(
-                url=f"/patients/{patient_id}/pay/lab?order_id={order_id}&return_to=lab/orders/{order_id}",
+                url=f"/lab/orders/{order_id}?error=payment_required&invoice_id={invoice_id}&balance={invoice_balance}",
                 status_code=status.HTTP_302_FOUND
             )
     
@@ -163,6 +284,42 @@ def enter_lab_result(
     except Exception as e:
         # Log validation error but continue
         print(f"Error validating lab result {order_id}: {e}")
+    
+    # Handle file uploads if provided
+    if files:
+        patient_id = encounter.patient_id
+        
+        # Create storage directory
+        storage_base = "static/files/lab_results"
+        storage_path = os.path.join(storage_base, str(patient_id), str(order_id))
+        os.makedirs(storage_path, exist_ok=True)
+        
+        uploaded_files = []
+        for file in files:
+            if file.filename:
+                # Generate unique filename
+                file_ext = os.path.splitext(file.filename)[1] or ""
+                unique_filename = f"{uuid.uuid4()}{file_ext}"
+                file_path = os.path.join(storage_path, unique_filename)
+                
+                # Save file
+                with open(file_path, "wb") as f:
+                    content = file.file.read()
+                    f.write(content)
+                
+                uploaded_files.append({
+                    "original_name": file.filename,
+                    "saved_path": file_path,
+                    "file_size": len(content),
+                    "file_type": file.content_type or "application/octet-stream"
+                })
+        
+        # Store file info in result text (or could create separate model)
+        if uploaded_files:
+            file_info = "\n\n[Attached Files: " + ", ".join([f.filename for f in files]) + "]"
+            result = result + file_info
+            # Update result in update_data
+            update_data["result"] = result
     
     lab_order_update = LabOrderUpdate(**update_data)
     updated_lab_order = encounter_crud.update_lab_order(db, order_id, lab_order_update)
@@ -194,11 +351,14 @@ def radiology_dashboard(
     request: Request,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Admin", "Doctor", "Clinician", "Radiology Staff"])),  # Radiology accessible to Admin, Clinicians, and Radiology Staff
-    status_filter: Optional[str] = Query(None, description="Filter by order status")
+    status_filter: Optional[str] = Query(None, description="Filter by order status"),
+    search: Optional[str] = Query(None, description="Search by patient name, patient number, or phone number")
 ):
     """
     Radiology dashboard showing pending and completed radiology orders.
     """
+    from sqlalchemy import or_
+    
     # Query for radiology orders
     query = db.query(RadiologyOrder).options(
         joinedload(RadiologyOrder.encounter).joinedload(Encounter.patient),
@@ -219,7 +379,64 @@ def radiology_dashboard(
             RadiologyOrder.status.in_([OrderStatus.PENDING.value, OrderStatus.IN_PROGRESS.value])
         )
     
+    # Search by patient name, patient number, or phone number
+    if search:
+        search_term = f"%{search.strip()}%"
+        # For walk-in orders, patient_id is directly on RadiologyOrder
+        # For encounter-based orders, patient is via Encounter
+        query = query.outerjoin(Encounter).outerjoin(Patient, 
+            or_(RadiologyOrder.patient_id == Patient.id, Encounter.patient_id == Patient.id)
+        ).filter(
+            or_(
+                Patient.first_name.ilike(search_term),
+                Patient.last_name.ilike(search_term),
+                Patient.patient_number.ilike(search_term),
+                Patient.phone_number.ilike(search_term),
+                (Patient.first_name + ' ' + Patient.last_name).ilike(search_term)
+            )
+        )
+    
     radiology_orders = query.order_by(RadiologyOrder.ordered_at.desc()).limit(100).all()
+    
+    # Check payment status for each radiology order (for cash patients)
+    from app.utils.payment_verification import is_cash_patient, check_payment_required_and_paid
+    from app.models.billing_models import Charge, ChargeType, Invoice
+    radiology_order_payment_status = {}
+    
+    for order in radiology_orders:
+        patient_id = None
+        if order.encounter and order.encounter.patient:
+            patient_id = order.encounter.patient.id
+        elif order.patient_id:
+            patient_id = order.patient_id
+        
+        if patient_id and is_cash_patient(db, patient_id):
+            # Check if there's a charge for this radiology order
+            charge = db.query(Charge).filter(
+                Charge.radiology_order_id == order.id,
+                Charge.charge_type == ChargeType.RADIOLOGY,
+                Charge.invoice.has(Invoice.is_active == True)
+            ).first()
+            
+            if charge:
+                invoice = charge.invoice
+                payment_required, payment_paid, _, _ = check_payment_required_and_paid(
+                    db, patient_id, ChargeType.RADIOLOGY,
+                    encounter_id=order.encounter_id if order.encounter else None,
+                    radiology_order_id=order.id
+                )
+                if payment_required and not payment_paid:
+                    radiology_order_payment_status[order.id] = {
+                        "payment_required": True,
+                        "payment_paid": False,
+                        "invoice_id": invoice.id,
+                        "balance": invoice.balance
+                    }
+                else:
+                    radiology_order_payment_status[order.id] = {
+                        "payment_required": payment_required,
+                        "payment_paid": True
+                    }
     
     context = {
         "request": request,
@@ -227,7 +444,9 @@ def radiology_dashboard(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "radiology_orders": radiology_orders,
-        "status_filter": status_filter
+        "radiology_order_payment_status": radiology_order_payment_status,
+        "status_filter": status_filter,
+        "search": search
     }
     return templates.TemplateResponse("ancillary/radiology_dashboard.html", context)
 
@@ -252,13 +471,66 @@ def view_radiology_order(
     if not radiology_order:
         raise HTTPException(status_code=404, detail="Radiology order not found")
     
+    # Check payment status for cash patients
+    from app.utils.payment_verification import (
+        is_cash_patient,
+        check_payment_required_and_paid,
+        requires_payment_before_service
+    )
+    from app.models.billing_models import ChargeType
+    
+    patient = radiology_order.encounter.patient
+    payment_required = False
+    payment_paid = True
+    payment_notice = None
+    unpaid_invoice = None
+    paid_invoice = None
+    
+    if is_cash_patient(db, patient.id):
+        # First, ensure charge exists for this radiology order (if not already created)
+        # This allows us to always check payment status
+        from app.services import create_charge_for_radiology_order
+        try:
+            create_charge_for_radiology_order(db, radiology_order, current_user.id, check_payment_required=False)
+        except Exception as e:
+            # Charge might already exist, continue
+            pass
+        
+        # Check payment requirement and status
+        payment_required = requires_payment_before_service(
+            db, patient.id, ChargeType.RADIOLOGY
+        )
+        
+        if payment_required:
+            payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+                db, patient.id, ChargeType.RADIOLOGY,
+                encounter_id=radiology_order.encounter_id,
+                radiology_order_id=order_id
+            )
+            
+            if invoice:
+                if payment_paid:
+                    paid_invoice = invoice
+                    payment_notice = f"Payment Status: Patient has paid for this radiology order. Invoice #{invoice.invoice_number} - Amount: GHS {invoice.total_amount:.2f}"
+                else:
+                    unpaid_invoice = invoice
+                    payment_notice = f"Payment Required: Patient has not paid for this radiology order. Outstanding balance: GHS {invoice.balance:.2f}"
+            else:
+                # Charge might not exist yet or still being created
+                payment_notice = "Payment Status: Checking payment status..."
+    
     context = {
         "request": request,
         "title": f"Radiology Order #{order_id}",
         "current_user": current_user,
         "user_role": current_user.role.name,
         "radiology_order": radiology_order,
-        "patient": radiology_order.encounter.patient
+        "patient": radiology_order.encounter.patient,
+        "payment_required": payment_required,
+        "payment_paid": payment_paid,
+        "payment_notice": payment_notice,
+        "unpaid_invoice": unpaid_invoice,
+        "paid_invoice": paid_invoice
     }
     return templates.TemplateResponse("ancillary/radiology_order_detail.html", context)
 
@@ -290,6 +562,7 @@ def enter_radiology_report(
     patient_id = encounter.patient_id
     
     # Check payment requirement for cash patients (radiology fee)
+    # Payment must be made before saving reports for cash patients
     if is_cash_patient(db, patient_id):
         payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
             db, patient_id, ChargeType.RADIOLOGY,
@@ -297,9 +570,11 @@ def enter_radiology_report(
         )
         
         if payment_required and not payment_paid:
-            # Redirect to payment page
+            # Block saving - redirect back with payment required error
+            invoice_id = invoice.id if invoice else None
+            invoice_balance = invoice.balance if invoice else None
             return RedirectResponse(
-                url=f"/patients/{patient_id}/pay/radiology?order_id={order_id}&return_to=radiology/orders/{order_id}",
+                url=f"/radiology/orders/{order_id}?error=payment_required&invoice_id={invoice_id}&balance={invoice_balance}",
                 status_code=status.HTTP_302_FOUND
             )
     
@@ -339,6 +614,7 @@ def enter_radiology_report(
             # In production, use proper logging
             print(f"Error creating charge for radiology order {order_id}: {e}")
     
+    # Redirect with success status
     return RedirectResponse(
         url=f"/radiology/orders/{order_id}?status=report_entered",
         status_code=status.HTTP_302_FOUND
@@ -351,11 +627,14 @@ def pharmacy_dashboard(
     request: Request,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Pharmacy Staff", "Admin", "Doctor", "Nurse", "Clinician"])),
-    status_filter: Optional[str] = Query(None, description="Filter by prescription status")
+    status_filter: Optional[str] = Query(None, description="Filter by prescription status"),
+    search: Optional[str] = Query(None, description="Search by patient name, patient number, or phone number")
 ):
     """
     Pharmacy dashboard showing pending and completed prescriptions.
     """
+    from sqlalchemy import or_
+    
     # Query for prescriptions
     query = db.query(Prescription).options(
         joinedload(Prescription.encounter).joinedload(Encounter.patient),
@@ -374,7 +653,56 @@ def pharmacy_dashboard(
         # Default: show pending prescriptions
         query = query.filter(Prescription.status == OrderStatus.PENDING.value)
     
+    # Search by patient name, patient number, or phone number
+    if search:
+        search_term = f"%{search.strip()}%"
+        # For walk-in orders, patient_id is directly on Prescription (though prescriptions are usually encounter-based)
+        # For encounter-based orders, patient is via Encounter
+        query = query.outerjoin(Encounter).outerjoin(Patient, 
+            or_(Prescription.patient_id == Patient.id, Encounter.patient_id == Patient.id)
+        ).filter(
+            or_(
+                Patient.first_name.ilike(search_term),
+                Patient.last_name.ilike(search_term),
+                Patient.patient_number.ilike(search_term),
+                Patient.phone_number.ilike(search_term),
+                (Patient.first_name + ' ' + Patient.last_name).ilike(search_term)
+            )
+        )
+    
     prescriptions = query.order_by(Prescription.prescribed_at.desc()).limit(100).all()
+    
+    # Check payment status for each prescription (for cash patients)
+    from app.utils.payment_verification import is_cash_patient, check_payment_required_and_paid
+    from app.models.billing_models import Charge, ChargeType, Invoice
+    prescription_payment_status = {}
+    
+    for prescription in prescriptions:
+        patient_id = None
+        if prescription.encounter and prescription.encounter.patient:
+            patient_id = prescription.encounter.patient.id
+        elif prescription.patient_id:
+            patient_id = prescription.patient_id
+        
+        if patient_id and is_cash_patient(db, patient_id):
+            # Check if there's a charge for this prescription
+            charge = db.query(Charge).filter(
+                Charge.prescription_id == prescription.id,
+                Charge.charge_type == ChargeType.PHARMACY,
+                Charge.invoice.has(Invoice.is_active == True)
+            ).first()
+            
+            if charge:
+                invoice = charge.invoice
+                payment_required, payment_paid, invoice_id, balance = check_payment_required_and_paid(
+                    db, invoice.id
+                )
+                if payment_required and not payment_paid:
+                    prescription_payment_status[prescription.id] = {
+                        "payment_required": True,
+                        "invoice_id": invoice_id,
+                        "balance": balance
+                    }
     
     context = {
         "request": request,
@@ -382,7 +710,9 @@ def pharmacy_dashboard(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "prescriptions": prescriptions,
-        "status_filter": status_filter
+        "prescription_payment_status": prescription_payment_status,
+        "status_filter": status_filter,
+        "search": search
     }
     return templates.TemplateResponse("ancillary/pharmacy_dashboard.html", context)
 
@@ -468,6 +798,54 @@ def view_prescription(
     else:
         interaction_check = None
     
+    # Check payment status for cash patients
+    from app.utils.payment_verification import (
+        is_cash_patient,
+        check_payment_required_and_paid,
+        requires_payment_before_service
+    )
+    from app.models.billing_models import ChargeType
+    from decimal import Decimal
+    
+    payment_required = False
+    payment_paid = True
+    payment_notice = None
+    unpaid_invoice = None
+    paid_invoice = None
+    
+    if is_cash_patient(db, patient.id):
+        # First, ensure charge exists for this prescription (if not already created)
+        # This allows us to always check payment status
+        from app.services import create_charge_for_prescription
+        try:
+            create_charge_for_prescription(db, prescription, current_user.id, check_payment_required=False)
+        except Exception as e:
+            # Charge might already exist, continue
+            pass
+        
+        # Check payment requirement and status
+        payment_required = requires_payment_before_service(
+            db, patient.id, ChargeType.PHARMACY
+        )
+        
+        if payment_required:
+            payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+                db, patient.id, ChargeType.PHARMACY,
+                encounter_id=prescription.encounter_id,
+                prescription_id=prescription_id
+            )
+            
+            if invoice:
+                if payment_paid:
+                    paid_invoice = invoice
+                    payment_notice = f"Payment Status: Patient has paid for this prescription. Invoice #{invoice.invoice_number} - Amount: GHS {invoice.total_amount:.2f}"
+                else:
+                    unpaid_invoice = invoice
+                    payment_notice = f"Payment Required: Patient has not paid for this prescription. Outstanding balance: GHS {invoice.balance:.2f}"
+            else:
+                # Charge might not exist yet or still being created
+                payment_notice = "Payment Status: Checking payment status..."
+    
     context = {
         "request": request,
         "title": f"Prescription #{prescription_id}",
@@ -479,7 +857,12 @@ def view_prescription(
         "stock_check": stock_check,
         "formulary_check": formulary_check,
         "interaction_check": interaction_check,
-        "stock_items": stock_items
+        "stock_items": stock_items,
+        "payment_required": payment_required,
+        "payment_paid": payment_paid,
+        "payment_notice": payment_notice,
+        "unpaid_invoice": unpaid_invoice,
+        "paid_invoice": paid_invoice
     }
     return templates.TemplateResponse("ancillary/prescription_detail.html", context)
 
@@ -514,18 +897,32 @@ def dispense_prescription(
     encounter = prescription.encounter
     patient_id = encounter.patient_id
     
-    # Check payment requirement for cash patients (pharmacy fee)
+    # Create charge first (if it doesn't exist) for all patients
+    # This ensures the charge exists before we check payment
+    from app.services import create_charge_for_prescription
+    try:
+        # Create charge if it doesn't exist (function returns None if charge already exists)
+        create_charge_for_prescription(db, prescription, current_user.id, check_payment_required=False)
+    except Exception as e:
+        # Log error but continue - charge might already exist
+        print(f"Note: Charge creation for prescription {prescription_id}: {e}")
+    
+    # For cash patients: Check payment requirement before dispensing
+    # Payment must be made before dispensing for cash patients
     # Note: For IPD patients, pharmacy is still pay-as-you-go
     if is_cash_patient(db, patient_id):
+        # Now check if payment has been made
         payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
             db, patient_id, ChargeType.PHARMACY,
             encounter_id=encounter.id, prescription_id=prescription_id
         )
         
         if payment_required and not payment_paid:
-            # Redirect to payment page
+            # Block dispensing - redirect back with payment required error
+            invoice_id = invoice.id if invoice else None
+            invoice_balance = invoice.balance if invoice else None
             return RedirectResponse(
-                url=f"/patients/{patient_id}/pay/pharmacy?prescription_id={prescription_id}&return_to=pharmacy/prescriptions/{prescription_id}",
+                url=f"/pharmacy/prescriptions/{prescription_id}?error=payment_required&invoice_id={invoice_id}&balance={invoice_balance}",
                 status_code=status.HTTP_302_FOUND
             )
     
@@ -557,6 +954,7 @@ def dispense_prescription(
         inventory_crud.create_inventory_transaction(db, transaction_data, current_user.id)
     
     # Update prescription as dispensed
+    # Payment check already performed above - if we reach here, payment is confirmed
     update_data = {
         "status": OrderStatus.COMPLETED.value,
         "dispensed_by_id": current_user.id,
@@ -566,16 +964,10 @@ def dispense_prescription(
     prescription_update = PrescriptionUpdate(**update_data)
     updated_prescription = encounter_crud.update_prescription(db, prescription_id, prescription_update)
     
-    # Automatically create charge when prescription is dispensed
-    if updated_prescription and updated_prescription.status == OrderStatus.COMPLETED.value:
-        try:
-            from app.services import create_charge_for_prescription
-            create_charge_for_prescription(db, updated_prescription, current_user.id)
-        except Exception as e:
-            # Log error but don't fail the request
-            # In production, use proper logging
-            print(f"Error creating charge for prescription {prescription_id}: {e}")
+    # Charge is already created before dispensing (for cash patients) or will be created automatically
+    # No need to create it again here since we create it earlier for payment verification
     
+    # Redirect with success status
     return RedirectResponse(
         url=f"/pharmacy/prescriptions/{prescription_id}?status=dispensed",
         status_code=status.HTTP_302_FOUND

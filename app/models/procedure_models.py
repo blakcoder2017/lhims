@@ -40,6 +40,7 @@ class Procedure(Base):
     # Foreign Keys
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=True)  # Optional link to encounter
+    procedure_catalog_id = Column(Integer, ForeignKey("procedure_catalog.id"), nullable=True)  # Link to procedure catalog
     performed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Doctor who performed the procedure
     ordered_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Doctor who ordered the procedure
     
@@ -86,6 +87,7 @@ class Procedure(Base):
     # Relationships
     patient = relationship("Patient", back_populates="procedures")
     encounter = relationship("Encounter", back_populates="procedures")
+    procedure_catalog = relationship("ProcedureCatalog", foreign_keys=[procedure_catalog_id])
     performed_by = relationship("User", foreign_keys=[performed_by_id])
     ordered_by = relationship("User", foreign_keys=[ordered_by_id])
     checked_in_by = relationship("User", foreign_keys=[checked_in_by_id])

@@ -30,6 +30,13 @@ class AdmissionStatus(str, enum.Enum):
     ABSCONDED = "absconded"
 
 
+class DischargeStatus(str, enum.Enum):
+    """Discharge status enumeration"""
+    NORMAL = "normal"  # Normal discharge
+    DEATH = "death"  # Patient died
+    REFERRAL = "referral"  # Referred to another facility
+
+
 class DepartmentType(str, enum.Enum):
     """Department type enumeration"""
     OPD = "opd"  # Outpatient Department
@@ -155,6 +162,11 @@ class Admission(Base):
     diagnosis = Column(Text, nullable=True)  # Diagnosis at admission
     notes = Column(Text, nullable=True)  # Additional notes
     
+    # Discharge Information
+    discharge_status = Column(postgresql.ENUM(DischargeStatus, values_callable=lambda x: [e.value for e in x], name='dischargestatus', create_type=False), nullable=True)  # Discharge status: normal, death, referral
+    discharge_diagnosis = Column(Text, nullable=True)  # Final diagnosis at discharge
+    discharge_notes = Column(Text, nullable=True)  # Discharge notes and instructions
+    
     # Transfer Information
     transferred_from_ward_id = Column(Integer, ForeignKey("wards.id"), nullable=True)  # Previous ward if transferred
     transferred_to_ward_id = Column(Integer, ForeignKey("wards.id"), nullable=True)  # New ward if transferred
@@ -169,8 +181,18 @@ class Admission(Base):
     
     # Relationships
     patient = relationship("Patient", back_populates="admissions")
-    encounter = relationship("Encounter", back_populates="admission")
-    invoice = relationship("Invoice")
+    # Initial encounter that led to admission (many-to-one, using encounter_id)
+    initial_encounter = relationship("Encounter", foreign_keys=[encounter_id], post_update=True)
+    # All encounters linked to this admission (one-to-many, using Encounter.admission_id)
+    # Use primaryjoin string to explicitly specify which foreign key to use (Encounter.admission_id, not Admission.encounter_id)
+    encounters = relationship(
+        "Encounter", 
+        back_populates="admission",
+        primaryjoin="Admission.id == Encounter.admission_id"
+    )
+    # Invoice relationship: Admission can have one invoice via invoice_id (one-to-one)
+    # Note: Invoice also has admission_id, but this relationship uses Admission.invoice_id
+    invoice = relationship("Invoice", foreign_keys=[invoice_id], uselist=False)
     ward = relationship("Ward", foreign_keys=[ward_id], back_populates="admissions")
     bed = relationship("Bed", back_populates="admissions")
     admitted_by = relationship("User", foreign_keys=[admitted_by_id])
@@ -228,6 +250,7 @@ class AdmissionNote(Base):
     """
     SQLAlchemy Model for admission notes.
     Allows nurses and doctors to add multiple notes to an admission with timestamps.
+    Supports threaded replies for interactive communication.
     """
     __tablename__ = "admission_notes"
 
@@ -236,6 +259,7 @@ class AdmissionNote(Base):
     # Foreign Keys
     admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=False)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User who created the note
+    parent_note_id = Column(Integer, ForeignKey("admission_notes.id"), nullable=True)  # Parent note for replies
     
     # Note Details
     note = Column(Text, nullable=False)  # The note content
@@ -251,7 +275,8 @@ class AdmissionNote(Base):
     # Relationships
     admission = relationship("Admission", back_populates="admission_notes")
     created_by = relationship("User", foreign_keys=[created_by_id])
+    parent_note = relationship("AdmissionNote", remote_side=[id], backref="replies")
     
     def __repr__(self):
-        return f"<AdmissionNote(id={self.id}, admission_id={self.admission_id}, created_by_id={self.created_by_id}, created_at={self.created_at})>"
+        return f"<AdmissionNote(id={self.id}, admission_id={self.admission_id}, created_by_id={self.created_by_id}, parent_note_id={self.parent_note_id}, created_at={self.created_at})>"
 

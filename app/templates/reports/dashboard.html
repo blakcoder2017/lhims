@@ -24,7 +24,7 @@
             <div class="container-fluid">
                 <div class="row">
                     <!-- Financial Reports -->
-                    {% if user_role in ['Admin', 'Finance', 'Management'] %}
+                    {% if user_role in ['Admin', 'Management', 'Finance'] %}
                     <div class="col-lg-4 col-md-6">
                         <div class="card card-primary card-outline">
                             <div class="card-header">
@@ -98,6 +98,156 @@
                             <div class="card-footer">
                                 <a href="{{ url_for('ipd_admissions_list') }}" class="btn btn-warning btn-block">
                                     <i class="fas fa-hospital mr-1"></i> View Admissions
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Service-Specific Reports Row -->
+                <div class="row mt-4">
+                    <!-- Pharmacy Report -->
+                    {% if user_role in ['Admin', 'Management', 'Finance', 'Pharmacy Staff'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-pills mr-1"></i> Pharmacy Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Revenue and frequently prescribed medications analysis.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue summary</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Top prescribed medications</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Medication revenue breakdown</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('pharmacy_report') }}" class="btn btn-success btn-block">
+                                    <i class="fas fa-pills mr-1"></i> View Pharmacy Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Lab Report -->
+                    {% if user_role in ['Admin', 'Management', 'Finance', 'Lab Staff'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-flask mr-1"></i> Lab Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Laboratory revenue and test analysis.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue summary</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Test frequency analysis</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue by test type</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('lab_report') }}" class="btn btn-info btn-block">
+                                    <i class="fas fa-flask mr-1"></i> View Lab Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Radiology Report -->
+                    {% if user_role in ['Admin', 'Management', 'Finance', 'Radiology Staff'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-x-ray mr-1"></i> Radiology Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Radiology revenue and study analysis.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue summary</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Study type frequency</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue by study type</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('radiology_report') }}" class="btn btn-info btn-block">
+                                    <i class="fas fa-x-ray mr-1"></i> View Radiology Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Additional Reports Row -->
+                <div class="row mt-4">
+                    <!-- Procedure Report -->
+                    {% if user_role in ['Admin', 'Management', 'Finance', 'Doctor'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-secondary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> Procedure Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Procedure statistics and revenue analysis.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Procedure frequency</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue by procedure</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Procedure trends</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('procedure_report') }}" class="btn btn-secondary btn-block">
+                                    <i class="fas fa-procedures mr-1"></i> View Procedure Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- IPD Comprehensive Report -->
+                    {% if user_role in ['Admin', 'Management', 'Finance', 'Doctor'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-hospital-alt mr-1"></i> IPD Comprehensive Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Comprehensive IPD report with disease, financial, and demographics data.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Disease report</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Financial report</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Patient demographics</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('ipd_comprehensive_report') }}" class="btn btn-danger btn-block">
+                                    <i class="fas fa-hospital-alt mr-1"></i> View IPD Comprehensive Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Disease Report -->
+                    {% if user_role in ['Admin', 'Management', 'Doctor'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-virus mr-1"></i> Disease Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Disease prevalence and patient analysis based on diseases database.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Disease frequency</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Patient counts per disease</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Disease trends</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('disease_report') }}" class="btn btn-primary btn-block">
+                                    <i class="fas fa-virus mr-1"></i> View Disease Report
                                 </a>
                             </div>
                         </div>

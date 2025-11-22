@@ -70,6 +70,9 @@
                             {% if prescription_id %}
                             <input type="hidden" name="prescription_id" value="{{ prescription_id }}">
                             {% endif %}
+                            {% if new_visit %}
+                            <input type="hidden" name="new_visit" value="{{ new_visit }}">
+                            {% endif %}
 
                             <div class="row">
                                 <div class="col-md-6">

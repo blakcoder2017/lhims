@@ -101,6 +101,7 @@
                             <table class="table table-bordered table-striped">
                                 <thead>
                                     <tr>
+                                        <th>Triage</th>
                                         <th>Queue #</th>
                                         <th>Patient Name</th>
                                         <th>Patient Number</th>
@@ -119,7 +120,30 @@
                                     {% for item in queue_items %}
                                     {% set appointment = item.appointment %}
                                     {% set patient = item.appointment.patient if item.appointment else item.encounter.patient %}
-                                    <tr class="{% if item.has_encounter %}table-info{% endif %} {% if item.type == 'encounter_only' %}table-warning{% endif %}">
+                                    {% set triage_level = item.get('triage_level') %}
+                                    {% set triage_category = item.get('triage_category') %}
+                                    <tr class="{% if item.has_encounter %}table-info{% endif %} {% if item.type == 'encounter_only' %}table-warning{% endif %} {% if triage_level == 'P1' or triage_category == 'Critical' %}table-danger{% elif triage_level == 'P2' or triage_category == 'Urgent' %}table-warning{% endif %}">
+                                        <td>
+                                            {% if triage_level %}
+                                                {% if triage_level == 'P1' or triage_category == 'Critical' %}
+                                                    <span class="badge badge-danger" title="Critical - Immediate attention">
+                                                        <i class="fas fa-exclamation-circle"></i> P1
+                                                    </span>
+                                                {% elif triage_level == 'P2' or triage_category == 'Urgent' %}
+                                                    <span class="badge badge-warning" title="Urgent - Prompt attention">
+                                                        <i class="fas fa-exclamation-triangle"></i> P2
+                                                    </span>
+                                                {% elif triage_level == 'P3' or triage_category == 'Routine' %}
+                                                    <span class="badge badge-success" title="Routine - Standard care">
+                                                        <i class="fas fa-check-circle"></i> P3
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge badge-secondary">{{ triage_level }}</span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="badge badge-secondary" title="Triage level not assigned">--</span>
+                                            {% endif %}
+                                        </td>
                                         <td>
                                             {% if appointment %}
                                             <strong>{{ appointment.queue_number or 'N/A' }}</strong>

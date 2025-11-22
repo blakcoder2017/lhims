@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-clinic-medical mr-2"></i>OPD Detailed Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">OPD Report</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters and Actions -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters & Export</h3>
+                        <div class="card-tools">
+                            <button onclick="window.print()" class="btn btn-sm btn-info mr-2">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                            {% set base_url = url_for('opd_detailed_report') %}
+                            {% set qs = [] %}
+                            {% if start_date %}{% set qs = qs + ['start_date=' ~ start_date] %}{% endif %}
+                            {% if end_date %}{% set qs = qs + ['end_date=' ~ end_date] %}{% endif %}
+                            {% if status %}{% set qs = qs + ['status=' ~ status] %}{% endif %}
+                            {% set query_str = qs|join('&') %}
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=pdf" class="btn btn-sm btn-danger mr-2">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </a>
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=excel" class="btn btn-sm btn-success mr-2">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </a>
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=csv" class="btn btn-sm btn-secondary">
+                                <i class="fas fa-file-csv"></i> CSV
+                            </a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('opd_detailed_report') }}">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Status</label>
+                                        <select name="status" class="form-control">
+                                            <option value="">All Statuses</option>
+                                            <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+                                            <option value="completed" {% if status == 'completed' %}selected{% endif %}>Completed</option>
+                                            <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search"></i> Generate Report
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Summary Statistics -->
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ total_visits }}</h3>
+                                <p>Total Visits</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-user-injured"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ completed_visits }}</h3>
+                                <p>Completed</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ active_visits }}</h3>
+                                <p>Active</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>GHS {{ "%.2f"|format(total_revenue) }}</h3>
+                                <p>Total Revenue</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-money-bill-wave"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Breakdowns -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Payment Status Breakdown</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Payment Status</th>
+                                            <th>Count</th>
+                                            <th>Total (GHS)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% if payment_breakdown %}
+                                        {% for status, data in payment_breakdown.items() %}
+                                        <tr>
+                                            <td>{{ status|title }}</td>
+                                            <td>{{ data.count }}</td>
+                                            <td>{{ "%.2f"|format(data.total) }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% else %}
+                                        <tr>
+                                            <td colspan="3" class="text-center text-muted">No payment data available</td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Visit Type Breakdown</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Visit Type</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% if visit_type_breakdown %}
+                                        {% for vtype, count in visit_type_breakdown.items() %}
+                                        <tr>
+                                            <td>{{ vtype|title }}</td>
+                                            <td>{{ count }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% else %}
+                                        <tr>
+                                            <td colspan="2" class="text-center text-muted">No visit type data available</td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detailed Visits Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Detailed Visits</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>OPD Number</th>
+                                        <th>Patient Name</th>
+                                        <th>Visit Date</th>
+                                        <th>Status</th>
+                                        <th>Payment Status</th>
+                                        <th>Visit Type</th>
+                                        <th>Total Charges</th>
+                                        <th>Encounters</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for visit in visits %}
+                                    <tr>
+                                        <td><strong>{{ visit.opd_number }}</strong></td>
+                                        <td>{{ visit.patient.first_name }} {{ visit.patient.last_name }}</td>
+                                        <td>{{ visit.visit_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>
+                                            {% if visit.status.value == 'active' %}
+                                                <span class="badge badge-success">Active</span>
+                                            {% elif visit.status.value == 'completed' %}
+                                                <span class="badge badge-info">Completed</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">Cancelled</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if visit.payment_status == 'paid' %}
+                                                <span class="badge badge-success">Paid</span>
+                                            {% elif visit.payment_status == 'pending' %}
+                                                <span class="badge badge-warning">Pending</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">{{ visit.payment_status|title }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ visit.visit_type|title if visit.visit_type else 'N/A' }}</td>
+                                        <td>GHS {{ "%.2f"|format(visit.total_charges) }}</td>
+                                        <td>{{ visit.encounters|length }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <style media="print">
+        .content-header, .card-header .card-tools, .btn, .breadcrumb, .sidebar { display: none !important; }
+        .card { border: none !important; box-shadow: none !important; }
+    </style>
+
+{% endblock %}
+

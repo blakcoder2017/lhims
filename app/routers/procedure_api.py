@@ -102,6 +102,12 @@ def procedure_create_form(
         if encounter and not patient:
             patient = encounter.patient
     
+    # Get active procedure catalog items for dropdown
+    from app.crud import procedure_catalog_crud
+    procedure_catalog_items, _ = procedure_catalog_crud.search_procedure_catalog(
+        db, query=None, skip=0, limit=1000, active_only=True
+    )
+    
     context = {
         "request": request,
         "title": "Create Procedure",
@@ -110,7 +116,8 @@ def procedure_create_form(
         "patient": patient,
         "encounter": encounter,
         "procedure_types": [pt.value for pt in ProcedureType],
-        "statuses": [stat.value for stat in ProcedureStatus]
+        "statuses": [stat.value for stat in ProcedureStatus],
+        "procedure_catalog_items": procedure_catalog_items
     }
     return templates.TemplateResponse("procedures/procedure_form.html", context)
 
@@ -122,6 +129,7 @@ def create_procedure(
     current_user = Depends(role_required(["Admin", "Doctor"])),
     patient_id: int = Form(...),
     encounter_id: Optional[int] = Form(None),
+    procedure_catalog_id: Optional[int] = Form(None),
     procedure_name: str = Form(...),
     procedure_code: Optional[str] = Form(None),
     procedure_type: str = Form(...),
@@ -146,6 +154,7 @@ def create_procedure(
         procedure_data = ProcedureCreate(
             patient_id=patient_id,
             encounter_id=encounter_id if encounter_id else None,
+            procedure_catalog_id=procedure_catalog_id if procedure_catalog_id else None,
             ordered_by_id=current_user.id,
             procedure_name=procedure_name,
             procedure_code=procedure_code,
@@ -224,6 +233,12 @@ def procedure_edit_form(
     if not procedure:
         raise HTTPException(status_code=404, detail="Procedure not found")
     
+    # Get active procedure catalog items for dropdown
+    from app.crud import procedure_catalog_crud
+    procedure_catalog_items, _ = procedure_catalog_crud.search_procedure_catalog(
+        db, query=None, skip=0, limit=1000, active_only=True
+    )
+    
     context = {
         "request": request,
         "title": f"Edit Procedure: {procedure.procedure_number}",
@@ -231,7 +246,8 @@ def procedure_edit_form(
         "user_role": current_user.role.name,
         "procedure": procedure,
         "procedure_types": [pt.value for pt in ProcedureType],
-        "statuses": [stat.value for stat in ProcedureStatus]
+        "statuses": [stat.value for stat in ProcedureStatus],
+        "procedure_catalog_items": procedure_catalog_items
     }
     return templates.TemplateResponse("procedures/procedure_form.html", context)
 
@@ -242,6 +258,7 @@ def update_procedure(
     procedure_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Admin", "Doctor"])),
+    procedure_catalog_id: Optional[int] = Form(None),
     procedure_name: Optional[str] = Form(None),
     procedure_type: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
@@ -255,8 +272,37 @@ def update_procedure(
 ):
     """Update a procedure."""
     try:
+        # Check payment if status is being changed to COMPLETED
+        if status and ProcedureStatus(status) == ProcedureStatus.COMPLETED:
+            procedure = procedure_crud.get_procedure(db, procedure_id)
+            if procedure:
+                from app.utils.payment_verification import (
+                    check_payment_required_and_paid,
+                    is_cash_patient
+                )
+                from app.models.billing_models import ChargeType
+                
+                patient_id = procedure.patient_id
+                if patient_id and is_cash_patient(db, patient_id):
+                    payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+                        db, patient_id, ChargeType.PROCEDURE,
+                        encounter_id=procedure.encounter_id,
+                        procedure_id=procedure_id
+                    )
+                    
+                    if payment_required and not payment_paid:
+                        # Block completion - redirect back with payment required error
+                        invoice_id = invoice.id if invoice else None
+                        invoice_balance = invoice.balance if invoice else None
+                        return RedirectResponse(
+                            url=request.url_for("procedure_detail", procedure_id=procedure_id) + f"?error=payment_required&invoice_id={invoice_id}&balance={invoice_balance}",
+                            status_code=302
+                        )
+        
         update_data = {}
         
+        if procedure_catalog_id is not None:
+            update_data["procedure_catalog_id"] = procedure_catalog_id if procedure_catalog_id else None
         if procedure_name:
             update_data["procedure_name"] = procedure_name
         if procedure_type:

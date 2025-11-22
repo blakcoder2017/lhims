@@ -117,6 +117,34 @@
                                 {% endif %}
                             </div>
 
+                            {% if procedure_catalog_items %}
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="form-group">
+                                        <label for="catalog_item">Select from Procedure Catalog (Optional)</label>
+                                        <select class="form-control" id="catalog_item" name="catalog_item" onchange="loadCatalogItem(this.value)">
+                                            <option value="">-- Select from Catalog --</option>
+                                            {% for item in procedure_catalog_items %}
+                                            <option value="{{ item.id }}" 
+                                                    {% if procedure and procedure.procedure_catalog_id == item.id %}selected{% endif %}
+                                                    data-name="{{ item.procedure_name }}"
+                                                    data-code="{{ item.procedure_code or '' }}"
+                                                    data-type="{{ item.procedure_type or '' }}"
+                                                    data-category="{{ item.procedure_category or '' }}"
+                                                    data-description="{{ item.description or '' }}"
+                                                    data-indication="{{ item.indication or '' }}"
+                                                    data-location="{{ item.typical_location or '' }}">
+                                                {{ item.procedure_name }}{% if item.procedure_code %} ({{ item.procedure_code }}){% endif %}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="form-text text-muted">Selecting a catalog item will auto-fill the procedure details below and link this procedure to the catalog.</small>
+                                        <input type="hidden" id="procedure_catalog_id" name="procedure_catalog_id" value="{% if procedure and procedure.procedure_catalog_id %}{{ procedure.procedure_catalog_id }}{% endif %}">
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
@@ -370,6 +398,59 @@
                     patientSearchInput.value = '';
                     patientSearchInput.required = true;
                     patientSearchInput.focus();
+                }
+            }
+
+            // Load catalog item details
+            function loadCatalogItem(catalogItemId) {
+                const catalogIdField = document.getElementById('procedure_catalog_id');
+                
+                if (!catalogItemId) {
+                    if (catalogIdField) catalogIdField.value = '';
+                    return;
+                }
+                
+                // Set the catalog_id hidden field
+                if (catalogIdField) {
+                    catalogIdField.value = catalogItemId;
+                }
+                
+                const select = document.getElementById('catalog_item');
+                const option = select.options[select.selectedIndex];
+                
+                if (option && option.dataset) {
+                    // Fill in the form fields
+                    const procedureName = document.getElementById('procedure_name');
+                    const procedureCode = document.getElementById('procedure_code');
+                    const procedureType = document.getElementById('procedure_type');
+                    const description = document.getElementById('description');
+                    const indication = document.getElementById('indication');
+                    const location = document.getElementById('location');
+                    
+                    if (procedureName && option.dataset.name) {
+                        procedureName.value = option.dataset.name;
+                    }
+                    if (procedureCode && option.dataset.code) {
+                        procedureCode.value = option.dataset.code;
+                    }
+                    if (procedureType && option.dataset.type) {
+                        // Find matching option in procedure_type select
+                        for (let i = 0; i < procedureType.options.length; i++) {
+                            if (procedureType.options[i].value.toLowerCase() === option.dataset.type.toLowerCase()) {
+                                procedureType.value = procedureType.options[i].value;
+                                break;
+                            }
+                        }
+                    }
+                    if (description && option.dataset.description) {
+                        description.value = option.dataset.description;
+                    }
+                    if (indication && option.dataset.indication) {
+                        indication.value = option.dataset.indication;
+                    }
+                    if (location && option.dataset.location) {
+                        location.value = option.dataset.location;
+                    }
                 }
             }
 

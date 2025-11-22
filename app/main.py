@@ -17,6 +17,8 @@ from app.routers import patient_api
 from app.routers import triage_api
 from app.routers import ipd_api
 from app.routers import ipd_ui_routes
+from app.routers import opd_api
+from app.routers import opd_ui_routes
 from app.routers import nurse_api
 from app.routers import doctor_api
 from app.routers import insurance_provider_api
@@ -28,6 +30,7 @@ from app.routers import payment_ui_routes
 from app.routers import reports_api
 from app.routers import expense_api
 from app.routers import procedure_api
+from app.routers import procedure_catalog_api
 from app.routers import department_api
 from app.routers import shift_type_api
 from app.routers import bed_type_api
@@ -129,79 +132,145 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
                 if required_match:
                     required_roles = required_match.group(1)
             
+            # Ensure we have safe defaults for template context
+            safe_user_role = parsed_user_role or user_role or "Guest"
+            safe_context = {
+                "request": request,
+                "status_code": 403,
+                "detail": error_message,
+                "current_user": current_user if current_user else None,
+                "user_role": safe_user_role,
+                "required_roles": required_roles
+            }
+            
             try:
                 return templates.TemplateResponse(
                     "error_403.html",
-                    {
-                        "request": request,
-                        "status_code": 403,
-                        "detail": error_message,
-                        "current_user": current_user,
-                        "user_role": parsed_user_role or user_role,
-                        "required_roles": required_roles
-                    },
+                    safe_context,
                     status_code=403
                 )
             except Exception as template_error:
                 # Fallback if template rendering fails
                 import traceback
-                print(f"Error rendering 403 template: {template_error}")
+                print(f"[ERROR] Failed to render error_403.html: {template_error}")
                 print(traceback.format_exc())
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "detail": error_message,
-                        "user_role": parsed_user_role or user_role,
-                        "required_roles": required_roles,
-                        "message": "You do not have permission to access this resource."
-                    }
+                # Try to return a simple HTML response instead
+                from fastapi.responses import HTMLResponse
+                return HTMLResponse(
+                    content=f"""
+                    <html>
+                        <head><title>Access Denied</title></head>
+                        <body>
+                            <h1>403 - Access Denied</h1>
+                            <p>You do not have permission to access this resource.</p>
+                            <p><strong>Your Role:</strong> {safe_user_role}</p>
+                            {f'<p><strong>Required Roles:</strong> {required_roles}</p>' if required_roles else ''}
+                            <p><a href="/">Return to Dashboard</a> | <a href="/login">Login</a></p>
+                        </body>
+                    </html>
+                    """,
+                    status_code=403
                 )
     
     # --- 3. Handle 404 Not Found -> Show user-friendly error page ---
     if exc.status_code == status.HTTP_404_NOT_FOUND:
         if not request.url.path.startswith("/api/"):
+            # Ensure we have safe defaults for template context
+            safe_context = {
+                "request": request,
+                "status_code": 404,
+                "module_name": request.url.path,
+                "reason": "The requested page or module is not available.",
+                "current_user": current_user if current_user else None,
+                "user_role": user_role if user_role else "Guest",
+                "detail": str(exc.detail) if exc.detail else "The requested resource was not found."
+            }
+            
             # Only show "module unavailable" for actual template errors, not resource not found errors
             if "TemplateNotFound" in str(exc.detail):
+                try:
+                    return templates.TemplateResponse(
+                        "module_unavailable.html",
+                        safe_context,
+                        status_code=404
+                    )
+                except Exception as template_error:
+                    print(f"[ERROR] Failed to render module_unavailable.html: {template_error}")
+                    return HTMLResponse(
+                        content=f"""
+                        <html>
+                            <head><title>Module Unavailable</title></head>
+                            <body>
+                                <h1>Module Unavailable</h1>
+                                <p>The requested module or feature is currently not available.</p>
+                                <p><strong>Module:</strong> {safe_context['module_name']}</p>
+                                <p><a href="/">Return to Dashboard</a> | <a href="/login">Login</a></p>
+                            </body>
+                        </html>
+                        """,
+                        status_code=404
+                    )
+            
+            # For resource not found errors (e.g., "Ward type not found", "Patient not found"), show regular error page
+            try:
                 return templates.TemplateResponse(
-                    "module_unavailable.html",
-                    {
-                        "request": request,
-                        "status_code": 404,
-                        "module_name": request.url.path,
-                        "reason": "The requested page or module is not available.",
-                        "current_user": current_user,
-                        "user_role": user_role
-                    },
+                    "error.html", 
+                    safe_context,
                     status_code=404
                 )
-            # For resource not found errors (e.g., "Ward type not found", "Patient not found"), show regular error page
-            return templates.TemplateResponse(
-                "error.html", 
-                {
-                    "request": request,
-                    "status_code": 404,
-                    "detail": exc.detail if exc.detail else "The requested resource was not found.",
-                    "current_user": current_user,
-                    "user_role": user_role
-                },
-                status_code=404
-            )
+            except Exception as template_error:
+                print(f"[ERROR] Failed to render error.html for 404: {template_error}")
+                return HTMLResponse(
+                    content=f"""
+                    <html>
+                        <head><title>Not Found</title></head>
+                        <body>
+                            <h1>404 - Not Found</h1>
+                            <p>{safe_context['detail']}</p>
+                            <p><a href="/">Return to Dashboard</a> | <a href="/login">Login</a></p>
+                        </body>
+                    </html>
+                    """,
+                    status_code=404
+                )
         return JSONResponse(status_code=404, content={"detail": exc.detail})
     
-    # --- 4. Handle Other HTTP Exceptions (e.g., 500) ---
+    # --- 4. Handle Other HTTP Exceptions (e.g., 500, 404) ---
     # Render an error template for UI routes
     if not request.url.path.startswith("/api/"):
-        return templates.TemplateResponse(
-            "error.html", 
-            {
-                "request": request,
-                "status_code": exc.status_code,
-                "detail": exc.detail,
-                "current_user": current_user,
-                "user_role": user_role
-            },
-            status_code=exc.status_code
-        )
+        # Ensure we have safe defaults for template context
+        safe_context = {
+            "request": request,
+            "status_code": exc.status_code,
+            "detail": str(exc.detail) if exc.detail else "An error occurred",
+            "current_user": current_user if current_user else None,
+            "user_role": user_role if user_role else "Guest"
+        }
+        
+        try:
+            return templates.TemplateResponse(
+                "error.html", 
+                safe_context,
+                status_code=exc.status_code
+            )
+        except Exception as template_error:
+            # If template rendering fails, return a simple HTML response
+            import traceback
+            print(f"[ERROR] Failed to render error.html: {template_error}")
+            print(traceback.format_exc())
+            return HTMLResponse(
+                content=f"""
+                <html>
+                    <head><title>Error {exc.status_code}</title></head>
+                    <body>
+                        <h1>Error {exc.status_code}</h1>
+                        <p>{safe_context['detail']}</p>
+                        <p><a href="/login">Return to Login</a></p>
+                    </body>
+                </html>
+                """,
+                status_code=exc.status_code
+            )
     
     # Fallback for other API errors
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
@@ -292,6 +361,8 @@ app.include_router(patient_records_api.router, prefix="", tags=["Patient Records
 # 5. Clinical Encounter & CPOE Routers
 from app.routers import encounter_api
 app.include_router(encounter_api.router)  # /api/v1/encounters routes
+app.include_router(opd_api.router, prefix="", tags=["OPD"])  # /api/v1/opd-visits routes
+app.include_router(opd_ui_routes.router, prefix="", tags=["OPD UI"])  # /opd/* UI routes for OPD management
 app.include_router(ipd_api.router, prefix="", tags=["IPD"])  # /api/v1/wards, /api/v1/beds, /api/v1/admissions, /api/v1/doctor-duties routes
 app.include_router(ipd_ui_routes.router, prefix="", tags=["IPD UI"])  # /ipd/* UI routes for IPD management
 from app.routers import drug_administration_api
@@ -321,6 +392,9 @@ app.include_router(reports_api.router, prefix="", tags=["Reports"])  # /reports 
 app.include_router(expense_api.router, prefix="", tags=["Expenses"])  # /expenses routes
 
 # 10. Procedure Management Routers
+# IMPORTANT: Include catalog routes BEFORE procedure routes to avoid route conflicts
+# (catalog routes are literal paths like /procedures/catalog, procedure routes have path params like /procedures/{id})
+app.include_router(procedure_catalog_api.router, prefix="", tags=["Procedure Catalog"])  # /procedures/catalog routes
 app.include_router(procedure_api.router, prefix="", tags=["Procedures"])  # /procedures routes
 
 # 11. Department Management Routers
@@ -396,3 +470,7 @@ app.include_router(password_reset_api.router, prefix="", tags=["Password Reset"]
 # 21. Walk-in Orders Management Routers
 from app.routers import walk_in_orders_api
 app.include_router(walk_in_orders_api.router, prefix="", tags=["Walk-in Orders"])  # /walk-in-orders routes
+
+# 22. Direct Service Requests from Patient Profile
+from app.routers import direct_service_requests_api
+app.include_router(direct_service_requests_api.router, prefix="", tags=["Direct Service Requests"])  # /patients/{id}/direct-requests routes

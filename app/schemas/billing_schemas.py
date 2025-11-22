@@ -48,6 +48,8 @@ class InvoiceBase(BaseModel):
     patient_id: int
     encounter_id: Optional[int] = None
     appointment_id: Optional[int] = None
+    opd_visit_id: Optional[int] = None  # Link to OPD visit (for OPD billing)
+    admission_id: Optional[int] = None  # Link to IPD admission (for IPD billing)
     payment_mechanism: Optional[PaymentMethod] = None
     nhis_number: Optional[str] = None
     insurance_provider: Optional[str] = None

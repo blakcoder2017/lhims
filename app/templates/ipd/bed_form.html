@@ -8,14 +8,15 @@
             <div class="container-fluid">
                 <div class="row mb-2">
                     <div class="col-sm-6">
-                        <h1><i class="fas fa-bed mr-2"></i>Create Bed</h1>
+                        <h1><i class="fas fa-bed mr-2"></i>{% if bed %}Edit{% else %}Create{% endif %} Bed</h1>
                     </div>
                     <div class="col-sm-6">
                         <ol class="breadcrumb float-sm-right">
                             <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
                             <li class="breadcrumb-item"><a href="{{ url_for('ipd_dashboard') }}">IPD</a></li>
                             <li class="breadcrumb-item"><a href="{{ url_for('ipd_wards_list') }}">Wards</a></li>
-                            <li class="breadcrumb-item active">Create Bed</li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_beds_list') }}">Beds</a></li>
+                            <li class="breadcrumb-item active">{% if bed %}Edit{% else %}Create{% endif %}</li>
                         </ol>
                     </div>
                 </div>
@@ -33,22 +34,27 @@
 
                 <div class="card card-primary card-outline">
                     <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-plus-circle mr-1"></i> Bed Information</h3>
+                        <h3 class="card-title">
+                            <i class="fas fa-{% if bed %}edit{% else %}plus-circle{% endif %} mr-1"></i> 
+                            {% if bed %}Edit{% else %}Create{% endif %} Bed Information
+                        </h3>
                     </div>
-                    <form method="POST" action="{{ url_for('ipd_bed_create') }}">
+                    <form method="POST" action="{% if bed %}{{ url_for('ipd_bed_update', bed_id=bed.id) }}{% else %}{{ url_for('ipd_bed_create') }}{% endif %}">
                         <div class="card-body">
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="ward_id">Ward <span class="text-danger">*</span></label>
-                                        {% if ward %}
+                                        {% if ward and not bed %}
                                         <input type="hidden" name="ward_id" value="{{ ward.id }}">
                                         <input type="text" class="form-control" value="{{ ward.name }}" readonly>
                                         {% else %}
                                         <select class="form-control" id="ward_id" name="ward_id" required>
                                             <option value="">Select Ward</option>
                                             {% for w in wards %}
-                                            <option value="{{ w.id }}">{{ w.name }} ({{ w.ward_number or 'N/A' }})</option>
+                                            <option value="{{ w.id }}" {% if bed and bed.ward_id == w.id %}selected{% elif ward and not bed and ward.id == w.id %}selected{% endif %}>
+                                                {{ w.name }} ({{ w.ward_number or 'N/A' }})
+                                            </option>
                                             {% endfor %}
                                         </select>
                                         {% endif %}
@@ -57,7 +63,9 @@
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="bed_number">Bed Number <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" id="bed_number" name="bed_number" required placeholder="e.g., BED-001">
+                                        <input type="text" class="form-control" id="bed_number" name="bed_number" 
+                                               value="{% if bed %}{{ bed.bed_number }}{% endif %}" 
+                                               required placeholder="e.g., BED-001">
                                     </div>
                                 </div>
                             </div>
@@ -65,7 +73,9 @@
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="bed_name">Bed Name</label>
-                                        <input type="text" class="form-control" id="bed_name" name="bed_name" placeholder="e.g., Bed 1">
+                                        <input type="text" class="form-control" id="bed_name" name="bed_name" 
+                                               value="{% if bed %}{{ bed.bed_name or '' }}{% endif %}" 
+                                               placeholder="e.g., Bed 1">
                                     </div>
                                 </div>
                                 <div class="col-md-6">
@@ -75,7 +85,9 @@
                                             <option value="">Select Bed Type (Optional)</option>
                                             {% if bed_types %}
                                             {% for bt in bed_types %}
-                                            <option value="{{ bt.name }}" data-default-charge="{{ bt.default_charge_per_day or '0' }}">
+                                            <option value="{{ bt.name }}" 
+                                                    data-default-charge="{{ bt.default_charge_per_day or '0' }}"
+                                                    {% if bed and bed.bed_type == bt.name %}selected{% endif %}>
                                                 {{ bt.name }}{% if bt.code %} ({{ bt.code }}){% endif %}
                                             </option>
                                             {% endfor %}
@@ -99,8 +111,10 @@
                                         <label for="bed_status">Status <span class="text-danger">*</span></label>
                                         <select class="form-control" id="bed_status" name="bed_status" required>
                                             {% for status in bed_statuses %}
-                                            <option value="{{ status }}" {% if status == 'available' %}selected{% endif %}>
-                                                {{ status.title() }}
+                                            <option value="{{ status }}" 
+                                                    {% if bed and bed.status.value == status %}selected
+                                                    {% elif not bed and status == 'available' %}selected{% endif %}>
+                                                {{ status.replace('_', ' ').title() }}
                                             </option>
                                             {% endfor %}
                                         </select>
@@ -109,7 +123,9 @@
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="charge_per_day">Charge per Day (GHS) <span class="text-danger">*</span></label>
-                                        <input type="number" step="0.01" class="form-control" id="charge_per_day" name="charge_per_day" value="0.00" required placeholder="0.00">
+                                        <input type="number" step="0.01" class="form-control" id="charge_per_day" name="charge_per_day" 
+                                               value="{% if bed and bed.charge_per_day %}{{ bed.charge_per_day }}{% else %}0.00{% endif %}" 
+                                               required placeholder="0.00">
                                     </div>
                                 </div>
                             </div>
@@ -117,21 +133,25 @@
                                 <div class="col-md-12">
                                     <div class="form-group">
                                         <label for="notes">Notes</label>
-                                        <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Additional notes about the bed"></textarea>
+                                        <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Additional notes about the bed">{% if bed %}{{ bed.notes or '' }}{% endif %}</textarea>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         <div class="card-footer">
                             <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-save mr-1"></i> Create Bed
+                                <i class="fas fa-save mr-1"></i> {% if bed %}Update{% else %}Create{% endif %} Bed
                             </button>
-                            {% if ward %}
+                            {% if bed %}
+                            <a href="{{ url_for('ipd_beds_list') }}" class="btn btn-secondary">
+                                <i class="fas fa-times mr-1"></i> Cancel
+                            </a>
+                            {% elif ward %}
                             <a href="{{ url_for('ipd_ward_detail', ward_id=ward.id) }}" class="btn btn-secondary">
                                 <i class="fas fa-times mr-1"></i> Cancel
                             </a>
                             {% else %}
-                            <a href="{{ url_for('ipd_wards_list') }}" class="btn btn-secondary">
+                            <a href="{{ url_for('ipd_beds_list') }}" class="btn btn-secondary">
                                 <i class="fas fa-times mr-1"></i> Cancel
                             </a>
                             {% endif %}

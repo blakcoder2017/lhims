@@ -30,17 +30,64 @@ def check_in_patient(
     appointment_id: Optional[int] = Form(None),
 ):
     """
-    Check in a patient after vitals are taken.
+    Check in a patient after vitals are taken and payment is made.
     Creates an appointment if one doesn't exist, then checks the patient in.
     This makes the patient appear in the doctor's queue.
+    
+    Requirements:
+    - Vitals must be recorded (within last 24 hours)
+    - Payment must be made (for cash patients only)
     """
     from app.models.patient_models import Patient
     from app.models.triage_models import TriageVitals
+    from app.utils.payment_verification import (
+        is_cash_patient,
+        has_paid_for_service,
+        requires_payment_before_service
+    )
+    from app.models.billing_models import ChargeType
+    from sqlalchemy import func
+    from datetime import date, timedelta
     
     # Get patient
     patient = db.query(Patient).filter(Patient.id == patient_id).first()
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
+    
+    # Step 1: Verify vitals have been recorded (within last 24 hours)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    
+    vitals_record = db.query(TriageVitals).filter(
+        TriageVitals.patient_id == patient_id,
+        func.date(TriageVitals.recorded_at) >= yesterday
+    ).order_by(TriageVitals.recorded_at.desc()).first()
+    
+    if not vitals_record:
+        # Vitals not recorded, redirect back with error
+        return RedirectResponse(
+            url=f"/patients/{patient_id}/triage?error=Vitals must be recorded before check-in. Please record vital signs first.",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Step 2: Verify payment has been made (for cash patients only)
+    if is_cash_patient(db, patient_id):
+        payment_required = requires_payment_before_service(db, patient_id, ChargeType.CONSULTATION)
+        
+        if payment_required:
+            # Check if payment has been made (for today's consultation)
+            has_paid, charge, invoice = has_paid_for_service(
+                db, patient_id, ChargeType.CONSULTATION,
+                encounter_id=None,
+                check_today_only=True  # Check for today's payment only
+            )
+            
+            if not has_paid:
+                # Payment not made, redirect back with error
+                return RedirectResponse(
+                    url=f"/patients/{patient_id}/triage?error=Payment must be completed before check-in. Please process payment first.",
+                    status_code=status.HTTP_302_FOUND
+                )
     
     # Check if appointment already exists
     appointment = None
@@ -276,14 +323,36 @@ def view_queue_page(
     
     # Calculate wait times for today's queue
     queue_today_with_wait = []
+    from app.models.triage_models import TriageVitals
+    from app.services.triage_level_calculator import get_triage_level_priority
+    
     for appointment in queue_today:
         wait_time = appointment_crud.calculate_wait_time(appointment)
         wait_time_str = appointment_crud.format_wait_time(wait_time)
+        
+        # Get most recent vitals with triage level for this patient
+        latest_vitals = db.query(TriageVitals).filter(
+            TriageVitals.patient_id == appointment.patient_id
+        ).order_by(TriageVitals.recorded_at.desc()).first()
+        
+        triage_level = latest_vitals.triage_level if latest_vitals else None
+        triage_category = latest_vitals.triage_category if latest_vitals else None
+        triage_priority = get_triage_level_priority(triage_level)
+        
         queue_today_with_wait.append({
             "appointment": appointment,
             "wait_time": wait_time,
-            "wait_time_str": wait_time_str
+            "wait_time_str": wait_time_str,
+            "triage_level": triage_level,
+            "triage_category": triage_category,
+            "triage_priority": triage_priority
         })
+    
+    # Sort by triage priority first (P1 > P2 > P3), then by arrival time
+    queue_today_with_wait.sort(key=lambda x: (
+        x.get("triage_priority", 4),
+        x["appointment"].checked_in_at or x["appointment"].scheduled_date
+    ))
     
     # Calculate wait times for previous days' queues
     queue_previous_with_wait = []

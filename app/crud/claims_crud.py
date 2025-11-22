@@ -153,11 +153,24 @@ def update_claim_status(
     approved_amount: Optional[Decimal] = None,
     rejection_reason: Optional[str] = None
 ) -> Optional[NHISClaim]:
-    """Update claim status (e.g., after submission to NHIA)"""
+    """
+    Update claim status (e.g., after submission to NHIA).
+    Automatically updates invoice and OPD visit payment status based on claim status.
+    
+    Industry Standard Workflow:
+    - APPROVED: Invoice → PARTIALLY_PAID (if co-pay exists) or PENDING (awaiting payment)
+    - PAID: Invoice → PAID, OPD Visit → paid
+    - REJECTED: Invoice remains PENDING (patient may need to pay)
+    """
+    from app.models.billing_models import Invoice, InvoiceStatus, Payment
+    from app.models.billing_models import PaymentStatus
+    from app.crud import opd_crud
+    
     claim = db.query(NHISClaim).filter(NHISClaim.id == claim_id).first()
     if not claim:
         return None
     
+    old_status = claim.status
     claim.status = new_status.value
     
     if new_status == ClaimStatus.SUBMITTED:
@@ -166,10 +179,108 @@ def update_claim_status(
         claim.processed_at = datetime.now()
         if approved_amount:
             claim.approved_amount = approved_amount
+        
+        # Update invoice status when claim is approved
+        if claim.invoice_id:
+            invoice = db.query(Invoice).filter(Invoice.id == claim.invoice_id).first()
+            if invoice:
+                # If there's a co-pay, mark as partially paid
+                if claim.co_pay_amount and claim.co_pay_amount > Decimal('0.00'):
+                    # Co-pay exists: mark as partially paid (insurance portion approved, co-pay pending)
+                    invoice.status = InvoiceStatus.PARTIALLY_PAID
+                    # Update paid_amount to reflect approved insurance amount
+                    insurance_amount = approved_amount or claim.nhis_amount
+                    invoice.paid_amount = insurance_amount
+                    invoice.balance = invoice.total_amount - invoice.paid_amount
+                else:
+                    # No co-pay: keep as pending until payment is actually received
+                    # Don't mark as paid until claim status is PAID
+                    invoice.status = InvoiceStatus.PENDING
+                
+                db.commit()
+                db.refresh(invoice)
+    
+    elif new_status == ClaimStatus.PAID:
+        claim.processed_at = datetime.now()
+        if approved_amount:
+            claim.approved_amount = approved_amount
+        
+        # Update invoice status when claim is paid (payment received from insurer)
+        if claim.invoice_id:
+            invoice = db.query(Invoice).filter(Invoice.id == claim.invoice_id).first()
+            if invoice:
+                # Payment received from insurance
+                insurance_payment_amount = approved_amount or claim.nhis_amount
+                
+                # Update invoice paid amount
+                current_paid = invoice.paid_amount or Decimal('0.00')
+                new_paid = current_paid + insurance_payment_amount
+                invoice.paid_amount = new_paid
+                invoice.balance = invoice.total_amount - new_paid
+                
+                # Check if fully paid (including any co-pay that was already paid)
+                if invoice.balance <= Decimal('0.00'):
+                    invoice.status = InvoiceStatus.PAID
+                    invoice.paid_date = datetime.now()
+                elif invoice.paid_amount > Decimal('0.00'):
+                    invoice.status = InvoiceStatus.PARTIALLY_PAID
+                
+                db.commit()
+                db.refresh(invoice)
+                
+                # Create a payment record for the insurance payment
+                from app.crud import billing_crud
+                from app.schemas.billing_schemas import PaymentCreate
+                from app.models.billing_models import PaymentMethod
+                try:
+                    # Get system user or first admin for payment creation
+                    from app.models.user_models import User, Role
+                    admin_role = db.query(Role).filter(Role.name == "Admin").first()
+                    received_by_id = claim.created_by_id
+                    if admin_role:
+                        admin_user = db.query(User).filter(
+                            User.role_id == admin_role.id,
+                            User.is_active == True
+                        ).first()
+                        if admin_user:
+                            received_by_id = admin_user.id
+                    
+                    payment_create = PaymentCreate(
+                        invoice_id=invoice.id,
+                        patient_id=claim.patient_id,
+                        amount=insurance_payment_amount,
+                        payment_method=PaymentMethod.NHIS,
+                        transaction_reference=claim.claim_number,
+                        receipt_number=f"INS-{claim.claim_number}",
+                        notes=f"Insurance payment for claim {claim.claim_number}"
+                    )
+                    billing_crud.create_payment(db, payment_create, received_by_id)
+                except Exception as e:
+                    print(f"Warning: Could not create payment record for claim {claim.claim_number}: {e}")
+                
+                # Update OPD visit payment status if invoice is linked to an OPD visit
+                if invoice.opd_visit_id:
+                    opd_crud.sync_opd_visit_payment_status(db, invoice.opd_visit_id)
+    
     elif new_status == ClaimStatus.REJECTED:
         claim.processed_at = datetime.now()
         if rejection_reason:
             claim.rejection_reason = rejection_reason
+        
+        # Rejected claims: Invoice remains PENDING (patient may need to pay)
+        # Optionally, you could mark invoice with a note about rejection
+        if claim.invoice_id:
+            invoice = db.query(Invoice).filter(Invoice.id == claim.invoice_id).first()
+            if invoice:
+                # Keep invoice as PENDING - patient may need to pay out of pocket
+                invoice.status = InvoiceStatus.PENDING
+                # Optionally add a note
+                if invoice.notes:
+                    invoice.notes += f"\n[Claim {claim.claim_number} rejected: {rejection_reason or 'No reason provided'}]"
+                else:
+                    invoice.notes = f"Claim {claim.claim_number} rejected: {rejection_reason or 'No reason provided'}"
+                db.commit()
+                db.refresh(invoice)
     
     if response_data:
         claim.response_data = response_data

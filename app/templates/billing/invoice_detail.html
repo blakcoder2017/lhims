@@ -159,10 +159,14 @@
                                         <th>Discount</th>
                                         <th>Tax</th>
                                         <th>Total</th>
+                                        <th>Paid</th>
+                                        <th>Balance</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for charge in invoice.charges %}
+                                    {% set charge_paid = charge.charge_payments|sum(attribute='amount') if charge.charge_payments else 0 %}
+                                    {% set charge_balance = charge.total_amount - charge_paid %}
                                     <tr>
                                         <td>{{ charge.charge_type.value.replace('_', ' ').title() }}</td>
                                         <td>{{ charge.description }}</td>
@@ -171,6 +175,16 @@
                                         <td>GHS {{ "%.2f"|format(charge.discount) }}</td>
                                         <td>GHS {{ "%.2f"|format(charge.tax_amount) }}</td>
                                         <td><strong>GHS {{ "%.2f"|format(charge.total_amount) }}</strong></td>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if charge_paid >= charge.total_amount else 'info' if charge_paid > 0 else 'secondary' }}">
+                                                GHS {{ "%.2f"|format(charge_paid) }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{{ 'success' if charge_balance <= 0 else 'warning' }}">
+                                                GHS {{ "%.2f"|format(charge_balance) }}
+                                            </span>
+                                        </td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
@@ -315,9 +329,9 @@
 
     <!-- Payment Modal -->
     <div class="modal fade" id="paymentModal" tabindex="-1" role="dialog">
-        <div class="modal-dialog" role="document">
+        <div class="modal-dialog modal-lg" role="document">
             <div class="modal-content">
-                <form method="POST" action="{{ url_for('process_payment', invoice_id=invoice.id) }}">
+                <form method="POST" action="{{ url_for('process_payment', invoice_id=invoice.id) }}" id="paymentForm">
                     <div class="modal-header">
                         <h5 class="modal-title">Process Payment</h5>
                         <button type="button" class="close" data-dismiss="modal">
@@ -326,14 +340,83 @@
                     </div>
                     <div class="modal-body">
                         <div class="alert alert-info">
-                            <strong>Balance Due:</strong> GHS {{ "%.2f"|format(invoice.balance) }}
+                            <strong>Total Balance Due:</strong> GHS {{ "%.2f"|format(invoice.balance) }}
                         </div>
+                        
+                        <!-- Charge Selection -->
                         <div class="form-group">
-                            <label>Amount (GHS)</label>
-                            <input type="number" name="amount" class="form-control" step="0.01" min="0.01" max="{{ invoice.balance }}" value="{{ invoice.balance }}" required>
+                            <label><strong>Select Charges to Pay (or leave unchecked to pay full invoice balance):</strong></label>
+                            <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                                <table class="table table-sm table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 40px;">
+                                                <input type="checkbox" id="selectAllCharges" onchange="toggleAllCharges()">
+                                            </th>
+                                            <th>Description</th>
+                                            <th>Total</th>
+                                            <th>Paid</th>
+                                            <th>Balance</th>
+                                            <th>Amount to Pay</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for charge in invoice.charges %}
+                                        {% set charge_paid = charge.charge_payments|sum(attribute='amount') if charge.charge_payments else 0 %}
+                                        {% set charge_balance = charge.total_amount - charge_paid %}
+                                        {% if charge_balance > 0 %}
+                                        <tr>
+                                            <td>
+                                                <input type="checkbox" 
+                                                       name="charge_ids" 
+                                                       value="{{ charge.id }}" 
+                                                       class="charge-checkbox"
+                                                       onchange="updatePaymentAmount()"
+                                                       data-balance="{{ charge_balance }}">
+                                            </td>
+                                            <td>{{ charge.description }}</td>
+                                            <td>GHS {{ "%.2f"|format(charge.total_amount) }}</td>
+                                            <td>GHS {{ "%.2f"|format(charge_paid) }}</td>
+                                            <td><strong>GHS {{ "%.2f"|format(charge_balance) }}</strong></td>
+                                            <td>
+                                                <input type="number" 
+                                                       name="charge_amount_{{ charge.id }}" 
+                                                       class="form-control form-control-sm charge-amount" 
+                                                       step="0.01" 
+                                                       min="0.01" 
+                                                       max="{{ charge_balance }}" 
+                                                       value="{{ charge_balance }}"
+                                                       disabled
+                                                       onchange="updatePaymentAmount()">
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <small class="form-text text-muted">
+                                <i class="fas fa-info-circle"></i> Check charges to pay individually, or leave unchecked to pay the full invoice balance.
+                            </small>
                         </div>
+                        
                         <div class="form-group">
-                            <label>Payment Method</label>
+                            <label>Total Payment Amount (GHS) <span class="text-danger">*</span></label>
+                            <input type="number" 
+                                   name="amount" 
+                                   id="totalPaymentAmount"
+                                   class="form-control" 
+                                   step="0.01" 
+                                   min="0.01" 
+                                   max="{{ invoice.balance }}" 
+                                   value="{{ invoice.balance }}" 
+                                   required
+                                   readonly>
+                            <small class="form-text text-muted">This amount is calculated from selected charges. Adjust individual charge amounts above.</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Payment Method <span class="text-danger">*</span></label>
                             <select name="payment_method" class="form-control" required>
                                 <option value="cash">Cash</option>
                                 <option value="mobile_money">Mobile Money</option>
@@ -365,6 +448,56 @@
             </div>
         </div>
     </div>
+
+    <script>
+        function toggleAllCharges() {
+            const selectAll = document.getElementById('selectAllCharges');
+            const checkboxes = document.querySelectorAll('.charge-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = selectAll.checked;
+                const amountInput = document.querySelector(`input[name="charge_amount_${cb.value}"]`);
+                if (amountInput) {
+                    amountInput.disabled = !selectAll.checked;
+                    if (!selectAll.checked) {
+                        amountInput.value = amountInput.getAttribute('max');
+                    }
+                }
+            });
+            updatePaymentAmount();
+        }
+
+        function updatePaymentAmount() {
+            const checkboxes = document.querySelectorAll('.charge-checkbox:checked');
+            let total = 0;
+            
+            checkboxes.forEach(cb => {
+                const amountInput = document.querySelector(`input[name="charge_amount_${cb.value}"]`);
+                if (amountInput && amountInput.value) {
+                    total += parseFloat(amountInput.value) || 0;
+                }
+            });
+            
+            // If no charges selected, use full invoice balance
+            if (checkboxes.length === 0) {
+                total = {{ invoice.balance }};
+            }
+            
+            document.getElementById('totalPaymentAmount').value = total.toFixed(2);
+        }
+
+        // Enable/disable amount inputs based on checkbox state
+        document.querySelectorAll('.charge-checkbox').forEach(cb => {
+            cb.addEventListener('change', function() {
+                const amountInput = document.querySelector(`input[name="charge_amount_${this.value}"]`);
+                if (amountInput) {
+                    amountInput.disabled = !this.checked;
+                    if (!this.checked) {
+                        amountInput.value = amountInput.getAttribute('max');
+                    }
+                }
+            });
+        });
+    </script>
 
 {% endblock %}
 

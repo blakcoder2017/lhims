@@ -149,10 +149,15 @@ def pay_consultation_page(
     encounter_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Front Office", "Finance", "Admin"])),
-    return_to: Optional[str] = Query(None)
+    return_to: Optional[str] = Query(None),
+    new_visit: Optional[str] = Query(None)
 ):
     """Payment page for consultation fee."""
     from datetime import datetime
+    from app.models.encounter_models import Encounter, EncounterStatus
+    from app.models.billing_models import Charge, Invoice
+    from sqlalchemy import func
+    from datetime import date
     
     patient = patient_crud.get_patient(db, patient_id)
     if not patient:
@@ -164,30 +169,84 @@ def pay_consultation_page(
         redirect_url = f"/patients/{patient_id}/encounters/new"
         if return_to:
             redirect_url = f"/patients/{patient_id}/{return_to}"
+        if new_visit:
+            redirect_url += f"?new_visit={new_visit}"
         return RedirectResponse(url=redirect_url, status_code=302)
     
-    # Check if already paid
-    payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
-        db, patient_id, ChargeType.CONSULTATION, encounter_id=encounter_id
-    )
+    # Check if this is a new visit (explicit or detected)
+    is_new_visit_flag = new_visit and new_visit.lower() == 'true'
     
-    if payment_paid:
-        # Already paid, redirect back
-        redirect_url = f"/patients/{patient_id}/encounters/new"
-        if return_to:
-            redirect_url = f"/patients/{patient_id}/{return_to}"
-        return RedirectResponse(url=redirect_url, status_code=302)
+    # If not explicitly a new visit, check if there's a completed encounter today
+    if not is_new_visit_flag:
+        today = date.today()
+        completed_encounters_today = db.query(Encounter).filter(
+            Encounter.patient_id == patient_id,
+            Encounter.status == EncounterStatus.COMPLETED.value,
+            Encounter.is_active == True,
+            func.date(Encounter.encounter_date) == today
+        ).count()
+        
+        if completed_encounters_today > 0:
+            is_new_visit_flag = True
     
-    # Get or create charge
-    if not charge:
-        service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
-        charge, invoice = get_or_create_service_charge(
-            db, patient_id, ChargeType.CONSULTATION,
-            "Consultation Fee (Covers Vitals & Initial Encounter)",
-            service_price,
-            encounter_id=encounter_id,
-            created_by_id=current_user.id
+    # For new visits, we need to find or create a NEW charge (not use old paid charges)
+    if is_new_visit_flag:
+        # Check for existing UNPAID charges for this new visit
+        # Don't reuse old paid charges - each visit needs its own charge
+        today = date.today()
+        existing_charge = db.query(Charge).join(Invoice).filter(
+            Invoice.patient_id == patient_id,
+            Charge.charge_type == ChargeType.CONSULTATION,
+            Charge.encounter_id.is_(None),
+            Invoice.is_active == True,
+            Invoice.balance > Decimal('0'),
+            Invoice.status != InvoiceStatus.PAID,
+            func.date(Charge.created_at) == today
+        ).order_by(Charge.created_at.desc()).first()
+        
+        if existing_charge:
+            # Use existing unpaid charge for this visit
+            charge = existing_charge
+            invoice = existing_charge.invoice
+            payment_paid = False  # Unpaid charge requires payment
+        else:
+            # Create a new charge for this new visit
+            service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
+            charge, invoice = get_or_create_service_charge(
+                db, patient_id, ChargeType.CONSULTATION,
+                "Consultation Fee (Covers Vitals & Initial Encounter)",
+                service_price,
+                encounter_id=encounter_id,
+                opd_visit_id=opd_visit_id,
+                created_by_id=current_user.id
+            )
+            payment_paid = False  # New charge requires payment
+    else:
+        # Not a new visit - check if already paid
+        payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+            db, patient_id, ChargeType.CONSULTATION, encounter_id=encounter_id
         )
+        
+        if payment_paid:
+            # Already paid, redirect back
+            redirect_url = f"/patients/{patient_id}/encounters/new"
+            if return_to:
+                redirect_url = f"/patients/{patient_id}/{return_to}"
+            if new_visit:
+                redirect_url += f"?new_visit={new_visit}"
+            return RedirectResponse(url=redirect_url, status_code=302)
+        
+        # Get or create charge
+        if not charge:
+            service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
+            charge, invoice = get_or_create_service_charge(
+                db, patient_id, ChargeType.CONSULTATION,
+                "Consultation Fee (Covers Vitals & Initial Encounter)",
+                service_price,
+                encounter_id=encounter_id,
+                opd_visit_id=opd_visit_id,
+                created_by_id=current_user.id
+            )
     
     context = {
         "request": request,
@@ -199,7 +258,8 @@ def pay_consultation_page(
         "invoice": invoice,
         "service_type": "consultation",
         "encounter_id": encounter_id,
-        "return_to": return_to or "encounters/new"
+        "return_to": return_to or "encounters/new",
+        "new_visit": new_visit  # Preserve new_visit parameter
     }
     
     return templates.TemplateResponse("billing/pay_service.html", context)
@@ -214,10 +274,30 @@ def process_consultation_payment(
     return_to: Optional[str] = Form(None),
     invoice_id: int = Form(...),
     amount: str = Form(...),
-    encounter_id: Optional[int] = Form(None)
+    encounter_id: Optional[int] = Form(None),
+    new_visit: Optional[str] = Form(None)
 ):
     """Process payment for consultation fee."""
+    from app.models.billing_models import Invoice
+    from app.crud import opd_crud
+    
     amount_decimal = Decimal(amount)
+    
+    # Validate invoice belongs to patient
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.patient_id != patient_id:
+        raise HTTPException(status_code=400, detail="Invoice does not belong to this patient")
+    
+    # If patient has an active OPD visit, ensure invoice is linked to it
+    active_opd_visit = opd_crud.get_active_opd_visit_by_patient(db, patient_id)
+    if active_opd_visit:
+        if invoice.opd_visit_id != active_opd_visit.id:
+            # Invoice is not linked to the active OPD visit - link it now
+            invoice.opd_visit_id = active_opd_visit.id
+            db.commit()
+            db.refresh(invoice)
     
     # Create payment
     payment_data = PaymentCreate(
@@ -231,13 +311,160 @@ def process_consultation_payment(
     
     payment = billing_crud.create_payment(db, payment_data, current_user.id)
     
+    # Ensure OPD visit payment status is synced immediately after payment
+    # This is critical for encounter creation validation
+    if invoice.opd_visit_id:
+        from app.crud import opd_crud
+        opd_crud.sync_opd_visit_payment_status(db, invoice.opd_visit_id)
+    elif active_opd_visit:
+        # If we just linked the invoice, sync now
+        opd_crud.sync_opd_visit_payment_status(db, active_opd_visit.id)
+    
+    # Create receipt for the payment
+    try:
+        receipt = billing_crud.create_receipt(db, payment.id, current_user.id)
+        receipt_number = receipt.receipt_number
+    except Exception as e:
+        # Log error but don't fail the payment
+        print(f"Error creating receipt for payment {payment.id}: {e}")
+        receipt_number = payment.receipt_number or "N/A"
+    
     # Determine redirect based on return_to parameter
     # If coming from registration, go to triage; otherwise go to encounter creation
-    redirect_url = f"/patients/{patient_id}/encounters/new?status=payment_success"
+    # Preserve new_visit parameter if it exists
+    new_visit_param = ""
+    if new_visit:
+        new_visit_param = f"&new_visit={new_visit}"
+    
+    redirect_url = f"/patients/{patient_id}/encounters/new?status=payment_success&receipt={receipt_number}{new_visit_param}"
     if return_to:
-        redirect_url = f"/patients/{patient_id}/{return_to}?status=payment_success"
+        redirect_url = f"/patients/{patient_id}/{return_to}?status=payment_success&receipt={receipt_number}{new_visit_param}"
     if encounter_id:
-        redirect_url = f"/encounters/{encounter_id}?status=payment_success"
+        redirect_url = f"/encounters/{encounter_id}?status=payment_success&receipt={receipt_number}{new_visit_param}"
+    
+    return RedirectResponse(url=redirect_url, status_code=302)
+
+
+@router.get("/patients/{patient_id}/pay/radiology", name="pay_radiology")
+def pay_radiology_page(
+    request: Request,
+    patient_id: int,
+    order_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Front Office", "Finance", "Admin", "Radiology Staff"])),
+    return_to: Optional[str] = Query(None)
+):
+    """Payment page for radiology fee."""
+    from app.models.encounter_models import RadiologyOrder, Encounter
+    from app.services.charge_automation import get_radiology_price
+    
+    patient = patient_crud.get_patient(db, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    # Get radiology order
+    radiology_order = db.query(RadiologyOrder).filter(RadiologyOrder.id == order_id).first()
+    if not radiology_order:
+        raise HTTPException(status_code=404, detail="Radiology order not found")
+    
+    # Verify patient matches and get encounter
+    encounter = None
+    encounter_id = None
+    
+    # For walk-in orders, check patient_id directly
+    if radiology_order.patient_id:
+        if radiology_order.patient_id != patient_id:
+            raise HTTPException(status_code=400, detail="Radiology order does not belong to this patient")
+    
+    # For encounter-based orders, verify through encounter
+    if radiology_order.encounter_id:
+        encounter = db.query(Encounter).filter(Encounter.id == radiology_order.encounter_id).first()
+        if encounter:
+            encounter_id = encounter.id
+            if encounter.patient_id != patient_id:
+                raise HTTPException(status_code=400, detail="Radiology order encounter does not belong to this patient")
+    
+    # Check if payment is required
+    if not is_cash_patient(db, patient_id):
+        # Not a cash patient, redirect back
+        redirect_url = f"/radiology/orders/{order_id}"
+        if return_to:
+            redirect_url = f"/{return_to}"
+        return RedirectResponse(url=redirect_url, status_code=302)
+    
+    # Check if already paid
+    payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+        db, patient_id, ChargeType.RADIOLOGY,
+        encounter_id=encounter_id,
+        radiology_order_id=order_id
+    )
+    
+    if payment_paid:
+        # Already paid, redirect back
+        redirect_url = f"/radiology/orders/{order_id}"
+        if return_to:
+            redirect_url = f"/{return_to}"
+        return RedirectResponse(url=redirect_url, status_code=302)
+    
+    # Get or create charge
+    if not charge:
+        # Calculate radiology price
+        radiology_price = get_radiology_price(db, radiology_order)
+        
+        charge, invoice = get_or_create_service_charge(
+            db, patient_id, ChargeType.RADIOLOGY,
+            f"Radiology: {radiology_order.study_type}",
+            radiology_price,
+            encounter_id=encounter_id,
+            radiology_order_id=order_id,
+            created_by_id=current_user.id
+        )
+    
+    context = {
+        "request": request,
+        "title": "Pay Radiology Fee",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "patient": patient,
+        "radiology_order": radiology_order,
+        "charge": charge,
+        "invoice": invoice,
+        "service_type": "radiology",
+        "return_to": return_to or f"radiology/orders/{order_id}"
+    }
+    
+    return templates.TemplateResponse("billing/pay_service.html", context)
+
+
+@router.post("/patients/{patient_id}/pay/radiology", name="process_radiology_payment")
+def process_radiology_payment(
+    request: Request,
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Front Office", "Finance", "Admin", "Radiology Staff"])),
+    return_to: Optional[str] = Form(None),
+    order_id: Optional[int] = Form(None),
+    invoice_id: int = Form(...),
+    amount: str = Form(...)
+):
+    """Process payment for radiology fee."""
+    amount_decimal = Decimal(amount)
+    
+    # Create payment
+    payment_data = PaymentCreate(
+        invoice_id=invoice_id,
+        patient_id=patient_id,
+        amount=amount_decimal,
+        payment_method="cash",
+        status=PaymentStatus.COMPLETED,
+        notes="Radiology fee payment"
+    )
+    
+    payment = billing_crud.create_payment(db, payment_data, current_user.id)
+    
+    redirect_url = f"/radiology/orders/{order_id}?status=payment_success" if order_id else f"/patients/{patient_id}?status=payment_success"
+    if return_to:
+        redirect_url = f"/{return_to}?status=payment_success"
     
     return RedirectResponse(url=redirect_url, status_code=302)
 

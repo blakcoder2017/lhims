@@ -104,6 +104,8 @@ def create_invoice(db: Session, invoice: InvoiceCreate, created_by_id: int) -> I
         patient_id=invoice.patient_id,
         encounter_id=invoice.encounter_id,
         appointment_id=invoice.appointment_id,
+        opd_visit_id=invoice.opd_visit_id,  # Link to OPD visit
+        admission_id=invoice.admission_id,  # Link to IPD admission
         created_by_id=created_by_id,
         payment_mechanism=invoice.payment_mechanism,
         nhis_number=invoice.nhis_number,
@@ -263,6 +265,8 @@ def add_charge_to_invoice(db: Session, invoice_id: int, charge: ChargeCreate) ->
         tax_amount=tax_amount,
         total_amount=total_amount,
         encounter_id=charge.encounter_id,
+        opd_visit_id=db_invoice.opd_visit_id,  # Link to OPD visit from invoice
+        admission_id=db_invoice.admission_id,  # Link to IPD admission from invoice
         lab_order_id=charge.lab_order_id,
         radiology_order_id=charge.radiology_order_id,
         prescription_id=charge.prescription_id
@@ -366,20 +370,80 @@ def create_payment(db: Session, payment: PaymentCreate, received_by_id: int) -> 
     )
     db.add(db_payment)
     
-    # Update invoice
-    db_invoice.paid_amount += payment.amount
-    db_invoice.balance = db_invoice.total_amount - db_invoice.paid_amount
+    # Update invoice - ensure we're working with Decimal types
+    from decimal import Decimal
+    payment_amount = Decimal(str(payment.amount))
+    
+    # Get current values as Decimal
+    current_paid = Decimal(str(db_invoice.paid_amount or 0))
+    total_amount = Decimal(str(db_invoice.total_amount or 0))
+    
+    # Update paid amount
+    new_paid_amount = current_paid + payment_amount
+    db_invoice.paid_amount = new_paid_amount
+    
+    # Recalculate balance
+    new_balance = total_amount - new_paid_amount
+    db_invoice.balance = new_balance
     
     # Update invoice status
-    if db_invoice.balance <= 0:
+    if new_balance <= Decimal('0.00'):
         db_invoice.status = InvoiceStatus.PAID
         db_invoice.paid_date = datetime.now()
-    elif db_invoice.paid_amount > 0:
+    elif new_paid_amount > Decimal('0.00'):
         db_invoice.status = InvoiceStatus.PARTIALLY_PAID
     
     db.commit()
+    db.refresh(db_invoice)
     db.refresh(db_payment)
+    
+    # Update OPD visit payment status if invoice is linked to an OPD visit
+    if db_invoice.opd_visit_id:
+        from app.crud import opd_crud
+        # Sync payment status (this will check if invoice is fully paid)
+        opd_crud.sync_opd_visit_payment_status(db, db_invoice.opd_visit_id)
+    
     return db_payment
+
+
+def create_receipt(db: Session, payment_id: int, generated_by_id: int) -> "Receipt":
+    """
+    Create a receipt for a payment.
+    Returns the created receipt.
+    """
+    from app.models.billing_models import Receipt, Payment
+    
+    # Get payment
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise ValueError("Payment not found")
+    
+    # Check if receipt already exists
+    existing_receipt = db.query(Receipt).filter(
+        Receipt.payment_id == payment_id,
+        Receipt.is_active == True
+    ).first()
+    
+    if existing_receipt:
+        return existing_receipt
+    
+    # Create receipt
+    receipt = Receipt(
+        payment_id=payment.id,
+        patient_id=payment.patient_id,
+        invoice_id=payment.invoice_id,
+        generated_by_id=generated_by_id,
+        receipt_number=payment.receipt_number or generate_receipt_number(db),
+        amount=payment.amount,
+        payment_method=payment.payment_method.value if hasattr(payment.payment_method, 'value') else str(payment.payment_method),
+        currency="GHS"
+    )
+    
+    db.add(receipt)
+    db.commit()
+    db.refresh(receipt)
+    
+    return receipt
 
 
 def get_payment(db: Session, payment_id: int) -> Optional[Payment]:

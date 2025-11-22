@@ -103,12 +103,14 @@
 
         <!-- Receipt Details -->
         <div class="section">
-            <p><span class="bold">Receipt #:</span> {{ payment.payment_number }}</p>
+            {% if receipt %}
+            <p><span class="bold">Receipt #:</span> {{ receipt.receipt_number }}</p>
+            {% else %}
+            <p><span class="bold">Receipt #:</span> {{ payment.receipt_number or payment.payment_number }}</p>
+            {% endif %}
             <p><span class="bold">Date:</span> {{ payment.payment_date.strftime('%Y-%m-%d %H:%M') }}</p>
             <p><span class="bold">Invoice #:</span> {{ invoice.invoice_number }}</p>
-            {% if payment.receipt_number %}
-            <p><span class="bold">Ref:</span> {{ payment.receipt_number }}</p>
-            {% endif %}
+            <p><span class="bold">Payment #:</span> {{ payment.payment_number }}</p>
         </div>
 
         <div class="divider"></div>

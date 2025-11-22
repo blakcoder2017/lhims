@@ -324,6 +324,155 @@ def process_selected_invoices_payment(
     )
 
 
+@router.get("/billing/invoices/create", name="create_invoice_page")
+def create_invoice_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance", "Front Office"])),
+    patient_id: Optional[int] = Query(None),
+    encounter_id: Optional[int] = Query(None)
+):
+    """
+    Page for creating a new invoice.
+    """
+    from app.crud import patient_crud, encounter_crud, service_pricing_crud
+    
+    patient = None
+    encounter = None
+    
+    if patient_id:
+        patient = patient_crud.get_patient(db, patient_id)
+    if encounter_id:
+        encounter = encounter_crud.get_encounter(db, encounter_id)
+        if encounter and not patient:
+            patient = encounter.patient
+    
+    # Load all active service pricing for service selection
+    all_services = service_pricing_crud.get_all_service_pricing(db, skip=0, limit=1000, include_inactive=False)
+    
+    context = {
+        "request": request,
+        "title": "Create Invoice",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "patient": patient,
+        "encounter": encounter,
+        "charge_types": [ct.value for ct in ChargeType],
+        "payment_methods": [pm.value for pm in PaymentMethod],
+        "services": all_services  # All services for dropdown
+    }
+    return templates.TemplateResponse("billing/create_invoice.html", context)
+
+
+@router.post("/billing/invoices/create", name="create_invoice", status_code=status.HTTP_302_FOUND)
+def create_invoice(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance", "Front Office"])),
+    patient_id: int = Form(...),
+    encounter_id: Optional[str] = Form(None),
+    appointment_id: Optional[str] = Form(None),
+    payment_mechanism: Optional[str] = Form(None),
+    nhis_number: Optional[str] = Form(None),
+    insurance_provider: Optional[str] = Form(None),
+    insurance_policy_number: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    # Charge fields (optional - if provided, a charge will be created)
+    charge_type: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    quantity: Optional[str] = Form("1"),
+    unit_price: Optional[str] = Form(None),
+    discount: Optional[str] = Form("0.00"),
+    tax_rate: Optional[str] = Form("0.00")
+):
+    """
+    Create a new invoice with optional initial charge.
+    """
+    from app.schemas.billing_schemas import InvoiceCreate, ChargeCreate
+    
+    # Convert empty strings to None for optional integer fields
+    encounter_id_int = None
+    if encounter_id and encounter_id.strip():
+        try:
+            encounter_id_int = int(encounter_id)
+        except (ValueError, TypeError):
+            encounter_id_int = None
+    
+    appointment_id_int = None
+    if appointment_id and appointment_id.strip():
+        try:
+            appointment_id_int = int(appointment_id)
+        except (ValueError, TypeError):
+            appointment_id_int = None
+    
+    # Prepare charges list
+    charges = []
+    
+    # If charge fields are provided, create a charge
+    # Check if charge fields are provided (not None and not empty strings)
+    has_charge_type = charge_type and charge_type.strip()
+    has_description = description and description.strip()
+    has_unit_price = unit_price and unit_price.strip()
+    
+    # Debug logging (can be removed later)
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Charge fields received - charge_type: {charge_type}, description: {description}, unit_price: {unit_price}")
+    logger.info(f"Has charge fields - charge_type: {has_charge_type}, description: {has_description}, unit_price: {has_unit_price}")
+    
+    if has_charge_type and has_description and has_unit_price:
+        try:
+            charge_type_enum = ChargeType(charge_type.strip())
+            quantity_int = int(quantity.strip()) if quantity and quantity.strip() else 1
+            unit_price_dec = Decimal(unit_price.strip())
+            discount_dec = Decimal(discount.strip()) if discount and discount.strip() else Decimal('0.00')
+            tax_rate_dec = Decimal(tax_rate.strip()) if tax_rate and tax_rate.strip() else Decimal('0.00')
+            
+            logger.info(f"Creating charge - type: {charge_type_enum}, description: {description.strip()}, unit_price: {unit_price_dec}, quantity: {quantity_int}")
+            
+            if unit_price_dec > 0:
+                charge_data = ChargeCreate(
+                    charge_type=charge_type_enum,
+                    description=description.strip(),
+                    quantity=quantity_int,
+                    unit_price=unit_price_dec,
+                    discount=discount_dec,
+                    tax_rate=tax_rate_dec,
+                    encounter_id=encounter_id_int
+                )
+                charges.append(charge_data)
+                logger.info(f"Charge added to charges list. Total charges: {len(charges)}")
+            else:
+                logger.warning(f"Unit price is 0 or negative: {unit_price_dec}")
+        except (ValueError, TypeError) as e:
+            # If charge creation fails, log error but continue without charge
+            logger.error(f"Error creating charge: {e}", exc_info=True)
+            pass
+    else:
+        logger.info("Charge fields not provided or incomplete - creating invoice without charge")
+    
+    invoice_data = InvoiceCreate(
+        patient_id=patient_id,
+        encounter_id=encounter_id_int,
+        appointment_id=appointment_id_int,
+        payment_mechanism=PaymentMethod(payment_mechanism) if payment_mechanism else None,
+        nhis_number=nhis_number,
+        insurance_provider=insurance_provider,
+        insurance_policy_number=insurance_policy_number,
+        notes=notes,
+        charges=charges
+    )
+    
+    logger.info(f"Creating invoice with {len(charges)} charge(s)")
+    invoice = billing_crud.create_invoice(db, invoice_data, current_user.id)
+    logger.info(f"Invoice created: {invoice.invoice_number}, Total: {invoice.total_amount}, Charges: {len(invoice.charges) if hasattr(invoice, 'charges') else 'N/A'}")
+    
+    return RedirectResponse(
+        url=f"/billing/invoices/{invoice.id}",
+        status_code=status.HTTP_302_FOUND
+    )
+
+
 @router.get("/billing/invoices/{invoice_id}", name="view_invoice")
 def view_invoice(
     request: Request,
@@ -334,7 +483,13 @@ def view_invoice(
     """
     View a specific invoice.
     """
-    invoice = billing_crud.get_invoice(db, invoice_id)
+    from app.models.billing_models import ChargePayment, Charge
+    invoice = db.query(Invoice).options(
+        joinedload(Invoice.charges).joinedload(Charge.charge_payments),
+        joinedload(Invoice.patient),
+        joinedload(Invoice.payments)
+    ).filter(Invoice.id == invoice_id).first()
+    
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     
@@ -347,81 +502,6 @@ def view_invoice(
         "patient": invoice.patient
     }
     return templates.TemplateResponse("billing/invoice_detail.html", context)
-
-
-@router.get("/billing/invoices/create", name="create_invoice_page")
-def create_invoice_page(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Finance", "Front Office"])),
-    patient_id: Optional[int] = Query(None),
-    encounter_id: Optional[int] = Query(None)
-):
-    """
-    Page for creating a new invoice.
-    """
-    from app.crud import patient_crud, encounter_crud
-    
-    patient = None
-    encounter = None
-    
-    if patient_id:
-        patient = patient_crud.get_patient(db, patient_id)
-    if encounter_id:
-        encounter = encounter_crud.get_encounter(db, encounter_id)
-        if encounter and not patient:
-            patient = encounter.patient
-    
-    context = {
-        "request": request,
-        "title": "Create Invoice",
-        "current_user": current_user,
-        "user_role": current_user.role.name,
-        "patient": patient,
-        "encounter": encounter,
-        "charge_types": [ct.value for ct in ChargeType],
-        "payment_methods": [pm.value for pm in PaymentMethod]
-    }
-    return templates.TemplateResponse("billing/create_invoice.html", context)
-
-
-@router.post("/billing/invoices/create", name="create_invoice", status_code=status.HTTP_302_FOUND)
-def create_invoice(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Finance", "Front Office"])),
-    patient_id: int = Form(...),
-    encounter_id: Optional[int] = Form(None),
-    appointment_id: Optional[int] = Form(None),
-    payment_mechanism: Optional[str] = Form(None),
-    nhis_number: Optional[str] = Form(None),
-    insurance_provider: Optional[str] = Form(None),
-    insurance_policy_number: Optional[str] = Form(None),
-    notes: Optional[str] = Form(None)
-):
-    """
-    Create a new invoice.
-    """
-    from app.schemas.billing_schemas import InvoiceCreate
-    
-    invoice_data = InvoiceCreate(
-        patient_id=patient_id,
-        encounter_id=encounter_id,
-        appointment_id=appointment_id,
-        payment_mechanism=PaymentMethod(payment_mechanism) if payment_mechanism else None,
-        nhis_number=nhis_number,
-        insurance_provider=insurance_provider,
-        insurance_policy_number=insurance_policy_number,
-        notes=notes,
-        charges=[]  # Charges will be added separately via add_charge endpoint
-    )
-    
-    invoice = billing_crud.create_invoice(db, invoice_data, current_user.id)
-    
-    return RedirectResponse(
-        url=f"/billing/invoices/{invoice.id}",
-        status_code=status.HTTP_302_FOUND
-    )
 
 
 @router.post("/billing/invoices/{invoice_id}/add-charge", name="add_charge", status_code=status.HTTP_302_FOUND)
@@ -469,7 +549,7 @@ def add_charge(
 
 # Payment Routes
 @router.post("/billing/invoices/{invoice_id}/payment", name="process_payment", status_code=status.HTTP_302_FOUND)
-def process_payment(
+async def process_payment(
     request: Request,
     invoice_id: int,
     db: Session = Depends(get_db),
@@ -482,15 +562,24 @@ def process_payment(
 ):
     """
     Process a payment for an invoice.
+    Supports paying individual charges or full invoice balance.
     """
+    from app.models.billing_models import Charge, ChargePayment
+    
     invoice = billing_crud.get_invoice(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     
+    payment_amount = Decimal(amount)
+    
+    # Get form data to check for charge selections
+    form_data = await request.form()
+    charge_ids = form_data.getlist("charge_ids")  # Get list of selected charge IDs
+    
     # Receipt number will be auto-generated if not provided
     payment_data = PaymentCreate(
         invoice_id=invoice_id,
-        amount=Decimal(amount),
+        amount=payment_amount,
         payment_method=PaymentMethod(payment_method),
         transaction_reference=transaction_reference,
         receipt_number=receipt_number if receipt_number else None,  # Auto-generated if None
@@ -498,6 +587,52 @@ def process_payment(
     )
     
     payment = billing_crud.create_payment(db, payment_data, current_user.id)
+    
+    # If specific charges were selected, allocate payment to those charges
+    if charge_ids:
+        remaining_amount = payment_amount
+        
+        for charge_id_str in charge_ids:
+            try:
+                charge_id = int(charge_id_str)
+            except (ValueError, TypeError):
+                continue
+                
+            charge_amount_key = f"charge_amount_{charge_id}"
+            if charge_amount_key in form_data:
+                try:
+                    charge_amount = Decimal(str(form_data[charge_amount_key]))
+                except (ValueError, TypeError):
+                    continue
+                
+                # Verify charge exists and belongs to invoice
+                charge = db.query(Charge).filter(
+                    Charge.id == charge_id,
+                    Charge.invoice_id == invoice_id
+                ).first()
+                
+                if charge and charge_amount > 0 and remaining_amount >= charge_amount:
+                    # Calculate how much has already been paid for this charge
+                    existing_payments = db.query(ChargePayment).filter(
+                        ChargePayment.charge_id == charge_id,
+                        ChargePayment.is_active == True
+                    ).all()
+                    already_paid = sum(cp.amount for cp in existing_payments)
+                    charge_balance = charge.total_amount - already_paid
+                    
+                    # Only allocate up to the charge balance
+                    allocation_amount = min(charge_amount, charge_balance, remaining_amount)
+                    
+                    if allocation_amount > 0:
+                        charge_payment = ChargePayment(
+                            payment_id=payment.id,
+                            charge_id=charge_id,
+                            amount=allocation_amount
+                        )
+                        db.add(charge_payment)
+                        remaining_amount -= allocation_amount
+        
+        db.commit()
     
     # Redirect to receipt page after payment
     return RedirectResponse(
@@ -532,14 +667,66 @@ def print_receipt(
     # Get hospital settings for receipt header
     hospital_settings = hospital_settings_crud.get_hospital_settings(db)
     
+    # Get receipt if exists
+    from app.models.billing_models import Receipt
+    receipt = db.query(Receipt).filter(
+        Receipt.payment_id == payment_id,
+        Receipt.is_active == True
+    ).first()
+    
     context = {
         "request": request,
         "title": f"Receipt - {payment.payment_number}",
         "current_user": current_user,
         "user_role": current_user.role.name,
         "payment": payment,
+        "receipt": receipt,
         "invoice": invoice,
         "patient": invoice.patient,
+        "hospital_settings": hospital_settings
+    }
+    return templates.TemplateResponse("billing/receipt.html", context)
+
+
+@router.get("/billing/receipts/{receipt_number}", name="view_receipt")
+def view_receipt(
+    request: Request,
+    receipt_number: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """View receipt by receipt number"""
+    from app.crud import hospital_settings_crud
+    from app.models.billing_models import Receipt
+    
+    receipt = db.query(Receipt).options(
+        joinedload(Receipt.payment).joinedload(Payment.invoice).joinedload(Invoice.patient),
+        joinedload(Receipt.patient),
+        joinedload(Receipt.generated_by)
+    ).filter(
+        Receipt.receipt_number == receipt_number,
+        Receipt.is_active == True
+    ).first()
+    
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    
+    payment = receipt.payment
+    invoice = receipt.invoice
+    patient = receipt.patient
+    
+    # Get hospital settings for receipt header
+    hospital_settings = hospital_settings_crud.get_hospital_settings(db)
+    
+    context = {
+        "request": request,
+        "title": f"Receipt - {receipt_number}",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "payment": payment,
+        "receipt": receipt,
+        "invoice": invoice,
+        "patient": patient,
         "hospital_settings": hospital_settings
     }
     return templates.TemplateResponse("billing/receipt.html", context)

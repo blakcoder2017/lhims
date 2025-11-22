@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-flask mr-2"></i>Lab Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">Lab Report</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters & Export</h3>
+                        <div class="card-tools">
+                            <button onclick="window.print()" class="btn btn-sm btn-info mr-2">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                            {% set base_url = url_for('lab_report') %}
+                            {% set qs = [] %}
+                            {% if start_date %}{% set qs = qs + ['start_date=' ~ start_date] %}{% endif %}
+                            {% if end_date %}{% set qs = qs + ['end_date=' ~ end_date] %}{% endif %}
+                            {% set query_str = qs|join('&') %}
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=pdf" class="btn btn-sm btn-danger mr-2">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </a>
+                            <a href="{{ base_url }}?{% if query_str %}{{ query_str }}&{% endif %}format=excel" class="btn btn-sm btn-success">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('lab_report') }}">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <div>
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="fas fa-search mr-1"></i> Apply Filters
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Summary Cards -->
+                <div class="row">
+                    <div class="col-lg-4 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>GHS {{ "%.2f"|format(total_revenue) }}</h3>
+                                <p>Total Revenue</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-money-bill-wave"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ total_orders }}</h3>
+                                <p>Total Lab Orders</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-vial"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{% if test_counts %}{{ test_counts|length }}{% else %}0{% endif %}</h3>
+                                <p>Unique Tests</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-flask"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Test Frequency -->
+                {% if test_counts %}
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-chart-bar mr-1"></i> Test Frequency Analysis</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Test Name</th>
+                                        <th>Order Count</th>
+                                        <th>Percentage</th>
+                                        <th>Revenue (GHS)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for test_name, count in test_counts.items()|sort(attribute='1', reverse=True) %}
+                                    {% set percentage = (count / total_orders * 100) if total_orders > 0 else 0 %}
+                                    {% set revenue = test_revenue.get(test_name, 0) if test_revenue else 0 %}
+                                    <tr>
+                                        <td><strong>{{ test_name }}</strong></td>
+                                        <td>{{ count }}</td>
+                                        <td>{{ "%.1f"|format(percentage) }}%</td>
+                                        <td>{{ "%.2f"|format(revenue) }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Revenue by Test -->
+                {% if test_revenue %}
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-chart-pie mr-1"></i> Revenue by Test Type</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Test Name</th>
+                                        <th>Revenue (GHS)</th>
+                                        <th>Percentage of Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for test_name, revenue in test_revenue.items()|sort(attribute='1', reverse=True) %}
+                                    {% set percentage = (revenue / total_revenue * 100) if total_revenue > 0 else 0 %}
+                                    <tr>
+                                        <td>{{ test_name }}</td>
+                                        <td><strong>{{ "%.2f"|format(revenue) }}</strong></td>
+                                        <td>
+                                            <div class="progress">
+                                                <div class="progress-bar bg-info" role="progressbar" style="width: {{ percentage }}%">
+                                                    {{ "%.1f"|format(percentage) }}%
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Patient Demographics - Gender Distribution -->
+                {% if gender_breakdown %}
+                <div class="card card-success card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-venus-mars mr-1"></i> Gender Distribution</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Gender</th>
+                                        <th>Count</th>
+                                        <th>Percentage</th>
+                                        <th>Visual</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% set total_patients = gender_breakdown.values()|sum %}
+                                    {% for gender, count in gender_breakdown.items() %}
+                                    {% set percentage = (count / total_patients * 100) if total_patients > 0 else 0 %}
+                                    <tr>
+                                        <td><strong>{{ gender or 'Unknown' }}</strong></td>
+                                        <td>{{ count }}</td>
+                                        <td>{{ "%.1f"|format(percentage) }}%</td>
+                                        <td>
+                                            <div class="progress">
+                                                <div class="progress-bar bg-success" role="progressbar" style="width: {{ percentage }}%">
+                                                    {{ "%.1f"|format(percentage) }}%
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <th>Total</th>
+                                        <th>{{ total_patients }}</th>
+                                        <th>100.0%</th>
+                                        <th></th>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Patient Demographics - Age Distribution -->
+                {% if age_groups %}
+                <div class="card card-warning card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-birthday-cake mr-1"></i> Age Distribution</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Age Group</th>
+                                        <th>Count</th>
+                                        <th>Percentage</th>
+                                        <th>Visual</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% set total_patients = age_groups.values()|sum %}
+                                    {% for age_group, count in age_groups.items() %}
+                                    {% set percentage = (count / total_patients * 100) if total_patients > 0 else 0 %}
+                                    {% set age_label = age_group ~ " years" if age_group != "65+" else "65+ years" %}
+                                    <tr>
+                                        <td><strong>{{ age_label }}</strong></td>
+                                        <td>{{ count }}</td>
+                                        <td>{{ "%.1f"|format(percentage) }}%</td>
+                                        <td>
+                                            <div class="progress">
+                                                <div class="progress-bar bg-warning" role="progressbar" style="width: {{ percentage }}%">
+                                                    {{ "%.1f"|format(percentage) }}%
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <th>Total</th>
+                                        <th>{{ total_patients }}</th>
+                                        <th>100.0%</th>
+                                        <th></th>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Report Info -->
+                <div class="card card-secondary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Report Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Report Period:</strong> {{ start_date }} to {{ end_date }}</p>
+                        <p><strong>Generated:</strong> {{ report_date.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                        <p><strong>Generated By:</strong> {{ current_user.full_name or current_user.username }}</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}
+

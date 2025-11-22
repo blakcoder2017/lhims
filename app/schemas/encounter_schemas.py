@@ -9,6 +9,8 @@ class EncounterBase(BaseModel):
     """Base schema for encounter data"""
     patient_id: int
     appointment_id: Optional[int] = None
+    opd_visit_id: Optional[int] = None  # Link to OPD visit (for OPD encounters)
+    admission_id: Optional[int] = None  # Link to IPD admission (for IPD encounters)
     chief_complaint: Optional[str] = None
     history_of_present_illness: Optional[str] = None
     past_medical_history: Optional[str] = None

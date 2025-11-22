@@ -53,7 +53,7 @@
                         <strong>Amount Due: GHS {{ "%.2f"|format(charge.total_amount) }}</strong>
                         {% endif %}
                     </p>
-                    <a href="{{ url_for('pay_consultation', patient_id=patient.id) }}?return_to=triage" class="btn btn-warning">
+                    <a href="{{ url_for('pay_consultation', patient_id=patient.id) }}?return_to=triage{% if request.query_params.get('new_visit') %}&new_visit={{ request.query_params.get('new_visit') }}{% endif %}" class="btn btn-warning">
                         <i class="fas fa-credit-card mr-1"></i> Proceed to Payment
                     </a>
                 </div>
@@ -89,6 +89,17 @@
                     <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
                     <h5><i class="icon fas fa-check"></i> Payment Successful!</h5>
                     <p class="mb-2">Payment has been processed successfully. You can now proceed to record vitals.</p>
+                    {% if request.query_params.get('receipt') %}
+                    <p class="mb-2">
+                        <strong>Receipt Number:</strong> {{ request.query_params.get('receipt') }}
+                        <a href="/billing/receipts/{{ request.query_params.get('receipt') }}" target="_blank" class="btn btn-sm btn-outline-primary ml-2">
+                            <i class="fas fa-receipt mr-1"></i> View Receipt
+                        </a>
+                        <a href="/billing/receipts/{{ request.query_params.get('receipt') }}?print=true" target="_blank" class="btn btn-sm btn-outline-secondary ml-1">
+                            <i class="fas fa-print mr-1"></i> Print
+                        </a>
+                    </p>
+                    {% endif %}
                     {% if patient.payment_mechanism and patient.payment_mechanism.value != 'cash' %}
                     <div class="mt-2">
                         <strong><i class="fas fa-shield-alt mr-1"></i> Insurance Information:</strong>
@@ -108,6 +119,31 @@
                         </ul>
                     </div>
                     {% endif %}
+                </div>
+                {% endif %}
+
+                {% if request.query_params.get('status') == 'vitals_required' %}
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-triangle"></i> Vitals Required</h5>
+                    <p class="mb-2">Patient must have vitals recorded before an encounter can be created. Please record vitals below.</p>
+                </div>
+                {% elif request.query_params.get('status') == 'checkin_required' %}
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-info-circle"></i> Complete Check-In First</h5>
+                    <p class="mb-0">
+                        This patient must be checked in and added to the doctor's queue (with consultation payment confirmed)
+                        before an encounter can be started. Kindly finish the vitals/payment process here, then check the patient in.
+                    </p>
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-exclamation-triangle"></i> Check-In Error</h5>
+                    <p class="mb-0">{{ request.query_params.get('error') }}</p>
                 </div>
                 {% endif %}
 
@@ -372,7 +408,8 @@
                                     <div class="form-group">
                                         <label>Temperature (°C) <span class="text-danger">*</span></label>
                                         <input type="number" step="0.1" class="form-control" name="temperature" 
-                                               min="30" max="45" required placeholder="36.5">
+                                               min="30" max="45" required placeholder="36.5"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">Normal: 36.1-37.2°C</small>
                                     </div>
                                 </div>
@@ -382,14 +419,16 @@
                                     <div class="form-group">
                                         <label>Systolic BP (mmHg)</label>
                                         <input type="number" class="form-control" name="systolic_bp" 
-                                               min="50" max="250" placeholder="120">
+                                               min="50" max="250" placeholder="120"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                     </div>
                                 </div>
                                 <div class="col-md-3">
                                     <div class="form-group">
                                         <label>Diastolic BP (mmHg)</label>
                                         <input type="number" class="form-control" name="diastolic_bp" 
-                                               min="30" max="150" placeholder="80">
+                                               min="30" max="150" placeholder="80"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                     </div>
                                 </div>
                                 
@@ -398,7 +437,8 @@
                                     <div class="form-group">
                                         <label>Pulse Rate (bpm)</label>
                                         <input type="number" class="form-control" name="pulse_rate" 
-                                               min="30" max="220" placeholder="72">
+                                               min="30" max="220" placeholder="72"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">Normal: 60-100 bpm</small>
                                     </div>
                                 </div>
@@ -410,7 +450,8 @@
                                     <div class="form-group">
                                         <label>Respiratory Rate (per min)</label>
                                         <input type="number" class="form-control" name="respiratory_rate" 
-                                               min="8" max="40" placeholder="16">
+                                               min="8" max="40" placeholder="16"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">Normal: 12-20/min</small>
                                     </div>
                                 </div>
@@ -420,7 +461,8 @@
                                     <div class="form-group">
                                         <label>Oxygen Saturation (SpO2 %)</label>
                                         <input type="number" class="form-control" name="oxygen_saturation" 
-                                               min="0" max="100" placeholder="98">
+                                               min="0" max="100" placeholder="98"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">Normal: ≥95%</small>
                                     </div>
                                 </div>
@@ -430,7 +472,8 @@
                                     <div class="form-group">
                                         <label>Weight (kg)</label>
                                         <input type="number" step="0.1" class="form-control" name="weight" 
-                                               min="0.1" max="500" placeholder="70.0" id="weightInput">
+                                               min="0.1" max="500" placeholder="70.0" id="weightInput"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                     </div>
                                 </div>
                                 
@@ -439,7 +482,8 @@
                                     <div class="form-group">
                                         <label>Height (cm)</label>
                                         <input type="number" step="0.1" class="form-control" name="height" 
-                                               min="30" max="250" placeholder="170.0" id="heightInput">
+                                               min="30" max="250" placeholder="170.0" id="heightInput"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                     </div>
                                 </div>
                             </div>
@@ -450,7 +494,8 @@
                                     <div class="form-group">
                                         <label>BMI (Auto-calculated)</label>
                                         <input type="text" class="form-control" id="bmiDisplay" 
-                                               readonly placeholder="Enter weight & height">
+                                               readonly placeholder="Enter weight & height"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">Calculated automatically</small>
                                     </div>
                                 </div>
@@ -460,16 +505,83 @@
                                     <div class="form-group">
                                         <label>Pain Scale (1-10)</label>
                                         <input type="number" class="form-control" name="pain_scale" 
-                                               min="0" max="10" placeholder="0">
+                                               min="0" max="10" placeholder="0"
+                                               {% if payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">0 = No pain, 10 = Severe pain</small>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Triage Level Assignment -->
+                            <div class="row mt-3">
+                                <div class="col-md-12">
+                                    <div class="card card-outline card-warning">
+                                        <div class="card-header">
+                                            <h5 class="card-title mb-0">
+                                                <i class="fas fa-tags mr-2"></i>Triage Level Assignment
+                                            </h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row">
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label for="auto_calculate_triage">
+                                                            <input type="checkbox" 
+                                                                   id="auto_calculate_triage" 
+                                                                   name="auto_calculate_triage" 
+                                                                   value="yes"
+                                                                   {% if payment_required and not payment_paid %}disabled{% endif %}>
+                                                            <strong>Auto-calculate from vitals</strong>
+                                                        </label>
+                                                        <small class="form-text text-muted d-block">Automatically determine triage level based on vital signs thresholds</small>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label for="triage_level">Triage Level</label>
+                                                        <select class="form-control" id="triage_level" name="triage_level"
+                                                                {% if payment_required and not payment_paid %}disabled{% endif %}>
+                                                            <option value="">-- Select Triage Level --</option>
+                                                            <option value="P1">P1 - Critical (Red)</option>
+                                                            <option value="P2">P2 - Urgent (Yellow)</option>
+                                                            <option value="P3">P3 - Routine (Green)</option>
+                                                        </select>
+                                                        <small class="form-text text-muted">Manual triage level assignment</small>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="col-md-4">
+                                                    <div class="form-group">
+                                                        <label for="triage_category">Triage Category</label>
+                                                        <select class="form-control" id="triage_category" name="triage_category"
+                                                                {% if payment_required and not payment_paid %}disabled{% endif %}>
+                                                            <option value="">-- Select Category --</option>
+                                                            <option value="Critical">Critical</option>
+                                                            <option value="Urgent">Urgent</option>
+                                                            <option value="Routine">Routine</option>
+                                                        </select>
+                                                        <small class="form-text text-muted">Triage category classification</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="alert alert-info mt-2 mb-0">
+                                                <i class="fas fa-info-circle mr-1"></i>
+                                                <strong>Triage Levels:</strong> P1/Critical (immediate attention), P2/Urgent (prompt attention), P3/Routine (standard care)
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         <div class="card-footer">
-                            <button type="submit" class="btn btn-info float-right" name="action" value="save"><i class="fas fa-save mr-1"></i> Save Vitals</button>
+                            <button type="submit" class="btn btn-info float-right" name="action" value="save"
+                                    {% if payment_required and not payment_paid %}disabled{% endif %}>
+                                <i class="fas fa-save mr-1"></i> Save Vitals
+                            </button>
                             {% if user_role in ['Doctor', 'Admin'] %}
-                            <button type="submit" class="btn btn-success float-right mr-2" name="action" value="save_and_create_encounter">
+                            <button type="submit" class="btn btn-success float-right mr-2" name="action" value="save_and_create_encounter"
+                                    {% if payment_required and not payment_paid %}disabled{% endif %}>
                                 <i class="fas fa-stethoscope mr-1"></i> Save Vitals & Create Encounter
                             </button>
                             {% endif %}
@@ -478,8 +590,13 @@
                     </form>
                 </div>
 
-                <!-- Check In Section - Appears after vitals are saved -->
-                {% if has_recent_vitals and not checked_in_appointment %}
+                <!-- Check In Section - Appears after vitals are saved AND payment is made (for cash patients) -->
+                {% set can_check_in = has_recent_vitals %}
+                {% if is_cash_patient and payment_required %}
+                    {% set can_check_in = has_recent_vitals and payment_paid %}
+                {% endif %}
+                
+                {% if can_check_in and not checked_in_appointment %}
                 <div class="card card-success card-outline">
                     <div class="card-header">
                         <h3 class="card-title"><i class="fas fa-check-circle mr-1"></i> Step 5: Patient Check-In</h3>
@@ -489,6 +606,16 @@
                         <div class="alert alert-success">
                             <h5><i class="icon fas fa-check"></i> Vitals Saved Successfully!</h5>
                             <p class="mb-2">Vital signs have been recorded. You can now check in the patient to add them to the doctor's queue.</p>
+                        </div>
+                        {% endif %}
+                        
+                        {% if is_cash_patient and payment_required and not payment_paid %}
+                        <div class="alert alert-warning">
+                            <h5><i class="icon fas fa-exclamation-triangle"></i> Payment Required</h5>
+                            <p class="mb-2">Payment must be completed before check-in. Please process payment first.</p>
+                            <a href="{{ url_for('pay_consultation', patient_id=patient.id) }}?return_to=triage{% if request.query_params.get('new_visit') %}&new_visit={{ request.query_params.get('new_visit') }}{% endif %}" class="btn btn-warning">
+                                <i class="fas fa-credit-card mr-1"></i> Proceed to Payment
+                            </a>
                         </div>
                         {% endif %}
                         
@@ -503,12 +630,12 @@
                             </p>
                         </div>
 
-                        <form method="POST" action="{{ url_for('check_in_patient', patient_id=patient.id) }}">
+                        <form method="POST" action="{{ url_for('check_in_patient', patient_id=patient.id) }}" {% if is_cash_patient and payment_required and not payment_paid %}onsubmit="alert('Please complete payment before checking in the patient.'); return false;"{% endif %}>
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="checkin_department">Department <span class="text-danger">*</span></label>
-                                        <select class="form-control" id="checkin_department" name="department" required>
+                                        <select class="form-control" id="checkin_department" name="department" required {% if is_cash_patient and payment_required and not payment_paid %}disabled{% endif %}>
                                             <option value="General Medicine" selected>General Medicine</option>
                                             <option value="Pediatrics">Pediatrics</option>
                                             <option value="Obstetrics & Gynecology">Obstetrics & Gynecology</option>
@@ -523,13 +650,13 @@
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="checkin_chief_complaint">Chief Complaint (Optional)</label>
-                                        <input type="text" class="form-control" id="checkin_chief_complaint" name="chief_complaint" placeholder="Patient's main complaint">
+                                        <input type="text" class="form-control" id="checkin_chief_complaint" name="chief_complaint" placeholder="Patient's main complaint" {% if is_cash_patient and payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">Brief description of why the patient is visiting</small>
                                     </div>
                                 </div>
                             </div>
                             <div class="form-group">
-                                <button type="submit" class="btn btn-success btn-lg btn-block">
+                                <button type="submit" class="btn btn-success btn-lg btn-block" {% if is_cash_patient and payment_required and not payment_paid %}disabled title="Payment must be completed before check-in"{% endif %}>
                                     <i class="fas fa-check-circle mr-2"></i>
                                     Check In Patient & Add to Doctor's Queue
                                 </button>
@@ -538,6 +665,47 @@
                                 </small>
                             </div>
                         </form>
+                    </div>
+                </div>
+                {% elif has_recent_vitals and not checked_in_appointment and is_cash_patient and payment_required and not payment_paid %}
+                <!-- Show message when vitals are recorded but payment is pending -->
+                <div class="card card-warning card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-lock mr-1"></i> Check-In Locked</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning">
+                            <h5><i class="icon fas fa-exclamation-triangle"></i> Payment Required for Check-In</h5>
+                            <p class="mb-2">
+                                <strong>Vitals recorded ✓</strong> - Vital signs have been recorded successfully.
+                            </p>
+                            <p class="mb-2">
+                                <strong>Payment pending ✗</strong> - Payment must be completed before you can check in the patient.
+                            </p>
+                            <a href="{{ url_for('pay_consultation', patient_id=patient.id) }}?return_to=triage{% if request.query_params.get('new_visit') %}&new_visit={{ request.query_params.get('new_visit') }}{% endif %}" class="btn btn-warning btn-lg">
+                                <i class="fas fa-credit-card mr-1"></i> Proceed to Payment
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% elif not has_recent_vitals and not checked_in_appointment %}
+                <!-- Show message when vitals are not recorded -->
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Check-In Requirements</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info-circle"></i> Complete Required Steps</h5>
+                            <p class="mb-2">To check in the patient, you must complete:</p>
+                            <ul class="mb-2">
+                                <li><strong>Record Vitals ✓</strong> - Record patient's vital signs (Step 4 above)</li>
+                                {% if is_cash_patient and payment_required %}
+                                <li><strong>Payment ✓</strong> - Process consultation fee payment (for cash patients)</li>
+                                {% endif %}
+                            </ul>
+                            <p class="mb-0">Once both steps are complete, the check-in form will appear here.</p>
+                        </div>
                     </div>
                 </div>
                 {% elif checked_in_appointment %}
@@ -737,6 +905,74 @@
             }
         }
         
+        // Triage Level Calculation Function (matches backend logic)
+        function calculateTriageLevel() {
+            const autoCalculateCheckbox = document.getElementById('auto_calculate_triage');
+            const triageLevelSelect = document.getElementById('triage_level');
+            const triageCategorySelect = document.getElementById('triage_category');
+            
+            if (!autoCalculateCheckbox || !triageLevelSelect || !triageCategorySelect) {
+                return; // Elements not found
+            }
+            
+            // Only auto-calculate if checkbox is checked
+            if (!autoCalculateCheckbox.checked) {
+                return;
+            }
+            
+            // Get vital signs values
+            const temperature = parseFloat(document.querySelector('input[name="temperature"]')?.value || 0);
+            const systolicBp = parseInt(document.querySelector('input[name="systolic_bp"]')?.value || 0);
+            const diastolicBp = parseInt(document.querySelector('input[name="diastolic_bp"]')?.value || 0);
+            const pulseRate = parseInt(document.querySelector('input[name="pulse_rate"]')?.value || 0);
+            const respiratoryRate = parseInt(document.querySelector('input[name="respiratory_rate"]')?.value || 0);
+            const oxygenSaturation = parseInt(document.querySelector('input[name="oxygen_saturation"]')?.value || 0);
+            const painScale = parseInt(document.querySelector('input[name="pain_scale"]')?.value || 0);
+            
+            // Check if temperature is provided (required for auto-calculate)
+            if (!temperature || temperature <= 0) {
+                return; // Need at least temperature to calculate
+            }
+            
+            // Critical (P1/Critical) - Immediate attention required
+            let isCritical = false;
+            let isUrgent = false;
+            
+            // Critical checks
+            if (temperature > 40.0 || temperature < 35.0) isCritical = true;
+            if (systolicBp > 0 && (systolicBp < 80 || systolicBp > 200)) isCritical = true;
+            if (diastolicBp > 0 && diastolicBp > 120) isCritical = true;
+            if (pulseRate > 0 && (pulseRate < 40 || pulseRate > 150)) isCritical = true;
+            if (respiratoryRate > 0 && (respiratoryRate < 8 || respiratoryRate > 30)) isCritical = true;
+            if (oxygenSaturation > 0 && oxygenSaturation < 90) isCritical = true;
+            if (painScale > 0 && painScale >= 9) isCritical = true;
+            
+            if (isCritical) {
+                triageLevelSelect.value = 'P1';
+                triageCategorySelect.value = 'Critical';
+                return;
+            }
+            
+            // Urgent (P2/Urgent) - Needs prompt attention
+            if (temperature > 39.0 || temperature < 35.5) isUrgent = true;
+            if (systolicBp > 0 && (systolicBp < 90 || systolicBp > 180)) isUrgent = true;
+            if (diastolicBp > 0 && diastolicBp > 110) isUrgent = true;
+            if (pulseRate > 0 && (pulseRate < 50 || pulseRate > 120)) isUrgent = true;
+            if (respiratoryRate > 0 && (respiratoryRate < 10 || respiratoryRate > 25)) isUrgent = true;
+            if (oxygenSaturation > 0 && oxygenSaturation < 95) isUrgent = true;
+            if (painScale > 0 && painScale >= 7) isUrgent = true;
+            
+            if (isUrgent) {
+                triageLevelSelect.value = 'P2';
+                triageCategorySelect.value = 'Urgent';
+                return;
+            }
+            
+            // Routine (P3/Routine) - Standard care
+            triageLevelSelect.value = 'P3';
+            triageCategorySelect.value = 'Routine';
+        }
+        
         // Wait for DOM to be ready
         document.addEventListener('DOMContentLoaded', function() {
             // Auto-calculate BMI when weight or height changes
@@ -757,6 +993,50 @@
             if (weightInput && heightInput) {
                 calculateBMI();
             }
+            
+            // Auto-calculate triage level when checkbox is checked or vitals change
+            const autoCalculateCheckbox = document.getElementById('auto_calculate_triage');
+            if (autoCalculateCheckbox) {
+                // Calculate when checkbox is toggled
+                autoCalculateCheckbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        calculateTriageLevel();
+                    } else {
+                        // Clear triage fields if unchecked
+                        const triageLevelSelect = document.getElementById('triage_level');
+                        const triageCategorySelect = document.getElementById('triage_category');
+                        if (triageLevelSelect) triageLevelSelect.value = '';
+                        if (triageCategorySelect) triageCategorySelect.value = '';
+                    }
+                });
+            }
+            
+            // Calculate triage level when vital signs change (if auto-calculate is checked)
+            const vitalInputs = [
+                'input[name="temperature"]',
+                'input[name="systolic_bp"]',
+                'input[name="diastolic_bp"]',
+                'input[name="pulse_rate"]',
+                'input[name="respiratory_rate"]',
+                'input[name="oxygen_saturation"]',
+                'input[name="pain_scale"]'
+            ];
+            
+            vitalInputs.forEach(selector => {
+                const input = document.querySelector(selector);
+                if (input) {
+                    input.addEventListener('input', function() {
+                        if (autoCalculateCheckbox && autoCalculateCheckbox.checked) {
+                            calculateTriageLevel();
+                        }
+                    });
+                    input.addEventListener('change', function() {
+                        if (autoCalculateCheckbox && autoCalculateCheckbox.checked) {
+                            calculateTriageLevel();
+                        }
+                    });
+                }
+            });
             
             // Set today's date as default for scheduled_date (if appointment form exists)
             const scheduledDateInput = document.getElementById('scheduled_date');

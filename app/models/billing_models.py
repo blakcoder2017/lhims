@@ -60,6 +60,8 @@ class Invoice(Base):
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=True)  # Optional link to encounter
     appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True)  # Optional link to appointment
+    opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (for OPD billing)
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (for IPD billing)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User who created the invoice
     
     # Invoice Details
@@ -101,6 +103,8 @@ class Invoice(Base):
     patient = relationship("Patient", back_populates="invoices")
     encounter = relationship("Encounter")
     appointment = relationship("Appointment")
+    opd_visit = relationship("OPDVisit", back_populates="invoices")
+    admission = relationship("Admission", foreign_keys=[admission_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
     charges = relationship("Charge", back_populates="invoice", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="invoice", cascade="all, delete-orphan")
@@ -121,6 +125,8 @@ class Charge(Base):
     # Foreign Keys
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
     encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=True)  # Optional link to encounter
+    opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (denormalized for reporting)
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (denormalized for reporting)
     lab_order_id = Column(Integer, ForeignKey("lab_orders.id"), nullable=True)  # Optional link to lab order
     radiology_order_id = Column(Integer, ForeignKey("radiology_orders.id"), nullable=True)  # Optional link to radiology order
     prescription_id = Column(Integer, ForeignKey("prescriptions.id"), nullable=True)  # Optional link to prescription
@@ -145,6 +151,7 @@ class Charge(Base):
     lab_order = relationship("LabOrder")
     radiology_order = relationship("RadiologyOrder")
     prescription = relationship("Prescription")
+    charge_payments = relationship("ChargePayment", back_populates="charge")
     
     def __repr__(self):
         return f"<Charge(id={self.id}, type={self.charge_type.value}, amount={self.total_amount})>"
@@ -191,7 +198,78 @@ class Payment(Base):
     invoice = relationship("Invoice", back_populates="payments")
     patient = relationship("Patient")
     received_by = relationship("User", foreign_keys=[received_by_id])
+    charge_payments = relationship("ChargePayment", back_populates="payment")
     
     def __repr__(self):
         return f"<Payment(id={self.id}, payment_number='{self.payment_number}', amount={self.amount}, status={self.status.value})>"
+
+
+class Receipt(Base):
+    """
+    SQLAlchemy Model for payment receipts.
+    Tracks receipt generation and provides audit trail for payments.
+    """
+    __tablename__ = "receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=False)
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
+    generated_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User who generated the receipt
+    
+    # Receipt Details
+    receipt_number = Column(String(50), unique=True, nullable=False, index=True)  # Unique receipt number
+    amount = Column(Numeric(10, 2), nullable=False)  # Payment amount
+    payment_method = Column(String(50), nullable=False)  # Payment method used
+    currency = Column(String(10), nullable=False, default="GHS")  # Currency code
+    
+    # Timestamps
+    generated_at = Column(DateTime, nullable=False, server_default=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Soft deletion
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    payment = relationship("Payment")
+    patient = relationship("Patient")
+    invoice = relationship("Invoice")
+    generated_by = relationship("User", foreign_keys=[generated_by_id])
+    
+    def __repr__(self):
+        return f"<Receipt(id={self.id}, receipt_number='{self.receipt_number}', amount={self.amount})>"
+
+
+class ChargePayment(Base):
+    """
+    SQLAlchemy Model for tracking payment allocations to individual charges.
+    Allows partial payments per charge within an invoice.
+    """
+    __tablename__ = "charge_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=False)
+    charge_id = Column(Integer, ForeignKey("charges.id"), nullable=False)
+    
+    # Payment Allocation
+    amount = Column(Numeric(10, 2), nullable=False)  # Amount allocated to this charge
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Soft deletion
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    payment = relationship("Payment", back_populates="charge_payments")
+    charge = relationship("Charge", back_populates="charge_payments")
+    
+    def __repr__(self):
+        return f"<ChargePayment(id={self.id}, payment_id={self.payment_id}, charge_id={self.charge_id}, amount={self.amount})>"
 

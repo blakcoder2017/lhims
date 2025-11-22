@@ -1,0 +1,868 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-file-invoice-dollar mr-2"></i>Insurance Claims Dashboard</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('claims_dashboard') }}">Claims</a></li>
+                            <li class="breadcrumb-item active">Insurance Claims Dashboard</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Notice about Claims Processing -->
+                <div class="alert alert-info alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-info-circle"></i> Local Claims Tracking</h5>
+                    <p class="mb-2">
+                        This dashboard tracks all insurance claims <strong>locally</strong> since the system is not connected to external insurance APIs.
+                        Claims are organized by provider with submission status badges:
+                    </p>
+                    <ul class="mb-0">
+                        <li><strong>Provider Badges:</strong> Identify NHIS vs Private Insurance providers</li>
+                        <li><strong>Submission Status:</strong> Track what has been submitted to each provider</li>
+                        <li><strong>Update Status:</strong> Click "Update Status" button on any claim to change its status (Draft → Pending → Submitted → Approved → Paid)</li>
+                        <li><strong>Export & Submit:</strong> Export claims and manually update status after submission to providers</li>
+                    </ul>
+                </div>
+                
+                <!-- Success Message -->
+                {% if request.query_params.get('status') == 'updated' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Status Updated!</h5>
+                    Claim/invoice status has been successfully updated.
+                </div>
+                {% endif %}
+                
+                <!-- Batch Update Success Message -->
+                {% if request.query_params.get('status') == 'batch_updated' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Batch Update Complete!</h5>
+                    <p>
+                        Successfully updated <strong>{{ request.query_params.get('updated', 0) }}</strong> claim(s)/invoice(s).
+                        {% if request.query_params.get('failed', '0') != '0' %}
+                        <br><span class="text-warning"><strong>{{ request.query_params.get('failed', 0) }}</strong> failed to update.</span>
+                        {% endif %}
+                    </p>
+                </div>
+                {% endif %}
+
+                <!-- Overall Statistics Cards -->
+                <div class="row">
+                    <!-- NHIS Statistics -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-primary">
+                            <div class="inner">
+                                <h3>{{ total_nhis_claims }}</h3>
+                                <p>
+                                    <span class="badge badge-light">NHIS</span> Total Claims
+                                </p>
+                                <h5>GHS {{ "%.2f"|format(nhis_total_amount) }}</h5>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-hospital"></i>
+                            </div>
+                            <a href="/claims?provider_filter=nhis" class="small-box-footer">
+                                View NHIS Claims <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ submitted_nhis_claims }}</h3>
+                                <p>
+                                    <span class="badge badge-light">NHIS</span> Submitted
+                                </p>
+                                <h5>GHS {{ "%.2f"|format(nhis_submitted_amount) }}</h5>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-paper-plane"></i>
+                            </div>
+                            <a href="/claims?provider_filter=nhis&status_filter=submitted" class="small-box-footer">
+                                View Submitted <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <!-- Private Insurance Statistics -->
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ total_private_invoices }}</h3>
+                                <p>
+                                    <span class="badge badge-light">Private</span> Total Invoices
+                                </p>
+                                <h5>GHS {{ "%.2f"|format(total_private_amount) }}</h5>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-umbrella"></i>
+                            </div>
+                            <a href="/claims?provider_filter=private_insurance" class="small-box-footer">
+                                View Private Claims <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ pending_private_invoices }}</h3>
+                                <p>
+                                    <span class="badge badge-light">Private</span> Pending
+                                </p>
+                                <h5>GHS {{ "%.2f"|format(total_pending_private_amount) }}</h5>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <a href="/claims?provider_filter=private_insurance&status_filter=pending" class="small-box-footer">
+                                View Pending <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filter Section -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters & Export</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label><strong>Provider Filter:</strong></label>
+                                <div class="btn-group mb-2" role="group">
+                                    <a href="/claims" class="btn btn-sm btn-outline-primary {{ 'active' if not provider_filter else '' }}">
+                                        <i class="fas fa-list"></i> All Providers
+                                    </a>
+                                    <a href="/claims?provider_filter=nhis" class="btn btn-sm btn-outline-primary {{ 'active' if provider_filter == 'nhis' else '' }}">
+                                        <span class="badge badge-primary">NHIS</span> NHIS Claims
+                                    </a>
+                                    <a href="/claims?provider_filter=private_insurance" class="btn btn-sm btn-outline-success {{ 'active' if provider_filter == 'private_insurance' else '' }}">
+                                        <span class="badge badge-success">Private</span> Private Insurance
+                                    </a>
+                                </div>
+                                {% if insurance_providers %}
+                                <div class="btn-group mb-2" role="group">
+                                    {% for provider in insurance_providers %}
+                                    <a href="/claims?provider_filter={{ provider|urlencode }}" 
+                                       class="btn btn-sm btn-outline-info {{ 'active' if provider_filter == provider else '' }}">
+                                        <span class="badge badge-info">{{ provider }}</span>
+                                    </a>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6">
+                                <label><strong>Status Filter:</strong></label>
+                                <div class="btn-group mb-2" role="group">
+                                    <a href="/claims{% if provider_filter %}?provider_filter={{ provider_filter }}{% endif %}" 
+                                       class="btn btn-sm btn-outline-secondary {{ 'active' if not status_filter else '' }}">All</a>
+                                    <a href="/claims?status_filter=draft{% if provider_filter %}&provider_filter={{ provider_filter }}{% endif %}" 
+                                       class="btn btn-sm btn-outline-secondary {{ 'active' if status_filter == 'draft' else '' }}">Draft</a>
+                                    <a href="/claims?status_filter=pending{% if provider_filter %}&provider_filter={{ provider_filter }}{% endif %}" 
+                                       class="btn btn-sm btn-outline-warning {{ 'active' if status_filter == 'pending' else '' }}">Pending</a>
+                                    <a href="/claims?status_filter=submitted{% if provider_filter %}&provider_filter={{ provider_filter }}{% endif %}" 
+                                       class="btn btn-sm btn-outline-info {{ 'active' if status_filter == 'submitted' else '' }}">Submitted</a>
+                                    <a href="/claims?status_filter=approved{% if provider_filter %}&provider_filter={{ provider_filter }}{% endif %}" 
+                                       class="btn btn-sm btn-outline-success {{ 'active' if status_filter == 'approved' else '' }}">Approved</a>
+                                    <a href="/claims?status_filter=paid{% if provider_filter %}&provider_filter={{ provider_filter }}{% endif %}" 
+                                       class="btn btn-sm btn-outline-success {{ 'active' if status_filter == 'paid' else '' }}">Paid</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NHIS Claims Section -->
+                {% if provider_filter != "private_insurance" and (not provider_filter or provider_filter == "nhis") %}
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <span class="badge badge-primary badge-lg mr-2">NHIS</span>
+                            National Health Insurance Scheme Claims
+                            <span class="badge badge-light ml-2">{{ total_nhis_claims }} claim(s)</span>
+                        </h3>
+                        <div class="card-tools">
+                            <div class="btn-group">
+                                <a href="/claims/export?format=csv{% if status_filter %}&status_filter={{ status_filter }}{% endif %}" 
+                                   class="btn btn-sm btn-success">
+                                    <i class="fas fa-file-csv mr-1"></i> Export CSV
+                                </a>
+                                <a href="/claims/export?format=excel{% if status_filter %}&status_filter={{ status_filter }}{% endif %}" 
+                                   class="btn btn-sm btn-success">
+                                    <i class="fas fa-file-excel mr-1"></i> Export Excel
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- NHIS Summary Stats -->
+                        <div class="row mb-3">
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-primary"><i class="fas fa-file-invoice"></i></span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Total Claims</span>
+                                        <span class="info-box-number">{{ total_nhis_claims }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-info"><i class="fas fa-paper-plane"></i></span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Submitted to NHIA</span>
+                                        <span class="info-box-number">{{ submitted_nhis_claims }}</span>
+                                        <small>GHS {{ "%.2f"|format(nhis_submitted_amount) }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-success"><i class="fas fa-check-circle"></i></span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Approved</span>
+                                        <span class="info-box-number">{{ approved_nhis_claims }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-success"><i class="fas fa-money-bill-wave"></i></span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">Paid</span>
+                                        <span class="info-box-number">{{ paid_nhis_claims }}</span>
+                                        <small>GHS {{ "%.2f"|format(nhis_paid_amount) }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Batch Update Controls -->
+                        <div class="row mb-3" id="nhisBatchControls" style="display: none;">
+                            <div class="col-md-12">
+                                <div class="alert alert-info">
+                                    <strong><span id="nhisSelectedCount">0</span> claim(s) selected</strong>
+                                    <button type="button" class="btn btn-warning btn-sm ml-3" 
+                                            data-toggle="modal" 
+                                            data-target="#batchUpdateNHISModal"
+                                            id="nhisBatchUpdateBtn">
+                                        <i class="fas fa-edit"></i> Batch Update Status
+                                    </button>
+                                    <button type="button" class="btn btn-secondary btn-sm ml-2" onclick="clearNHISSelection()">
+                                        <i class="fas fa-times"></i> Clear Selection
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- NHIS Claims Table -->
+                        {% if nhis_claims %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 40px;">
+                                            <input type="checkbox" id="selectAllNHIS" onchange="toggleAllNHIS(this)">
+                                        </th>
+                                        <th>Claim Number</th>
+                                        <th>Patient</th>
+                                        <th>NHIS Number</th>
+                                        <th>Claim Date</th>
+                                        <th class="text-right">Amount</th>
+                                        <th>Status</th>
+                                        <th>Submitted</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for claim in nhis_claims %}
+                                    <tr>
+                                        <td>
+                                            <input type="checkbox" class="nhis-claim-checkbox" 
+                                                   value="{{ claim.id }}" 
+                                                   onchange="updateNHISSelection()">
+                                        </td>
+                                        <td><strong>{{ claim.claim_number }}</strong></td>
+                                        <td>{{ claim.patient.first_name }} {{ claim.patient.last_name }}</td>
+                                        <td><span class="badge badge-primary">{{ claim.nhis_number }}</span></td>
+                                        <td>{{ claim.claim_date.strftime('%Y-%m-%d') if claim.claim_date else 'N/A' }}</td>
+                                        <td class="text-right">GHS {{ "%.2f"|format(claim.total_amount or 0) }}</td>
+                                        <td>
+                                            {% if claim.status.value == 'submitted' or claim.status.value == 'processing' %}
+                                            <span class="badge badge-info">
+                                                <i class="fas fa-paper-plane mr-1"></i>{{ claim.status.value.replace('_', ' ').title() }}
+                                            </span>
+                                            {% elif claim.status.value == 'approved' %}
+                                            <span class="badge badge-success">
+                                                <i class="fas fa-check-circle mr-1"></i>Approved
+                                            </span>
+                                            {% elif claim.status.value == 'paid' %}
+                                            <span class="badge badge-success">
+                                                <i class="fas fa-money-bill-wave mr-1"></i>Paid
+                                            </span>
+                                            {% elif claim.status.value == 'rejected' %}
+                                            <span class="badge badge-danger">
+                                                <i class="fas fa-times-circle mr-1"></i>Rejected
+                                            </span>
+                                            {% elif claim.status.value == 'pending' %}
+                                            <span class="badge badge-warning">
+                                                <i class="fas fa-clock mr-1"></i>Pending
+                                            </span>
+                                            {% else %}
+                                            <span class="badge badge-secondary">{{ claim.status.value.replace('_', ' ').title() }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if claim.submitted_at %}
+                                            <span class="badge badge-success">
+                                                <i class="fas fa-check mr-1"></i>Yes
+                                            </span>
+                                            <br><small class="text-muted">{{ claim.submitted_at.strftime('%Y-%m-%d') }}</small>
+                                            {% else %}
+                                            <span class="badge badge-secondary">
+                                                <i class="fas fa-times mr-1"></i>No
+                                            </span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group-vertical">
+                                                <a href="{{ url_for('view_claim', claim_id=claim.id) }}" class="btn btn-sm btn-primary">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                                {% if not claim.submitted_at %}
+                                                <a href="{{ url_for('submit_claim', claim_id=claim.id) }}" class="btn btn-sm btn-info" 
+                                                   onclick="return confirm('Mark this claim as submitted to NHIA?');">
+                                                    <i class="fas fa-paper-plane"></i> Mark Submitted
+                                                </a>
+                                                {% endif %}
+                                                <button type="button" class="btn btn-sm btn-warning" 
+                                                        data-toggle="modal" 
+                                                        data-target="#updateStatusModal{{ claim.id }}"
+                                                        title="Update Status">
+                                                    <i class="fas fa-edit"></i> Update Status
+                                                </button>
+                                            </div>
+                                            
+                                            <!-- Status Update Modal -->
+                                            <div class="modal fade" id="updateStatusModal{{ claim.id }}" tabindex="-1" role="dialog">
+                                                <div class="modal-dialog" role="document">
+                                                    <div class="modal-content">
+                                                        <div class="modal-header">
+                                                            <h5 class="modal-title">Update Claim Status</h5>
+                                                            <button type="button" class="close" data-dismiss="modal">
+                                                                <span>&times;</span>
+                                                            </button>
+                                                        </div>
+                                                        <form method="POST" action="{{ url_for('update_nhis_claim_status', claim_id=claim.id) }}">
+                                                            <div class="modal-body">
+                                                                <div class="form-group">
+                                                                    <label>Claim Number:</label>
+                                                                    <input type="text" class="form-control" value="{{ claim.claim_number or 'N/A' }}" readonly>
+                                                                </div>
+                                                                <div class="form-group">
+                                                                    <label>Patient:</label>
+                                                                    <input type="text" class="form-control" value="{{ claim.patient.first_name }} {{ claim.patient.last_name }}" readonly>
+                                                                </div>
+                                                                <div class="form-group">
+                                                                    <label>Current Status:</label>
+                                                                    <input type="text" class="form-control" value="{{ claim.status.value.title() }}" readonly>
+                                                                </div>
+                                                                <div class="form-group">
+                                                                    <label for="new_status{{ claim.id }}">New Status <span class="text-danger">*</span></label>
+                                                                    <select class="form-control" id="new_status{{ claim.id }}" name="new_status" required>
+                                                                        <option value="draft" {% if claim.status.value == 'draft' %}selected{% endif %}>Draft</option>
+                                                                        <option value="pending" {% if claim.status.value == 'pending' %}selected{% endif %}>Pending</option>
+                                                                        <option value="submitted" {% if claim.status.value == 'submitted' %}selected{% endif %}>Submitted</option>
+                                                                        <option value="processing" {% if claim.status.value == 'processing' %}selected{% endif %}>Processing</option>
+                                                                        <option value="approved" {% if claim.status.value == 'approved' %}selected{% endif %}>Approved</option>
+                                                                        <option value="rejected" {% if claim.status.value == 'rejected' %}selected{% endif %}>Rejected</option>
+                                                                        <option value="paid" {% if claim.status.value == 'paid' %}selected{% endif %}>Paid</option>
+                                                                        <option value="cancelled" {% if claim.status.value == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                                                                    </select>
+                                                                    <small class="form-text text-muted">
+                                                                        <strong>Note:</strong> When status is set to "Paid", the system will automatically update the invoice and create a payment record.
+                                                                    </small>
+                                                                </div>
+                                                                <div class="form-group">
+                                                                    <label for="notes{{ claim.id }}">Notes (Optional)</label>
+                                                                    <textarea class="form-control" id="notes{{ claim.id }}" name="notes" rows="3" placeholder="Add notes about this status update (e.g., approval reference, rejection reason, payment confirmation number, etc.)..."></textarea>
+                                                                </div>
+                                                            </div>
+                                                            <div class="modal-footer">
+                                                                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                                                                <button type="submit" class="btn btn-primary">Update Status</button>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-1"></i> No NHIS claims found matching the current filter.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Private Insurance Claims Section -->
+                {% if provider_filter != "nhis" %}
+                <div class="card card-success card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <span class="badge badge-success badge-lg mr-2">PRIVATE</span>
+                            Private Insurance Claims
+                            <span class="badge badge-light ml-2">{{ total_private_invoices }} invoice(s)</span>
+                        </h3>
+                        <div class="card-tools">
+                            <div class="btn-group">
+                                <a href="/claims/private-insurance/export?format=csv{% if status_filter %}&status_filter={{ status_filter }}{% endif %}" 
+                                   class="btn btn-sm btn-success">
+                                    <i class="fas fa-file-csv mr-1"></i> Export CSV
+                                </a>
+                                <a href="/claims/private-insurance/export?format=excel{% if status_filter %}&status_filter={{ status_filter }}{% endif %}" 
+                                   class="btn btn-sm btn-success">
+                                    <i class="fas fa-file-excel mr-1"></i> Export Excel
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Private Insurance Summary by Provider -->
+                        {% if invoices_by_provider %}
+                        <div class="row mb-3">
+                            {% for provider in insurance_providers %}
+                            <div class="col-md-4">
+                                <div class="info-box">
+                                    <span class="info-box-icon bg-info">
+                                        <span class="badge badge-light">{{ provider|truncate(2, True, '') }}</span>
+                                    </span>
+                                    <div class="info-box-content">
+                                        <span class="info-box-text">
+                                            <span class="badge badge-info">{{ provider }}</span>
+                                        </span>
+                                        <span class="info-box-number">{{ invoices_by_provider[provider]|length }} invoices</span>
+                                        <small>GHS {{ "%.2f"|format(total_amount_by_provider[provider]) }}</small>
+                                        <div class="progress">
+                                            <div class="progress-bar bg-success" style="width: {{ (submitted_count_by_provider[provider] / invoices_by_provider[provider]|length * 100) if invoices_by_provider[provider]|length > 0 else 0 }}%"></div>
+                                        </div>
+                                        <small>{{ submitted_count_by_provider[provider] }} submitted</small>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Private Insurance Claims by Provider -->
+                        {% for provider in insurance_providers %}
+                        {% if not provider_filter or provider_filter == provider %}
+                        <div class="card card-info card-outline collapsed-card mb-3">
+                            <div class="card-header">
+                                <h3 class="card-title">
+                                    <span class="badge badge-info mr-2">{{ provider }}</span>
+                                    {{ invoices_by_provider[provider]|length }} invoice(s)
+                                    <span class="badge badge-success ml-2">{{ submitted_count_by_provider[provider] }} submitted</span>
+                                </h3>
+                                <div class="card-tools">
+                                    <div class="btn-group mr-2">
+                                        <a href="/claims/private-insurance/export?format=csv&insurance_provider={{ provider|urlencode }}" 
+                                           class="btn btn-sm btn-success">
+                                            <i class="fas fa-file-csv mr-1"></i> Export
+                                        </a>
+                                    </div>
+                                    <button type="button" class="btn btn-tool" data-card-widget="collapse">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <!-- Batch Update Controls for Private Insurance -->
+                                <div class="row mb-3" id="privateBatchControls{{ provider|replace(' ', '_') }}" style="display: none;">
+                                    <div class="col-md-12">
+                                        <div class="alert alert-info">
+                                            <strong><span id="privateSelectedCount{{ provider|replace(' ', '_') }}">0</span> invoice(s) selected</strong>
+                                            <button type="button" class="btn btn-warning btn-sm ml-3" 
+                                                    data-toggle="modal" 
+                                                    data-target="#batchUpdatePrivateModal{{ provider|replace(' ', '_') }}"
+                                                    id="privateBatchUpdateBtn{{ provider|replace(' ', '_') }}">
+                                                <i class="fas fa-edit"></i> Batch Update Status
+                                            </button>
+                                            <button type="button" class="btn btn-secondary btn-sm ml-2" onclick="clearPrivateSelection('{{ provider|replace(' ', '_') }}')">
+                                                <i class="fas fa-times"></i> Clear Selection
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-hover table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 40px;">
+                                                    <input type="checkbox" id="selectAllPrivate{{ provider|replace(' ', '_') }}" 
+                                                           onchange="toggleAllPrivate('{{ provider|replace(' ', '_') }}', this)">
+                                                </th>
+                                                <th>Invoice #</th>
+                                                <th>Patient</th>
+                                                <th>Policy #</th>
+                                                <th>Date</th>
+                                                <th class="text-right">Amount</th>
+                                                <th>Status</th>
+                                                <th>Submitted</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for invoice in invoices_by_provider[provider] %}
+                                            <tr>
+                                                <td>
+                                                    <input type="checkbox" 
+                                                           class="private-invoice-checkbox private-checkbox-{{ provider|replace(' ', '_') }}" 
+                                                           value="{{ invoice.id }}" 
+                                                           data-provider="{{ provider|replace(' ', '_') }}"
+                                                           onchange="updatePrivateSelection('{{ provider|replace(' ', '_') }}')">
+                                                </td>
+                                                <td><strong>{{ invoice.invoice_number }}</strong></td>
+                                                <td>{{ invoice.patient.first_name }} {{ invoice.patient.last_name }}</td>
+                                                <td><span class="badge badge-info">{{ invoice.insurance_policy_number or 'N/A' }}</span></td>
+                                                <td>{{ invoice.invoice_date.strftime('%Y-%m-%d') if invoice.invoice_date else 'N/A' }}</td>
+                                                <td class="text-right">GHS {{ "%.2f"|format(invoice.total_amount) }}</td>
+                                                <td>
+                                                    {% if invoice.status.value == 'paid' %}
+                                                    <span class="badge badge-success">Paid</span>
+                                                    {% elif invoice.status.value == 'pending' %}
+                                                    <span class="badge badge-warning">Pending</span>
+                                                    {% else %}
+                                                    <span class="badge badge-secondary">{{ invoice.status.value.title() }}</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if invoice.status.value in ['pending', 'partially_paid', 'paid'] %}
+                                                    <span class="badge badge-success">
+                                                        <i class="fas fa-check mr-1"></i>Yes
+                                                    </span>
+                                                    {% else %}
+                                                    <span class="badge badge-secondary">
+                                                        <i class="fas fa-times mr-1"></i>No
+                                                    </span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <div class="btn-group-vertical">
+                                                        <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" class="btn btn-sm btn-info">
+                                                            <i class="fas fa-eye"></i> View
+                                                        </a>
+                                                        <button type="button" class="btn btn-sm btn-warning" 
+                                                                data-toggle="modal" 
+                                                                data-target="#updateInvoiceStatusModal{{ invoice.id }}"
+                                                                title="Update Status">
+                                                            <i class="fas fa-edit"></i> Update Status
+                                                        </button>
+                                                    </div>
+                                                    
+                                                    <!-- Status Update Modal for Private Insurance -->
+                                                    <div class="modal fade" id="updateInvoiceStatusModal{{ invoice.id }}" tabindex="-1" role="dialog">
+                                                        <div class="modal-dialog" role="document">
+                                                            <div class="modal-content">
+                                                                <div class="modal-header">
+                                                                    <h5 class="modal-title">Update Invoice Status</h5>
+                                                                    <button type="button" class="close" data-dismiss="modal">
+                                                                        <span>&times;</span>
+                                                                    </button>
+                                                                </div>
+                                                                <form method="POST" action="{{ url_for('update_private_insurance_invoice_status', invoice_id=invoice.id) }}">
+                                                                    <div class="modal-body">
+                                                                        <div class="form-group">
+                                                                            <label>Invoice Number:</label>
+                                                                            <input type="text" class="form-control" value="{{ invoice.invoice_number or 'N/A' }}" readonly>
+                                                                        </div>
+                                                                        <div class="form-group">
+                                                                            <label>Patient:</label>
+                                                                            <input type="text" class="form-control" value="{{ invoice.patient.first_name }} {{ invoice.patient.last_name }}" readonly>
+                                                                        </div>
+                                                                        <div class="form-group">
+                                                                            <label>Insurance Provider:</label>
+                                                                            <input type="text" class="form-control" value="{{ invoice.insurance_provider or invoice.patient.insurance_provider or 'N/A' }}" readonly>
+                                                                        </div>
+                                                                        <div class="form-group">
+                                                                            <label>Current Status:</label>
+                                                                            <input type="text" class="form-control" value="{{ invoice.status.value.title() }}" readonly>
+                                                                        </div>
+                                                                        <div class="form-group">
+                                                                            <label for="new_status{{ invoice.id }}">New Status <span class="text-danger">*</span></label>
+                                                                            <select class="form-control" id="new_status{{ invoice.id }}" name="new_status" required>
+                                                                                <option value="draft" {% if invoice.status.value == 'draft' %}selected{% endif %}>Draft</option>
+                                                                                <option value="pending" {% if invoice.status.value == 'pending' %}selected{% endif %}>Pending</option>
+                                                                                <option value="partially_paid" {% if invoice.status.value == 'partially_paid' %}selected{% endif %}>Partially Paid</option>
+                                                                                <option value="paid" {% if invoice.status.value == 'paid' %}selected{% endif %}>Paid</option>
+                                                                                <option value="overdue" {% if invoice.status.value == 'overdue' %}selected{% endif %}>Overdue</option>
+                                                                            </select>
+                                                                            <small class="form-text text-muted">
+                                                                                <strong>Note:</strong> When status is set to "Paid", ensure payment has been received from the insurance provider.
+                                                                            </small>
+                                                                        </div>
+                                                                        <div class="form-group">
+                                                                            <label for="notes{{ invoice.id }}">Notes (Optional)</label>
+                                                                            <textarea class="form-control" id="notes{{ invoice.id }}" name="notes" rows="3" placeholder="Add notes about this status update (e.g., payment confirmation, reference number, etc.)..."></textarea>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div class="modal-footer">
+                                                                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                                                                        <button type="submit" class="btn btn-primary">Update Status</button>
+                                                                    </div>
+                                                                </form>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <style>
+        .badge-lg {
+            font-size: 1rem;
+            padding: 0.5rem 0.75rem;
+        }
+    </style>
+
+    <!-- Batch Update Modal for NHIS Claims -->
+    <div class="modal fade" id="batchUpdateNHISModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Batch Update NHIS Claims Status</h5>
+                    <button type="button" class="close" data-dismiss="modal">
+                        <span>&times;</span>
+                    </button>
+                </div>
+                <form method="POST" action="{{ url_for('batch_update_nhis_claims_status') }}" id="batchUpdateNHISForm">
+                    <div class="modal-body">
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            <strong>Warning:</strong> This will update the status of all selected claims. This action cannot be undone.
+                        </div>
+                        <div class="form-group">
+                            <label>Selected Claims:</label>
+                            <div id="selectedNHISClaimsList" class="border p-2" style="max-height: 150px; overflow-y: auto;">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="batch_new_status_nhis">New Status <span class="text-danger">*</span></label>
+                            <select class="form-control" id="batch_new_status_nhis" name="new_status" required>
+                                <option value="">-- Select Status --</option>
+                                <option value="draft">Draft</option>
+                                <option value="pending">Pending</option>
+                                <option value="submitted">Submitted</option>
+                                <option value="processing">Processing</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="paid">Paid</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                            <small class="form-text text-muted">
+                                <strong>Note:</strong> When status is set to "Paid", the system will automatically update invoices and create payment records for all selected claims.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="batch_notes_nhis">Notes (Optional)</label>
+                            <textarea class="form-control" id="batch_notes_nhis" name="notes" rows="3" placeholder="Add notes about this batch status update (e.g., batch approval reference, payment confirmation, etc.)..."></textarea>
+                        </div>
+                        <!-- Hidden input for claim IDs -->
+                        <input type="hidden" name="claim_ids" id="batchNHISClaimIds">
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Update All Selected</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch Update Modal for Private Insurance (per provider) -->
+    {% for provider in insurance_providers %}
+    <div class="modal fade" id="batchUpdatePrivateModal{{ provider|replace(' ', '_') }}" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Batch Update Invoice Status - {{ provider }}</h5>
+                    <button type="button" class="close" data-dismiss="modal">
+                        <span>&times;</span>
+                    </button>
+                </div>
+                <form method="POST" action="{{ url_for('batch_update_private_insurance_invoices_status') }}" id="batchUpdatePrivateForm{{ provider|replace(' ', '_') }}">
+                    <div class="modal-body">
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            <strong>Warning:</strong> This will update the status of all selected invoices. This action cannot be undone.
+                        </div>
+                        <div class="form-group">
+                            <label>Selected Invoices:</label>
+                            <div id="selectedPrivateInvoicesList{{ provider|replace(' ', '_') }}" class="border p-2" style="max-height: 150px; overflow-y: auto;">
+                                <!-- Will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="batch_new_status_private{{ provider|replace(' ', '_') }}">New Status <span class="text-danger">*</span></label>
+                            <select class="form-control" id="batch_new_status_private{{ provider|replace(' ', '_') }}" name="new_status" required>
+                                <option value="">-- Select Status --</option>
+                                <option value="draft">Draft</option>
+                                <option value="pending">Pending</option>
+                                <option value="partially_paid">Partially Paid</option>
+                                <option value="paid">Paid</option>
+                                <option value="overdue">Overdue</option>
+                            </select>
+                            <small class="form-text text-muted">
+                                <strong>Note:</strong> When status is set to "Paid", ensure payments have been received from the insurance provider.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="batch_notes_private{{ provider|replace(' ', '_') }}">Notes (Optional)</label>
+                            <textarea class="form-control" id="batch_notes_private{{ provider|replace(' ', '_') }}" name="notes" rows="3" placeholder="Add notes about this batch status update (e.g., batch payment confirmation, reference number, etc.)..."></textarea>
+                        </div>
+                        <!-- Hidden input for invoice IDs -->
+                        <input type="hidden" name="invoice_ids" id="batchPrivateInvoiceIds{{ provider|replace(' ', '_') }}">
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Update All Selected</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <script>
+        // NHIS Claims Batch Selection
+        function toggleAllNHIS(checkbox) {
+            const checkboxes = document.querySelectorAll('.nhis-claim-checkbox');
+            checkboxes.forEach(cb => cb.checked = checkbox.checked);
+            updateNHISSelection();
+        }
+
+        function updateNHISSelection() {
+            const checkboxes = document.querySelectorAll('.nhis-claim-checkbox:checked');
+            const count = checkboxes.length;
+            const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+            
+            document.getElementById('nhisSelectedCount').textContent = count;
+            document.getElementById('batchNHISClaimIds').value = selectedIds.join(',');
+            
+            // Show/hide batch controls
+            const controls = document.getElementById('nhisBatchControls');
+            if (count > 0) {
+                controls.style.display = 'block';
+                
+                // Update selected claims list in modal
+                const listDiv = document.getElementById('selectedNHISClaimsList');
+                if (selectedIds.length > 0) {
+                    listDiv.innerHTML = '<ul class="mb-0">' + 
+                        Array.from(checkboxes).map(cb => {
+                            const row = cb.closest('tr');
+                            const claimNumber = row.querySelector('td:nth-child(2) strong') ? row.querySelector('td:nth-child(2) strong').textContent : 'N/A';
+                            return '<li>' + claimNumber + '</li>';
+                        }).join('') + '</ul>';
+                }
+            } else {
+                controls.style.display = 'none';
+            }
+            
+            // Update select all checkbox
+            const selectAll = document.getElementById('selectAllNHIS');
+            const allCheckboxes = document.querySelectorAll('.nhis-claim-checkbox');
+            selectAll.checked = allCheckboxes.length > 0 && checkboxes.length === allCheckboxes.length;
+        }
+
+        function clearNHISSelection() {
+            document.querySelectorAll('.nhis-claim-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('selectAllNHIS').checked = false;
+            updateNHISSelection();
+        }
+
+        // Private Insurance Batch Selection
+        function toggleAllPrivate(provider, checkbox) {
+            const checkboxes = document.querySelectorAll('.private-checkbox-' + provider);
+            checkboxes.forEach(cb => cb.checked = checkbox.checked);
+            updatePrivateSelection(provider);
+        }
+
+        function updatePrivateSelection(provider) {
+            const checkboxes = document.querySelectorAll('.private-checkbox-' + provider + ':checked');
+            const count = checkboxes.length;
+            const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+            
+            document.getElementById('privateSelectedCount' + provider).textContent = count;
+            document.getElementById('batchPrivateInvoiceIds' + provider).value = selectedIds.join(',');
+            
+            // Show/hide batch controls
+            const controls = document.getElementById('privateBatchControls' + provider);
+            if (count > 0) {
+                controls.style.display = 'block';
+                
+                // Update selected invoices list in modal
+                const listDiv = document.getElementById('selectedPrivateInvoicesList' + provider);
+                if (selectedIds.length > 0) {
+                    listDiv.innerHTML = '<ul class="mb-0">' + 
+                        Array.from(checkboxes).map(cb => {
+                            const row = cb.closest('tr');
+                            const invoiceNumber = row.querySelector('td:nth-child(2) strong') ? row.querySelector('td:nth-child(2) strong').textContent : 'N/A';
+                            return '<li>' + invoiceNumber + '</li>';
+                        }).join('') + '</ul>';
+                }
+            } else {
+                controls.style.display = 'none';
+            }
+            
+            // Update select all checkbox
+            const selectAll = document.getElementById('selectAllPrivate' + provider);
+            const allCheckboxes = document.querySelectorAll('.private-checkbox-' + provider);
+            selectAll.checked = allCheckboxes.length > 0 && checkboxes.length === allCheckboxes.length;
+        }
+
+        function clearPrivateSelection(provider) {
+            document.querySelectorAll('.private-checkbox-' + provider).forEach(cb => cb.checked = false);
+            document.getElementById('selectAllPrivate' + provider).checked = false;
+            updatePrivateSelection(provider);
+        }
+    </script>
+
+{% endblock %}
+

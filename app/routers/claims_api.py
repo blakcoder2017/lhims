@@ -23,52 +23,163 @@ def claims_dashboard(
     request: Request,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Admin", "Finance"])),
-    status_filter: Optional[str] = Query(None)
+    status_filter: Optional[str] = Query(None),
+    provider_filter: Optional[str] = Query(None)  # "nhis" or provider name
 ):
-    """NHIS Claims dashboard - National Health Insurance Scheme claims"""
-    query = db.query(NHISClaim).filter(NHISClaim.is_active == True)
+    """
+    Unified Claims Dashboard - Shows both NHIS and Private Insurance claims
+    with provider badges and submission tracking
+    """
+    from app.models.billing_models import Invoice, InvoiceStatus
+    from app.models.patient_models import PaymentMechanism
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import func
+    from decimal import Decimal
     
-    if status_filter:
+    # ========== NHIS CLAIMS ==========
+    nhis_query = db.query(NHISClaim).filter(NHISClaim.is_active == True)
+    
+    if status_filter and provider_filter != "private_insurance":
         try:
             status_enum = ClaimStatus(status_filter)
-            query = query.filter(NHISClaim.status == status_enum.value)
+            nhis_query = nhis_query.filter(NHISClaim.status == status_enum.value)
         except ValueError:
             pass
+    
+    # Filter by provider
+    if provider_filter == "nhis" or not provider_filter:
+        nhis_claims = nhis_query.options(
+            joinedload(NHISClaim.patient),
+            joinedload(NHISClaim.encounter),
+            joinedload(NHISClaim.invoice)
+        ).order_by(NHISClaim.claim_date.desc()).all()
     else:
-        # Default: show draft and pending claims
-        query = query.filter(
-            NHISClaim.status.in_([ClaimStatus.DRAFT.value, ClaimStatus.PENDING.value])
-        )
+        nhis_claims = []
     
-    from sqlalchemy.orm import joinedload
-    claims = query.options(
-        joinedload(NHISClaim.patient),
-        joinedload(NHISClaim.encounter)
-    ).order_by(NHISClaim.claim_date.desc()).limit(100).all()
-    
-    # Statistics
-    total_claims = db.query(NHISClaim).filter(NHISClaim.is_active == True).count()
-    pending_claims = db.query(NHISClaim).filter(
+    # NHIS Statistics
+    total_nhis_claims = db.query(NHISClaim).filter(NHISClaim.is_active == True).count()
+    submitted_nhis_claims = db.query(NHISClaim).filter(
+        NHISClaim.status.in_([ClaimStatus.SUBMITTED.value, ClaimStatus.PROCESSING.value, ClaimStatus.APPROVED.value, ClaimStatus.PAID.value]),
+        NHISClaim.is_active == True
+    ).count()
+    pending_nhis_claims = db.query(NHISClaim).filter(
         NHISClaim.status == ClaimStatus.PENDING.value,
         NHISClaim.is_active == True
     ).count()
-    approved_claims = db.query(NHISClaim).filter(
+    approved_nhis_claims = db.query(NHISClaim).filter(
         NHISClaim.status == ClaimStatus.APPROVED.value,
         NHISClaim.is_active == True
     ).count()
+    paid_nhis_claims = db.query(NHISClaim).filter(
+        NHISClaim.status == ClaimStatus.PAID.value,
+        NHISClaim.is_active == True
+    ).count()
+    
+    # NHIS Financial Summary
+    nhis_total_amount = db.query(func.sum(NHISClaim.total_amount)).filter(
+        NHISClaim.is_active == True
+    ).scalar() or Decimal('0.00')
+    nhis_submitted_amount = db.query(func.sum(NHISClaim.total_amount)).filter(
+        NHISClaim.status.in_([ClaimStatus.SUBMITTED.value, ClaimStatus.PROCESSING.value, ClaimStatus.APPROVED.value, ClaimStatus.PAID.value]),
+        NHISClaim.is_active == True
+    ).scalar() or Decimal('0.00')
+    nhis_paid_amount = db.query(func.sum(NHISClaim.approved_amount)).filter(
+        NHISClaim.status == ClaimStatus.PAID.value,
+        NHISClaim.is_active == True
+    ).scalar() or Decimal('0.00')
+    
+    # ========== PRIVATE INSURANCE CLAIMS ==========
+    private_query = db.query(Invoice).filter(
+        Invoice.is_active == True,
+        Invoice.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE.value
+    )
+    
+    if status_filter and provider_filter != "nhis":
+        try:
+            status_enum = InvoiceStatus(status_filter)
+            private_query = private_query.filter(Invoice.status == status_enum.value)
+        except ValueError:
+            pass
+    
+    # Filter by provider
+    if provider_filter and provider_filter != "nhis" and provider_filter != "private_insurance":
+        from app.models.patient_models import Patient
+        private_query = private_query.join(Patient).filter(
+            func.coalesce(Invoice.insurance_provider, Patient.insurance_provider) == provider_filter
+        )
+    
+    if provider_filter != "nhis":
+        private_invoices = private_query.options(
+            joinedload(Invoice.patient),
+            joinedload(Invoice.encounter)
+        ).order_by(Invoice.invoice_date.desc()).all()
+    else:
+        private_invoices = []
+    
+    # Group private insurance by provider
+    invoices_by_provider = {}
+    total_amount_by_provider = {}
+    submitted_count_by_provider = {}
+    
+    for invoice in private_invoices:
+        provider = invoice.insurance_provider or invoice.patient.insurance_provider or "Unknown Provider"
+        
+        if provider not in invoices_by_provider:
+            invoices_by_provider[provider] = []
+            total_amount_by_provider[provider] = Decimal('0.00')
+            submitted_count_by_provider[provider] = 0
+        
+        invoices_by_provider[provider].append(invoice)
+        total_amount_by_provider[provider] += invoice.total_amount
+        
+        # Count submitted (pending, partially_paid, paid are considered submitted)
+        if invoice.status.value in ['pending', 'partially_paid', 'paid']:
+            submitted_count_by_provider[provider] += 1
+    
+    # Private Insurance Statistics
+    total_private_invoices = len(private_invoices)
+    pending_private_invoices = sum(1 for inv in private_invoices if inv.status == InvoiceStatus.PENDING.value)
+    paid_private_invoices = sum(1 for inv in private_invoices if inv.status == InvoiceStatus.PAID.value)
+    
+    total_private_amount = sum(inv.total_amount for inv in private_invoices)
+    total_pending_private_amount = sum(inv.balance for inv in private_invoices if inv.status == InvoiceStatus.PENDING.value)
+    total_paid_private_amount = sum(inv.total_amount for inv in private_invoices if inv.status == InvoiceStatus.PAID.value)
+    
+    # Get list of unique insurance providers
+    insurance_providers = sorted(invoices_by_provider.keys())
     
     context = {
         "request": request,
-        "title": "NHIS Claims",
+        "title": "Insurance Claims Dashboard",
         "current_user": current_user,
         "user_role": current_user.role.name,
-        "claims": claims,
+        # NHIS Data
+        "nhis_claims": nhis_claims,
+        "total_nhis_claims": total_nhis_claims,
+        "submitted_nhis_claims": submitted_nhis_claims,
+        "pending_nhis_claims": pending_nhis_claims,
+        "approved_nhis_claims": approved_nhis_claims,
+        "paid_nhis_claims": paid_nhis_claims,
+        "nhis_total_amount": nhis_total_amount,
+        "nhis_submitted_amount": nhis_submitted_amount,
+        "nhis_paid_amount": nhis_paid_amount,
+        # Private Insurance Data
+        "private_invoices": private_invoices,
+        "invoices_by_provider": invoices_by_provider,
+        "total_amount_by_provider": total_amount_by_provider,
+        "submitted_count_by_provider": submitted_count_by_provider,
+        "insurance_providers": insurance_providers,
+        "total_private_invoices": total_private_invoices,
+        "pending_private_invoices": pending_private_invoices,
+        "paid_private_invoices": paid_private_invoices,
+        "total_private_amount": total_private_amount,
+        "total_pending_private_amount": total_pending_private_amount,
+        "total_paid_private_amount": total_paid_private_amount,
+        # Filters
         "status_filter": status_filter,
-        "total_claims": total_claims,
-        "pending_claims": pending_claims,
-        "approved_claims": approved_claims
+        "provider_filter": provider_filter,
     }
-    return templates.TemplateResponse("claims/dashboard.html", context)
+    return templates.TemplateResponse("claims/unified_dashboard.html", context)
 
 
 @router.get("/claims/private-insurance", name="private_insurance_claims_dashboard")
@@ -407,24 +518,32 @@ def update_nhis_claim_status(
     new_status: str = Form(...),
     notes: Optional[str] = Form(None)
 ):
-    """Update the status of an NHIS claim."""
-    claim = db.query(NHISClaim).filter(
-        NHISClaim.id == claim_id,
-        NHISClaim.is_active == True
-    ).first()
-    
-    if not claim:
-        raise HTTPException(status_code=404, detail="Claim not found")
-    
+    """
+    Update the status of an NHIS claim.
+    Uses the update_claim_status function which automatically handles:
+    - Invoice status updates
+    - Payment record creation (when status = PAID)
+    - OPD visit payment status sync
+    """
     try:
         status_enum = ClaimStatus(new_status)
-        claim.status = status_enum.value
         
+        # Use the update_claim_status function which handles automatic payment updates
+        updated_claim = claims_crud.update_claim_status(
+            db=db,
+            claim_id=claim_id,
+            new_status=status_enum,
+            rejection_reason=notes if status_enum == ClaimStatus.REJECTED else None
+        )
+        
+        if not updated_claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        
+        # Add notes if provided
         if notes:
-            claim.notes = (claim.notes or '') + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {notes}"
-        
-        db.commit()
-        db.refresh(claim)
+            updated_claim.notes = (updated_claim.notes or '') + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {notes}"
+            db.commit()
+            db.refresh(updated_claim)
         
         return RedirectResponse(
             url=f"/claims?status=updated&claim_id={claim_id}",
@@ -516,11 +635,17 @@ def export_private_insurance_invoices(
         )
     
     elif format == "excel":
-        # Generate Excel
+        # Generate Excel - check if openpyxl is available
         try:
             import openpyxl
             from openpyxl.styles import Font, Alignment
-            
+        except ImportError as e:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"openpyxl is required for Excel export. Install it with: pip install openpyxl. Error: {str(e)}"
+            )
+        
+        try:
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "Private Insurance Invoices"
@@ -579,8 +704,11 @@ def export_private_insurance_invoices(
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 headers={"Content-Disposition": f"attachment; filename={filename}"}
             )
-        except ImportError:
-            raise HTTPException(status_code=500, detail="openpyxl is required for Excel export. Install it with: pip install openpyxl")
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating Excel file: {str(e)}"
+            )
 
 
 @router.post("/claims/private-insurance/invoices/{invoice_id}/update-status", name="update_private_insurance_invoice_status")
@@ -623,4 +751,125 @@ def update_private_insurance_invoice_status(
         )
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+
+
+@router.post("/claims/batch-update-nhis", name="batch_update_nhis_claims_status")
+def batch_update_nhis_claims_status(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance"])),
+    claim_ids: str = Form(...),
+    new_status: str = Form(...),
+    notes: Optional[str] = Form(None)
+):
+    """
+    Batch update status for multiple NHIS claims.
+    Updates all selected claims to the new status and handles automatic payment updates.
+    """
+    try:
+        status_enum = ClaimStatus(new_status)
+        claim_id_list = [int(id.strip()) for id in claim_ids.split(',') if id.strip()]
+        
+        if not claim_id_list:
+            raise HTTPException(status_code=400, detail="No claims selected")
+        
+        updated_count = 0
+        failed_count = 0
+        errors = []
+        
+        for claim_id in claim_id_list:
+            try:
+                updated_claim = claims_crud.update_claim_status(
+                    db=db,
+                    claim_id=claim_id,
+                    new_status=status_enum,
+                    rejection_reason=notes if status_enum == ClaimStatus.REJECTED else None
+                )
+                
+                if updated_claim:
+                    # Add notes if provided
+                    if notes:
+                        updated_claim.notes = (updated_claim.notes or '') + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Batch Update: {notes}"
+                        db.commit()
+                        db.refresh(updated_claim)
+                    updated_count += 1
+                else:
+                    failed_count += 1
+                    errors.append(f"Claim {claim_id} not found")
+            except Exception as e:
+                failed_count += 1
+                errors.append(f"Claim {claim_id}: {str(e)}")
+        
+        # Build redirect URL with results
+        result_msg = f"Updated {updated_count} claim(s)"
+        if failed_count > 0:
+            result_msg += f", {failed_count} failed"
+        
+        return RedirectResponse(
+            url=f"/claims?status=batch_updated&updated={updated_count}&failed={failed_count}",
+            status_code=302
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch update failed: {str(e)}")
+
+
+@router.post("/claims/batch-update-private-insurance", name="batch_update_private_insurance_invoices_status")
+def batch_update_private_insurance_invoices_status(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance"])),
+    invoice_ids: str = Form(...),
+    new_status: str = Form(...),
+    notes: Optional[str] = Form(None)
+):
+    """
+    Batch update status for multiple private insurance invoices.
+    """
+    from app.models.billing_models import Invoice, InvoiceStatus
+    from app.models.patient_models import PaymentMechanism
+    
+    try:
+        status_enum = InvoiceStatus(new_status)
+        invoice_id_list = [int(id.strip()) for id in invoice_ids.split(',') if id.strip()]
+        
+        if not invoice_id_list:
+            raise HTTPException(status_code=400, detail="No invoices selected")
+        
+        updated_count = 0
+        failed_count = 0
+        
+        for invoice_id in invoice_id_list:
+            try:
+                invoice = db.query(Invoice).filter(
+                    Invoice.id == invoice_id,
+                    Invoice.is_active == True,
+                    Invoice.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE.value
+                ).first()
+                
+                if invoice:
+                    invoice.status = status_enum.value
+                    
+                    if notes:
+                        if hasattr(invoice, 'notes'):
+                            invoice.notes = (invoice.notes or '') + f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Batch Update: {notes}"
+                    
+                    db.commit()
+                    db.refresh(invoice)
+                    updated_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                failed_count += 1
+                db.rollback()
+        
+        return RedirectResponse(
+            url=f"/claims?status=batch_updated&updated={updated_count}&failed={failed_count}&type=private",
+            status_code=302
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch update failed: {str(e)}")
 

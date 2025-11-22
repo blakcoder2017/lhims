@@ -216,7 +216,7 @@ def get_admission(db: Session, admission_id: int) -> Optional[Admission]:
         joinedload(Admission.patient),
         joinedload(Admission.ward),
         joinedload(Admission.bed),
-        joinedload(Admission.encounter),
+        joinedload(Admission.initial_encounter),
         joinedload(Admission.admitted_by),
         joinedload(Admission.transferred_from_ward),
         joinedload(Admission.transferred_to_ward),
@@ -364,7 +364,7 @@ def update_admission(db: Session, admission_id: int, admission_update: Admission
 
 
 def discharge_patient(db: Session, admission_id: int, discharged_by_id: int, discharge_date: Optional[datetime] = None) -> Optional[Admission]:
-    """Discharge a patient"""
+    """Discharge a patient and release their bed"""
     db_admission = get_admission(db, admission_id)
     if not db_admission:
         return None
@@ -377,14 +377,25 @@ def discharge_patient(db: Session, admission_id: int, discharged_by_id: int, dis
     db_admission.discharge_date = discharge_date or datetime.now()
     
     # Update bed status to available
-    bed = get_bed(db, db_admission.bed_id)
+    # Query bed directly (including soft-deleted ones) to ensure we can release it
+    bed = db.query(Bed).filter(Bed.id == db_admission.bed_id).first()
     if bed:
         bed.status = BedStatus.AVAILABLE
+        print(f"Bed {bed.id} ({bed.bed_number}) released for admission {admission_id}")
+    else:
+        print(f"Warning: Bed {db_admission.bed_id} not found for admission {admission_id}")
     
     # Update ward occupancy
-    ward = get_ward(db, db_admission.ward_id)
-    if ward and ward.current_occupancy > 0:
-        ward.current_occupancy -= 1
+    # Query ward directly (including soft-deleted ones) to ensure we can update occupancy
+    ward = db.query(Ward).filter(Ward.id == db_admission.ward_id).first()
+    if ward:
+        if ward.current_occupancy > 0:
+            ward.current_occupancy -= 1
+            print(f"Ward {ward.id} ({ward.name}) occupancy decremented to {ward.current_occupancy} for admission {admission_id}")
+        else:
+            print(f"Warning: Ward {ward.id} ({ward.name}) occupancy is already 0 for admission {admission_id}")
+    else:
+        print(f"Warning: Ward {db_admission.ward_id} not found for admission {admission_id}")
     
     db.commit()
     db.refresh(db_admission)

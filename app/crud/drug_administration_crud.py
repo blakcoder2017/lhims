@@ -41,14 +41,27 @@ def get_dispensed_drugs_by_admission(db: Session, admission_number: str) -> List
         prescriptions.extend(encounter_prescriptions)
         print(f"Found {len(encounter_prescriptions)} prescriptions from admission encounter")
     
-    # Get prescriptions from other encounters during admission period
-    # Include all encounters on or after admission date
+    # Get prescriptions from other encounters during THIS admission period only
+    # Determine admission period (from admission_date to discharge_date or now if still admitted)
+    from datetime import date
+    from sqlalchemy import func
+    
+    admission_start_date = admission.admission_date.date() if isinstance(admission.admission_date, datetime) else admission.admission_date
+    admission_end_date = None
+    if admission.discharge_date:
+        admission_end_date = admission.discharge_date.date() if isinstance(admission.discharge_date, datetime) else admission.discharge_date
+    else:
+        # Still admitted, use today as end date
+        admission_end_date = date.today()
+    
+    # Get prescriptions from other encounters during THIS admission period only
     other_prescriptions = db.query(Prescription).options(
         joinedload(Prescription.prescribed_by),
         joinedload(Prescription.encounter)
     ).join(Encounter).filter(
         Encounter.patient_id == admission.patient_id,
-        Encounter.encounter_date >= admission.admission_date.date()
+        func.date(Encounter.encounter_date) >= admission_start_date,
+        func.date(Encounter.encounter_date) <= admission_end_date
     ).all()
     
     print(f"Found {len(other_prescriptions)} prescriptions from other encounters during admission period")

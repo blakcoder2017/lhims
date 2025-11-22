@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from app.db.database import get_db
 from app.core.deps import role_required, get_current_user
-from app.crud import encounter_crud, billing_crud, service_pricing_crud
+from app.crud import encounter_crud, billing_crud, service_pricing_crud, appointment_crud
 from app.schemas.encounter_schemas import (
     EncounterCreate, EncounterUpdate, Encounter,
     LabOrderCreate, LabOrderUpdate, LabOrder,
@@ -66,6 +66,8 @@ def create_encounter_form(
     # Form fields
     patient_id: int = Form(...),
     appointment_id: Optional[int] = Form(None),
+    opd_visit_id: Optional[int] = Form(None),  # OPD visit link
+    admission_id: Optional[int] = Form(None),  # IPD admission link
     chief_complaint: Optional[str] = Form(None),
     history_of_present_illness: Optional[str] = Form(None),
     past_medical_history: Optional[str] = Form(None),
@@ -80,6 +82,7 @@ def create_encounter_form(
     primary_disease_id: Optional[str] = Form(None),
     secondary_disease_ids: Optional[str] = Form(None),
     custom_diseases: Optional[str] = Form(None),
+    diagnoses: Optional[List[int]] = Form(None),  # Disease IDs from multi-select
 ):
     """
     Handles HTML form submission for creating a new clinical encounter.
@@ -90,69 +93,39 @@ def create_encounter_form(
     For cash patients: Checks if consultation fee has been paid before allowing encounter creation.
     """
     from app.utils.payment_verification import (
-        check_payment_required_and_paid,
-        is_cash_patient,
-        requires_payment_before_service,
-        has_paid_for_service
+        verify_encounter_workflow,
+        is_cash_patient
     )
     from app.models.billing_models import ChargeType
     
-    # Check payment requirement for cash patients (consultation fee)
-    if is_cash_patient(db, patient_id):
-        payment_required = requires_payment_before_service(db, patient_id, ChargeType.CONSULTATION)
-        
-        if payment_required:
-            # Use improved payment check: look for recent consultation charges with payments
-            from app.models.billing_models import Charge, Invoice, Payment, PaymentStatus
-            
-            # Look for any consultation charges, then check if they have payments
-            recent_charges = db.query(Charge).join(Invoice).filter(
-                Invoice.patient_id == patient_id,
-                Charge.charge_type == ChargeType.CONSULTATION,
-                Charge.encounter_id.is_(None),
-                Invoice.is_active == True
-            ).order_by(Charge.created_at.desc()).limit(5).all()
-            
-            recent_paid_charge = None
-            has_paid = False
-            for ch in recent_charges:
-                # Check all payments on this invoice
-                all_payments = db.query(Payment).filter(
-                    Payment.invoice_id == ch.invoice_id,
-                    Payment.status == PaymentStatus.COMPLETED,
-                    Payment.is_active == True
-                ).all()
-                
-                if all_payments:
-                    total_paid_all = sum(p.amount for p in all_payments)
-                    
-                    if total_paid_all >= ch.total_amount:
-                        recent_paid_charge = ch
-                        has_paid = True
-                        break
-            
-            # Fallback: check for today's charges using the standard method
-            if not has_paid:
-                has_paid, charge, invoice = has_paid_for_service(
-                    db, patient_id, ChargeType.CONSULTATION,
-                    encounter_id=None,
-                    check_today_only=True
-                )
-            
-            payment_paid = has_paid
-            
-            if not payment_paid:
-                # Redirect to payment page
-                return RedirectResponse(
-                    url=f"/patients/{patient_id}/pay/consultation?return_to=encounters/new",
-                    status_code=status.HTTP_302_FOUND
-                )
+    # Verify complete workflow: vitals + check-in + payment (for ALL users including admins)
+    workflow_complete, missing_step, vitals_record, appointment_record, payment_info = verify_encounter_workflow(
+        db, patient_id, check_vitals=True, check_checkin=True, check_payment=True
+    )
+    
+    if not workflow_complete:
+        triage_url = request.url_for("patient_triage", patient_id=patient_id)
+        status_param = "checkin_required"
+        if missing_step == "vitals":
+            status_param = "vitals_required"
+        elif missing_step == "payment":
+            status_param = "payment_required"
+        return RedirectResponse(
+            url=f"{triage_url}?status={status_param}",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Use the verified appointment record
+    if appointment_record:
+        appointment_id = appointment_record.id
     
     try:
         # Create encounter data
         encounter_data = EncounterCreate(
             patient_id=patient_id,
             appointment_id=appointment_id,
+            opd_visit_id=opd_visit_id if opd_visit_id else None,
+            admission_id=admission_id if admission_id else None,
             clinician_id=current_user.id,
             status=EncounterStatus.IN_PROGRESS,
             chief_complaint=chief_complaint if chief_complaint else None,
@@ -168,36 +141,68 @@ def create_encounter_form(
             secondary_diagnosis_codes=secondary_diagnosis_codes if secondary_diagnosis_codes else None,
         )
         
-        # Create encounter
-        new_encounter = encounter_crud.create_encounter(db, encounter_data)
+        # Create encounter (with validation)
+        try:
+            new_encounter = encounter_crud.create_encounter(db, encounter_data)
+        except ValueError as e:
+            # Handle validation errors
+            error_msg = str(e)
+            triage_url = request.url_for("patient_triage", patient_id=patient_id)
+            return RedirectResponse(
+                url=f"{triage_url}?error={error_msg}",
+                status_code=status.HTTP_302_FOUND
+            )
         
         # Link diseases to encounter
         from app.crud import disease_crud
         import json
         
-        # Process primary disease
-        if primary_disease_id and primary_disease_id.strip():
-            try:
-                disease_id = int(primary_disease_id)
-                disease_crud.add_disease_to_encounter(
-                    db, new_encounter.id, disease_id=disease_id, is_primary=True
-                )
-            except (ValueError, TypeError):
-                pass  # Invalid ID, skip
+        # Debug: Log received diagnoses
+        print(f"DEBUG: Received diagnoses parameter: {diagnoses}, type: {type(diagnoses)}")
         
-        # Process secondary diseases
-        if secondary_disease_ids and secondary_disease_ids.strip():
-            try:
-                secondary_ids = json.loads(secondary_disease_ids)
-                for disease_id in secondary_ids:
-                    try:
-                        disease_crud.add_disease_to_encounter(
-                            db, new_encounter.id, disease_id=int(disease_id), is_primary=False
-                        )
-                    except (ValueError, TypeError):
-                        continue
-            except (json.JSONDecodeError, TypeError):
-                pass  # Invalid JSON, skip
+        # Process diagnoses from multi-select field (new method)
+        if diagnoses and len(diagnoses) > 0:
+            # First diagnosis is primary, rest are secondary
+            for idx, disease_id in enumerate(diagnoses):
+                try:
+                    # Ensure disease_id is an integer
+                    if isinstance(disease_id, str):
+                        disease_id = int(disease_id)
+                    elif not isinstance(disease_id, int):
+                        disease_id = int(disease_id)
+                    
+                    is_primary = (idx == 0)  # First one is primary
+                    disease_crud.add_disease_to_encounter(
+                        db, new_encounter.id, disease_id=disease_id, is_primary=is_primary
+                    )
+                except (ValueError, TypeError) as e:
+                    print(f"Error adding disease {disease_id} to encounter: {e}")
+                    continue
+        else:
+            # Fallback to old method for backward compatibility
+            # Process primary disease
+            if primary_disease_id and primary_disease_id.strip():
+                try:
+                    disease_id = int(primary_disease_id)
+                    disease_crud.add_disease_to_encounter(
+                        db, new_encounter.id, disease_id=disease_id, is_primary=True
+                    )
+                except (ValueError, TypeError):
+                    pass  # Invalid ID, skip
+            
+            # Process secondary diseases
+            if secondary_disease_ids and secondary_disease_ids.strip():
+                try:
+                    secondary_ids = json.loads(secondary_disease_ids)
+                    for disease_id in secondary_ids:
+                        try:
+                            disease_crud.add_disease_to_encounter(
+                                db, new_encounter.id, disease_id=int(disease_id), is_primary=False
+                            )
+                        except (ValueError, TypeError):
+                            continue
+                except (json.JSONDecodeError, TypeError):
+                    pass  # Invalid JSON, skip
         
         # Process custom diseases
         if custom_diseases and custom_diseases.strip():
@@ -213,7 +218,6 @@ def create_encounter_form(
         
         # NEW WORKFLOW: If encounter created by nurse, automatically create appointment and add to doctor queue
         if not appointment_id and current_user.role.name in ["Nurse", "Admin"]:
-            from app.crud import appointment_crud
             
             # Determine department from chief complaint or use default
             department = "General Medicine"  # Default department
@@ -407,7 +411,6 @@ def update_encounter_endpoint(
     # If encounter is completed, remove patient from queue (update appointment status)
     if status_to_check == EncounterStatus.COMPLETED:
         if encounter.appointment_id:
-            from app.crud import appointment_crud
             appointment_update = AppointmentUpdate(
                 status=AppointmentStatus.COMPLETED,
                 completed_at=datetime.now()
@@ -1108,13 +1111,327 @@ def update_prescription_endpoint(
     current_user = Depends(role_required(["Pharmacy Staff", "Admin"]))
 ):
     """Update a prescription (e.g., mark as dispensed)."""
-    # If marking as dispensed, set dispensed_by_id
-    if prescription_update.status == OrderStatus.COMPLETED and not prescription_update.dispensed_by_id:
-        prescription_update.dispensed_by_id = current_user.id
-        prescription_update.dispensed_at = datetime.now()
+    from app.utils.payment_verification import (
+        check_payment_required_and_paid,
+        is_cash_patient
+    )
+    from app.models.billing_models import ChargeType
+    from app.models.encounter_models import Prescription as PrescriptionModel
     
-    prescription = encounter_crud.update_prescription(db, prescription_id, prescription_update)
+    # Get prescription to access encounter and patient
+    prescription = db.query(PrescriptionModel).filter(PrescriptionModel.id == prescription_id).first()
     if not prescription:
         raise HTTPException(status_code=404, detail="Prescription not found")
-    return prescription
+    
+    # If marking as dispensed (COMPLETED), verify payment for cash patients
+    if prescription_update.status == OrderStatus.COMPLETED:
+        # Get patient from encounter
+        encounter = prescription.encounter
+        patient_id = encounter.patient_id
+        
+        # Create charge first (if it doesn't exist) for all patients
+        # This ensures the charge exists before we check payment
+        from app.services import create_charge_for_prescription
+        try:
+            # Create charge if it doesn't exist (function returns None if charge already exists)
+            create_charge_for_prescription(db, prescription, current_user.id, check_payment_required=False)
+        except Exception as e:
+            # Log error but continue - charge might already exist
+            print(f"Note: Charge creation for prescription {prescription_id}: {e}")
+        
+        # Check payment requirement for cash patients (pharmacy fee)
+        # Payment must be made before dispensing for cash patients
+        if is_cash_patient(db, patient_id):
+            payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+                db, patient_id, ChargeType.PHARMACY,
+                encounter_id=encounter.id, prescription_id=prescription_id
+            )
+            
+            if payment_required and not payment_paid:
+                # Block dispensing - payment required
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Payment required before dispensing. Please process payment for this prescription first. Invoice ID: {invoice.id if invoice else 'N/A'}, Balance: {invoice.balance if invoice else 'N/A'}"
+                )
+        
+        # If marking as dispensed, set dispensed_by_id
+        if not prescription_update.dispensed_by_id:
+            prescription_update.dispensed_by_id = current_user.id
+            prescription_update.dispensed_at = datetime.now()
+    
+    updated_prescription = encounter_crud.update_prescription(db, prescription_id, prescription_update)
+    if not updated_prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+    return updated_prescription
+
+
+# Delete Routes for Services
+@router.delete("/lab-orders/{lab_order_id}", status_code=status.HTTP_200_OK)
+def delete_lab_order(
+    lab_order_id: int,
+    encounter_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """Delete a lab order. Only pending/in_progress orders can be deleted."""
+    lab_order = encounter_crud.get_lab_order(db, lab_order_id)
+    if not lab_order:
+        raise HTTPException(status_code=404, detail="Lab order not found")
+    
+    # Verify it belongs to the encounter
+    if lab_order.encounter_id != encounter_id:
+        raise HTTPException(status_code=400, detail="Lab order does not belong to this encounter")
+    
+    # Only allow deletion of pending or in_progress orders
+    if lab_order.status.value in [OrderStatus.COMPLETED.value]:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete completed lab orders. Only pending or in-progress orders can be removed."
+        )
+    
+    # Check for associated charges and handle them
+    from app.models.billing_models import Charge, Invoice, InvoiceStatus
+    associated_charges = db.query(Charge).filter(Charge.lab_order_id == lab_order_id).all()
+    
+    if associated_charges:
+        # Check if any invoice is paid - if so, prevent deletion
+        for charge in associated_charges:
+            invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
+            if invoice and invoice.status == InvoiceStatus.PAID:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot delete lab order. Associated charges have been paid. Please contact Finance department."
+                )
+        
+        # Delete all associated charges (this will update invoice totals)
+        from app.crud import billing_crud
+        for charge in associated_charges:
+            billing_crud.delete_charge(db, charge.id)
+    
+    # Delete the lab order
+    db.delete(lab_order)
+    db.commit()
+    
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Lab order deleted successfully", "lab_order_id": lab_order_id}
+    )
+
+
+@router.delete("/radiology-orders/{radiology_order_id}", status_code=status.HTTP_200_OK)
+def delete_radiology_order(
+    radiology_order_id: int,
+    encounter_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """Delete a radiology order. Only pending/in_progress orders can be deleted."""
+    radiology_order = db.query(RadiologyOrderModel).filter(RadiologyOrderModel.id == radiology_order_id).first()
+    if not radiology_order:
+        raise HTTPException(status_code=404, detail="Radiology order not found")
+    
+    # Verify it belongs to the encounter
+    if radiology_order.encounter_id != encounter_id:
+        raise HTTPException(status_code=400, detail="Radiology order does not belong to this encounter")
+    
+    # Only allow deletion of pending or in_progress orders
+    if radiology_order.status.value in [OrderStatus.COMPLETED.value]:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete completed radiology orders. Only pending or in-progress orders can be removed."
+        )
+    
+    # Check for associated charges and handle them
+    from app.models.billing_models import Charge, Invoice, InvoiceStatus
+    associated_charges = db.query(Charge).filter(Charge.radiology_order_id == radiology_order_id).all()
+    
+    if associated_charges:
+        # Check if any invoice is paid - if so, prevent deletion
+        for charge in associated_charges:
+            invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
+            if invoice and invoice.status == InvoiceStatus.PAID:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot delete radiology order. Associated charges have been paid. Please contact Finance department."
+                )
+        
+        # Delete all associated charges (this will update invoice totals)
+        from app.crud import billing_crud
+        for charge in associated_charges:
+            billing_crud.delete_charge(db, charge.id)
+    
+    # Delete the radiology order
+    db.delete(radiology_order)
+    db.commit()
+    
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Radiology order deleted successfully", "radiology_order_id": radiology_order_id}
+    )
+
+
+@router.delete("/prescriptions/{prescription_id}", status_code=status.HTTP_200_OK)
+def delete_prescription(
+    prescription_id: int,
+    encounter_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """Delete a prescription. Only pending/in_progress prescriptions can be deleted."""
+    from app.models.encounter_models import Prescription as PrescriptionModel
+    
+    prescription = db.query(PrescriptionModel).filter(PrescriptionModel.id == prescription_id).first()
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+    
+    # Verify it belongs to the encounter
+    if prescription.encounter_id != encounter_id:
+        raise HTTPException(status_code=400, detail="Prescription does not belong to this encounter")
+    
+    # Only allow deletion of pending or in_progress prescriptions
+    if prescription.status.value in [OrderStatus.COMPLETED.value]:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete completed prescriptions. Only pending or in-progress prescriptions can be removed."
+        )
+    
+    # Check for associated charges and handle them
+    from app.models.billing_models import Charge, Invoice, InvoiceStatus
+    associated_charges = db.query(Charge).filter(Charge.prescription_id == prescription_id).all()
+    
+    if associated_charges:
+        # Check if any invoice is paid - if so, prevent deletion
+        for charge in associated_charges:
+            invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
+            if invoice and invoice.status == InvoiceStatus.PAID:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot delete prescription. Associated charges have been paid. Please contact Finance department."
+                )
+        
+        # Delete all associated charges (this will update invoice totals)
+        from app.crud import billing_crud
+        for charge in associated_charges:
+            billing_crud.delete_charge(db, charge.id)
+    
+    # Delete the prescription
+    db.delete(prescription)
+    db.commit()
+    
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Prescription deleted successfully", "prescription_id": prescription_id}
+    )
+
+
+@router.delete("/procedures/{procedure_id}", status_code=status.HTTP_200_OK)
+def delete_procedure(
+    procedure_id: int,
+    encounter_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """Delete a procedure. Only pending/in_progress procedures can be deleted."""
+    from app.models.encounter_models import Procedure as ProcedureModel
+    
+    procedure = db.query(ProcedureModel).filter(ProcedureModel.id == procedure_id).first()
+    if not procedure:
+        raise HTTPException(status_code=404, detail="Procedure not found")
+    
+    # Verify it belongs to the encounter
+    if procedure.encounter_id != encounter_id:
+        raise HTTPException(status_code=400, detail="Procedure does not belong to this encounter")
+    
+    # Only allow deletion of pending or in_progress procedures
+    if procedure.status.value in [OrderStatus.COMPLETED.value]:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete completed procedures. Only pending or in-progress procedures can be removed."
+        )
+    
+    # Check for associated charges and handle them
+    # Procedures might have charges linked by description pattern
+    from app.models.billing_models import Charge, Invoice, InvoiceStatus, ChargeType
+    from sqlalchemy import or_
+    
+    # Look for charges that match this procedure (by description pattern or encounter)
+    associated_charges = db.query(Charge).filter(
+        Charge.charge_type == ChargeType.PROCEDURE,
+        Charge.encounter_id == encounter_id,
+        or_(
+            Charge.description.like(f"Procedure #{procedure_id}%"),
+            Charge.description.like(f"%{procedure.procedure_name}%")
+        )
+    ).all()
+    
+    if associated_charges:
+        # Check if any invoice is paid - if so, prevent deletion
+        for charge in associated_charges:
+            invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
+            if invoice and invoice.status == InvoiceStatus.PAID:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot delete procedure. Associated charges have been paid. Please contact Finance department."
+                )
+        
+        # Delete all associated charges (this will update invoice totals)
+        from app.crud import billing_crud
+        for charge in associated_charges:
+            billing_crud.delete_charge(db, charge.id)
+    
+    # Delete the procedure
+    db.delete(procedure)
+    db.commit()
+    
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Procedure deleted successfully", "procedure_id": procedure_id}
+    )
+
+
+@router.delete("/antenatal-charges/{charge_id}", status_code=status.HTTP_200_OK)
+def delete_antenatal_charge(
+    charge_id: int,
+    encounter_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """Delete an antenatal charge."""
+    from app.models.billing_models import Charge
+    
+    charge = db.query(Charge).filter(Charge.id == charge_id).first()
+    if not charge:
+        raise HTTPException(status_code=404, detail="Antenatal charge not found")
+    
+    # Verify it's an antenatal charge and belongs to the encounter
+    if charge.charge_type != ChargeType.ANTENATAL:
+        raise HTTPException(status_code=400, detail="This is not an antenatal charge")
+    
+    # Check if charge is linked to encounter via invoice
+    if charge.invoice and charge.invoice.encounter_id != encounter_id:
+        raise HTTPException(status_code=400, detail="Charge does not belong to this encounter")
+    
+    # Check if invoice is paid - don't allow deletion of paid charges
+    if charge.invoice and charge.invoice.status == InvoiceStatus.PAID:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete charges from paid invoices. Please contact Finance department."
+        )
+    
+    # Delete the charge and update invoice totals
+    invoice = charge.invoice
+    if invoice:
+        # Update invoice totals
+        invoice.subtotal -= (charge.unit_price * charge.quantity - charge.discount)
+        invoice.tax_amount -= charge.tax_amount
+        invoice.total_amount = invoice.subtotal - invoice.discount_amount + invoice.tax_amount
+        invoice.balance = invoice.total_amount - invoice.paid_amount
+    
+    db.delete(charge)
+    db.commit()
+    
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Antenatal charge deleted successfully", "charge_id": charge_id}
+    )
 

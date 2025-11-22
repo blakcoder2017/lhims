@@ -156,22 +156,44 @@
                         </div>
                         {% endif %}
                         <!-- Diagnosis Section -->
-                        {% if encounter.primary_diagnosis_code or secondary_diagnoses %}
+                        {% if encounter_diseases or encounter.primary_diagnosis_code or secondary_diagnoses %}
                         <div class="form-group">
                             <label><strong>Diagnosis/Diagnoses:</strong></label>
-                            {% if encounter.primary_diagnosis_code %}
-                            <div class="mb-2">
-                                <span class="badge badge-primary">PRIMARY</span>
-                                <strong>{{ encounter.primary_diagnosis_code }}</strong> - {{ encounter.primary_diagnosis_description }}
-                            </div>
-                            {% endif %}
-                            {% if secondary_diagnoses %}
-                                {% for diagnosis in secondary_diagnoses %}
+                            {% if encounter_diseases %}
+                                {% for diagnosis in encounter_diseases %}
                                 <div class="mb-2">
-                                    <span class="badge badge-secondary">SECONDARY</span>
-                                    {% if diagnosis.get('code') %}<strong>{{ diagnosis.code }}</strong> - {% endif %}{{ diagnosis.get('description', diagnosis) }}
+                                    <strong>Diagnosis:</strong> {{ diagnosis.name }}
+                                    {% if diagnosis.code %}
+                                    <span class="text-muted">({{ diagnosis.code }})</span>
+                                    {% endif %}
+                                    {% if diagnosis.is_primary %}
+                                    <span class="badge badge-primary ml-2">PRIMARY</span>
+                                    {% else %}
+                                    <span class="badge badge-secondary ml-2">SECONDARY</span>
+                                    {% endif %}
                                 </div>
                                 {% endfor %}
+                            {% else %}
+                                {% if encounter.primary_diagnosis_code %}
+                                <div class="mb-2">
+                                    <strong>Diagnosis:</strong> {{ encounter.primary_diagnosis_description or encounter.primary_diagnosis_code }}
+                                    {% if encounter.primary_diagnosis_code %}
+                                    <span class="text-muted">({{ encounter.primary_diagnosis_code }})</span>
+                                    {% endif %}
+                                    <span class="badge badge-primary ml-2">PRIMARY</span>
+                                </div>
+                                {% endif %}
+                                {% if secondary_diagnoses %}
+                                    {% for diagnosis in secondary_diagnoses %}
+                                    <div class="mb-2">
+                                        <strong>Diagnosis:</strong> {{ diagnosis.get('description', diagnosis) }}
+                                        {% if diagnosis.get('code') %}
+                                        <span class="text-muted">({{ diagnosis.code }})</span>
+                                        {% endif %}
+                                        <span class="badge badge-secondary ml-2">SECONDARY</span>
+                                    </div>
+                                    {% endfor %}
+                                {% endif %}
                             {% endif %}
                         </div>
                         {% endif %}
@@ -206,9 +228,14 @@
                             <div class="col-md-5 border-right">
                                 <div class="form-group">
                                     <label for="gstgSummaryInput">Clinical Summary *</label>
-                                    <textarea class="form-control" id="gstgSummaryInput" rows="6" placeholder="Summarize the case...">{{ (differential_data.clinical_summary if differential_data else (encounter.assessment or encounter.history_of_present_illness or encounter.chief_complaint)) or '' }}</textarea>
+                                    <textarea class="form-control" id="gstgSummaryInput" rows="6" placeholder="Summarize the case...">{% if differential_data and differential_data.clinical_summary %}{{ differential_data.clinical_summary }}{% else %}{% if encounter.chief_complaint %}Chief Complaint: {{ encounter.chief_complaint }}{% endif %}
+{% if encounter_diseases %}
+Diagnoses:
+{% for diagnosis in encounter_diseases %}{% if diagnosis.is_primary %}Primary: {% else %}Secondary: {% endif %}{{ diagnosis.name }}{% if diagnosis.code %} ({{ diagnosis.code }}){% endif %}
+{% endfor %}{% endif %}
+{% if encounter.assessment %}Assessment: {{ encounter.assessment }}{% elif encounter.history_of_present_illness %}History: {{ encounter.history_of_present_illness }}{% endif %}{% endif %}</textarea>
                                     <small class="form-text text-muted">
-                                        Auto-filled from assessment; edit before generating to improve accuracy.
+                                        Auto-filled from chief complaint, diagnoses, and assessment; edit before generating to improve accuracy.
                                     </small>
                                 </div>
                                 <div class="form-row">
@@ -583,6 +610,11 @@
                                                                 <a href="/lab/orders/{{ order.id }}" class="btn btn-xs btn-primary" target="_blank">
                                                                     <i class="fas fa-eye"></i> View
                                                                 </a>
+                                                                {% if order.status.value != 'completed' %}
+                                                                <button type="button" class="btn btn-xs btn-danger ml-1" onclick="removeLabOrder({{ order.id }}, {{ encounter.id }})" title="Remove Lab Order">
+                                                                    <i class="fas fa-trash"></i> Remove
+                                                                </button>
+                                                                {% endif %}
                                                             </td>
                                                         </tr>
                                                         {% endfor %}
@@ -703,6 +735,11 @@
                                                         <i class="fas fa-images"></i> View Images
                                                     </a>
                                                     {% endif %}
+                                                    {% if order.status.value != 'completed' %}
+                                                    <button type="button" class="btn btn-sm btn-outline-danger ml-1" onclick="removeRadiologyOrder({{ order.id }}, {{ encounter.id }})" title="Remove Radiology Order">
+                                                        <i class="fas fa-trash"></i> Remove
+                                                    </button>
+                                                    {% endif %}
                                                 </div>
                                             </div>
                                             {% endfor %}
@@ -788,6 +825,13 @@
                                                     <p><small><strong>Instructions:</strong> {{ prescription.instructions }}</small></p>
                                                     {% endif %}
                                                     <p><small>Status: <span class="badge badge-{{ 'success' if prescription.status.value == 'completed' else 'warning' if prescription.status.value == 'in_progress' else 'info' }}">{{ prescription.status.value|title }}</span></small></p>
+                                                    {% if prescription.status.value != 'completed' %}
+                                                    <div class="mt-2">
+                                                        <button type="button" class="btn btn-xs btn-danger" onclick="removePrescription({{ prescription.id }}, {{ encounter.id }})" title="Remove Prescription">
+                                                            <i class="fas fa-trash"></i> Remove
+                                                        </button>
+                                                    </div>
+                                                    {% endif %}
                                                 </div>
                                                 {% endfor %}
                                             {% else %}
@@ -878,6 +922,13 @@
                                                 {% if procedure.scheduled_date %}
                                                 <p><small><strong>Scheduled:</strong> {{ procedure.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</small></p>
                                                 {% endif %}
+                                                {% if procedure.status.value != 'completed' %}
+                                                <div class="mt-2">
+                                                    <button type="button" class="btn btn-xs btn-danger" onclick="removeProcedure({{ procedure.id }}, {{ encounter.id }})" title="Remove Procedure">
+                                                        <i class="fas fa-trash"></i> Remove
+                                                    </button>
+                                                </div>
+                                                {% endif %}
                                             </div>
                                             {% endfor %}
                                         {% else %}
@@ -931,6 +982,7 @@
                                                         <th>Qty</th>
                                                         <th>Amount</th>
                                                         <th>Date</th>
+                                                        <th>Action</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -940,6 +992,11 @@
                                                         <td>{{ charge.quantity }}</td>
                                                         <td>GHS {{ "%.2f"|format(charge.total_amount) }}</td>
                                                         <td>{{ charge.created_at.strftime('%Y-%m-%d') }}</td>
+                                                        <td>
+                                                            <button type="button" class="btn btn-xs btn-danger" onclick="removeAntenatalCharge({{ charge.id }}, {{ encounter.id }})" title="Remove Antenatal Charge">
+                                                                <i class="fas fa-trash"></i> Remove
+                                                            </button>
+                                                        </td>
                                                     </tr>
                                                     {% endfor %}
                                                 </tbody>
@@ -995,24 +1052,44 @@
                                     <p class="mb-0 text-truncate-3">{{ encounter.plan }}</p>
                                 </div>
                                 {% endif %}
-                                {% if encounter.primary_diagnosis_code or secondary_diagnoses %}
+                                {% if encounter_diseases or encounter.primary_diagnosis_code or secondary_diagnoses %}
                                 <div class="mb-3">
                                     <small class="text-muted text-uppercase">Diagnoses</small>
-                                    {% if encounter.primary_diagnosis_code %}
-                                    <p class="mb-1">
-                                        <span class="badge badge-primary">Primary</span>
-                                        <strong>{{ encounter.primary_diagnosis_code }}</strong><br>
-                                        <small class="text-muted">{{ encounter.primary_diagnosis_description }}</small>
-                                    </p>
-                                    {% endif %}
-                                    {% if secondary_diagnoses %}
-                                        {% for diagnosis in secondary_diagnoses %}
+                                    {% if encounter_diseases %}
+                                        {% for diagnosis in encounter_diseases %}
                                         <p class="mb-1">
-                                            <span class="badge badge-secondary">Secondary</span>
-                                            {% if diagnosis.get('code') %}<strong>{{ diagnosis.code }}</strong> &mdash; {% endif %}
-                                            <small>{{ diagnosis.get('description', diagnosis) }}</small>
+                                            <strong>Diagnosis:</strong> {{ diagnosis.name }}
+                                            {% if diagnosis.code %}
+                                            <span class="text-muted">({{ diagnosis.code }})</span>
+                                            {% endif %}
+                                            {% if diagnosis.is_primary %}
+                                            <span class="badge badge-primary badge-sm ml-1">Primary</span>
+                                            {% else %}
+                                            <span class="badge badge-secondary badge-sm ml-1">Secondary</span>
+                                            {% endif %}
                                         </p>
                                         {% endfor %}
+                                    {% else %}
+                                        {% if encounter.primary_diagnosis_code %}
+                                        <p class="mb-1">
+                                            <strong>Diagnosis:</strong> {{ encounter.primary_diagnosis_description or encounter.primary_diagnosis_code }}
+                                            {% if encounter.primary_diagnosis_code %}
+                                            <span class="text-muted">({{ encounter.primary_diagnosis_code }})</span>
+                                            {% endif %}
+                                            <span class="badge badge-primary badge-sm ml-1">Primary</span>
+                                        </p>
+                                        {% endif %}
+                                        {% if secondary_diagnoses %}
+                                            {% for diagnosis in secondary_diagnoses %}
+                                            <p class="mb-1">
+                                                <strong>Diagnosis:</strong> {{ diagnosis.get('description', diagnosis) }}
+                                                {% if diagnosis.get('code') %}
+                                                <span class="text-muted">({{ diagnosis.code }})</span>
+                                                {% endif %}
+                                                <span class="badge badge-secondary badge-sm ml-1">Secondary</span>
+                                            </p>
+                                            {% endfor %}
+                                        {% endif %}
                                     {% endif %}
                                 </div>
                                 {% endif %}
@@ -1732,6 +1809,155 @@
             .catch(error => {
                 console.error('Error:', error);
                 alert('Error completing encounter. Please try again.');
+            });
+        }
+        
+        // Remove service functions
+        function removeLabOrder(labOrderId, encounterId) {
+            if (!confirm('Are you sure you want to remove this lab order? This action cannot be undone.')) {
+                return;
+            }
+            
+            fetch(`/api/v1/encounters/lab-orders/${labOrderId}?encounter_id=${encounterId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    return response.json().then(data => {
+                        alert(data.detail || 'Error removing lab order.');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error removing lab order. Please try again.');
+            });
+        }
+        
+        function removeRadiologyOrder(radiologyOrderId, encounterId) {
+            if (!confirm('Are you sure you want to remove this radiology order? This action cannot be undone.')) {
+                return;
+            }
+            
+            fetch(`/api/v1/encounters/radiology-orders/${radiologyOrderId}?encounter_id=${encounterId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    return response.json().then(data => {
+                        alert(data.detail || 'Error removing radiology order.');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error removing radiology order. Please try again.');
+            });
+        }
+        
+        function removePrescription(prescriptionId, encounterId) {
+            if (!confirm('Are you sure you want to remove this prescription? This action cannot be undone.')) {
+                return;
+            }
+            
+            fetch(`/api/v1/encounters/prescriptions/${prescriptionId}?encounter_id=${encounterId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Remove prescription from DOM if using AJAX, otherwise reload
+                    const prescriptionItem = document.querySelector(`[data-prescription-id="${prescriptionId}"]`);
+                    if (prescriptionItem) {
+                        prescriptionItem.remove();
+                        // Show "No prescriptions" message if list is empty
+                        const prescriptionsList = document.getElementById('prescriptionsList');
+                        if (prescriptionsList && prescriptionsList.querySelectorAll('.prescription-item').length === 0) {
+                            const noPrescriptionsMsg = document.getElementById('noPrescriptionsMsg');
+                            if (!noPrescriptionsMsg) {
+                                const msg = document.createElement('p');
+                                msg.className = 'text-muted';
+                                msg.id = 'noPrescriptionsMsg';
+                                msg.textContent = 'No prescriptions';
+                                prescriptionsList.appendChild(msg);
+                            }
+                        }
+                    } else {
+                        window.location.reload();
+                    }
+                } else {
+                    return response.json().then(data => {
+                        alert(data.detail || 'Error removing prescription.');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error removing prescription. Please try again.');
+            });
+        }
+        
+        function removeProcedure(procedureId, encounterId) {
+            if (!confirm('Are you sure you want to remove this procedure? This action cannot be undone.')) {
+                return;
+            }
+            
+            fetch(`/api/v1/encounters/procedures/${procedureId}?encounter_id=${encounterId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    return response.json().then(data => {
+                        alert(data.detail || 'Error removing procedure.');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error removing procedure. Please try again.');
+            });
+        }
+        
+        function removeAntenatalCharge(chargeId, encounterId) {
+            if (!confirm('Are you sure you want to remove this antenatal charge? This action cannot be undone.')) {
+                return;
+            }
+            
+            fetch(`/api/v1/encounters/antenatal-charges/${chargeId}?encounter_id=${encounterId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    return response.json().then(data => {
+                        alert(data.detail || 'Error removing antenatal charge.');
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error removing antenatal charge. Please try again.');
             });
         }
         

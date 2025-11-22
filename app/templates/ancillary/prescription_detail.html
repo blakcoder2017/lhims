@@ -48,6 +48,53 @@
                 </div>
                 {% endif %}
 
+                {% if request.query_params.get('status') == 'payment_success' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check-circle"></i> Payment Successful!</h5>
+                    Payment has been processed successfully. You may now dispense the medication.
+                </div>
+                {% endif %}
+
+                <!-- Payment Notice for Cash Patients -->
+                {% if payment_required %}
+                    {% if payment_paid %}
+                    <div class="alert alert-success alert-dismissible">
+                        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                        <h5><i class="icon fas fa-check-circle"></i> Payment Confirmed</h5>
+                        <p><strong>{{ payment_notice }}</strong></p>
+                        {% if paid_invoice %}
+                        <p class="mb-2">
+                            <a href="/billing/invoices/{{ paid_invoice.id }}" class="btn btn-sm btn-success mr-2" target="_blank">
+                                <i class="fas fa-file-invoice mr-1"></i> View Invoice
+                            </a>
+                        </p>
+                        <p class="mb-0"><small class="text-muted"><i class="fas fa-info-circle"></i> Payment has been processed. Medication can be dispensed.</small></p>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning alert-dismissible">
+                        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                        <h5><i class="icon fas fa-exclamation-triangle"></i> Payment Required</h5>
+                        <p><strong>{{ payment_notice }}</strong></p>
+                        {% if unpaid_invoice %}
+                        <p class="mb-2">
+                            <a href="/billing/invoices/{{ unpaid_invoice.id }}" class="btn btn-sm btn-warning mr-2" target="_blank">
+                                <i class="fas fa-file-invoice mr-1"></i> View Invoice
+                            </a>
+                        </p>
+                        <p class="mb-0"><small class="text-muted"><i class="fas fa-info-circle"></i> Payment must be made before dispensing. Please contact Finance department.</small></p>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                {% elif payment_notice %}
+                <div class="alert alert-info alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-info-circle"></i> Payment Status</h5>
+                    <p><strong>{{ payment_notice }}</strong></p>
+                </div>
+                {% endif %}
+
                 <!-- Patient Information -->
                 <div class="card card-primary card-outline">
                     <div class="card-header">
@@ -370,6 +417,53 @@
             </div>
         </section>
     </div>
+
+    <!-- Payment Required Modal -->
+    <div class="modal fade" id="paymentRequiredModal" tabindex="-1" role="dialog" aria-labelledby="paymentRequiredModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title" id="paymentRequiredModalLabel">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>Payment Required
+                    </h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="lead">You cannot dispense medication until payment has been made.</p>
+                    <p>This patient is a cash-paying customer and payment must be processed by the Finance department before medication can be dispensed.</p>
+                    {% if request.query_params.get('invoice_id') %}
+                    <div class="alert alert-info">
+                        <strong>Invoice ID:</strong> {{ request.query_params.get('invoice_id') }}<br>
+                        {% if request.query_params.get('balance') %}
+                        <strong>Outstanding Balance:</strong> GHS {{ "%.2f"|format(request.query_params.get('balance')|float) }}
+                        {% endif %}
+                    </div>
+                    <p>
+                        <a href="/billing/invoices/{{ request.query_params.get('invoice_id') }}" class="btn btn-warning btn-sm" target="_blank">
+                            <i class="fas fa-file-invoice mr-1"></i> View Invoice
+                        </a>
+                    </p>
+                    {% endif %}
+                    <p class="mb-0"><small class="text-muted">Please contact the Finance department to process payment before proceeding.</small></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Show payment required modal if error parameter is present
+        $(document).ready(function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('error') === 'payment_required') {
+                $('#paymentRequiredModal').modal('show');
+            }
+        });
+    </script>
 
 {% endblock %}
 

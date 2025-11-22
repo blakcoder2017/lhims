@@ -44,10 +44,12 @@ from app.models.ipd_models import (
     DepartmentType,
     AdmissionNote
 )
+from app.models.opd_models import OPDVisit, OPDVisitStatus
 from app.models.insurance_provider_models import InsuranceProvider
 from app.models.ward_type_models import WardType
 from app.models.expense_models import Expense, ExpenseCategory, ExpenseStatus
 from app.models.procedure_models import Procedure, ProcedureType, ProcedureStatus
+from app.models.procedure_catalog_models import ProcedureCatalog
 from app.models.department_models import Department
 from app.models.shift_type_models import ShiftType
 from app.models.bed_type_models import BedType

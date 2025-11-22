@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %} 
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-procedures mr-2"></i>Procedure Catalog</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Procedure Catalog</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+
+                <!-- Quick Actions -->
+                {% if user_role in ['Admin'] %}
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-plus-circle mr-1"></i> Quick Actions</h3>
+                    </div>
+                    <div class="card-body">
+                        <a href="{{ url_for('procedure_catalog_create_form') }}" class="btn btn-primary">
+                            <i class="fas fa-plus mr-1"></i> Add New Procedure Type
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Search & Filter -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-search mr-1"></i> Search & Filter</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('procedure_catalog_dashboard') }}">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Search</label>
+                                        <input type="text" name="search" class="form-control" placeholder="Search by name or code..." value="{{ search or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Category</label>
+                                        <select name="category" class="form-control">
+                                            <option value="">All Categories</option>
+                                            {% for cat in categories %}
+                                            <option value="{{ cat }}" {{ 'selected' if category == cat else '' }}>{{ cat }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Procedure Type</label>
+                                        <select name="procedure_type" class="form-control">
+                                            <option value="">All Types</option>
+                                            {% for pt in procedure_types %}
+                                            <option value="{{ pt }}" {{ 'selected' if procedure_type_filter == pt else '' }}>{{ pt.replace('_', ' ').title() }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search"></i> Search
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Procedures Table -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-list mr-1"></i> Procedure Types</h3>
+                        <div class="card-tools">
+                            <span class="badge badge-info">{{ total_count }} total</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        {% if procedures %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Procedure Name</th>
+                                        <th>Code</th>
+                                        <th>Category</th>
+                                        <th>Type</th>
+                                        <th>Cash Price</th>
+                                        <th>NHIS</th>
+                                        <th>Private Insurance</th>
+                                        <th>Duration</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for procedure in procedures %}
+                                    <tr>
+                                        <td><strong>{{ procedure.procedure_name }}</strong></td>
+                                        <td>{{ procedure.procedure_code or 'N/A' }}</td>
+                                        <td>{{ procedure.procedure_category or 'N/A' }}</td>
+                                        <td>
+                                            {% if procedure.procedure_type %}
+                                                <span class="badge badge-info">{{ procedure.procedure_type.replace('_', ' ').title() }}</span>
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if procedure.cash_price %}
+                                                <strong>{{ procedure.cash_currency or 'GHS' }} {{ "%.2f"|format(procedure.cash_price) }}</strong>
+                                            {% else %}
+                                                <span class="text-muted">Not Set</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if procedure.nhis_covered %}
+                                                <span class="badge badge-success">Yes</span>
+                                                {% if procedure.nhis_price %}
+                                                    <br><small>{{ procedure.cash_currency or 'GHS' }} {{ "%.2f"|format(procedure.nhis_price) }}</small>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="badge badge-secondary">No</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if procedure.private_insurance_covered %}
+                                                <span class="badge badge-success">Yes</span>
+                                                {% if procedure.private_insurance_price %}
+                                                    <br><small>{{ procedure.cash_currency or 'GHS' }} {{ "%.2f"|format(procedure.private_insurance_price) }}</small>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="badge badge-secondary">No</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if procedure.estimated_duration_minutes %}
+                                                {{ procedure.estimated_duration_minutes }} min
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('view_procedure_catalog', catalog_id=procedure.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                            {% if user_role in ['Admin'] %}
+                                            <a href="{{ url_for('procedure_catalog_edit_form', catalog_id=procedure.id) }}" class="btn btn-sm btn-warning">
+                                                <i class="fas fa-edit"></i> Edit
+                                            </a>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        {% if total_pages > 1 %}
+                        <div class="row mt-3">
+                            <div class="col-md-12">
+                                <nav aria-label="Page navigation">
+                                    <ul class="pagination justify-content-center">
+                                        {% if page > 1 %}
+                                        <li class="page-item">
+                                            <a class="page-link" href="{{ url_for('procedure_catalog_dashboard', search=search, category=category, procedure_type=procedure_type_filter, page=page-1, per_page=per_page) }}">Previous</a>
+                                        </li>
+                                        {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">Previous</span>
+                                        </li>
+                                        {% endif %}
+                                        
+                                        {% for p in range(1, total_pages + 1) %}
+                                            {% if p == page %}
+                                            <li class="page-item active">
+                                                <span class="page-link">{{ p }}</span>
+                                            </li>
+                                            {% elif p <= 3 or p > total_pages - 3 or (p >= page - 1 and p <= page + 1) %}
+                                            <li class="page-item">
+                                                <a class="page-link" href="{{ url_for('procedure_catalog_dashboard', search=search, category=category, procedure_type=procedure_type_filter, page=p, per_page=per_page) }}">{{ p }}</a>
+                                            </li>
+                                            {% elif p == 4 or p == total_pages - 3 %}
+                                            <li class="page-item disabled">
+                                                <span class="page-link">...</span>
+                                            </li>
+                                            {% endif %}
+                                        {% endfor %}
+                                        
+                                        {% if page < total_pages %}
+                                        <li class="page-item">
+                                            <a class="page-link" href="{{ url_for('procedure_catalog_dashboard', search=search, category=category, procedure_type=procedure_type_filter, page=page+1, per_page=per_page) }}">Next</a>
+                                        </li>
+                                        {% else %}
+                                        <li class="page-item disabled">
+                                            <span class="page-link">Next</span>
+                                        </li>
+                                        {% endif %}
+                                    </ul>
+                                </nav>
+                                <div class="text-center">
+                                    <small class="text-muted">
+                                        Showing {{ ((page - 1) * per_page) + 1 }} to {{ [page * per_page, total_count]|min }} of {{ total_count }} results
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> No Procedures Found</h5>
+                            {% if search or category or procedure_type_filter %}
+                                No procedures found matching your search criteria. <a href="{{ url_for('procedure_catalog_dashboard') }}">Clear filters</a>
+                            {% else %}
+                                No procedure types have been created yet. 
+                                {% if user_role in ['Admin'] %}
+                                <a href="{{ url_for('procedure_catalog_create_form') }}" class="btn btn-sm btn-primary">Add First Procedure Type</a>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+

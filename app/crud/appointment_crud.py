@@ -234,3 +234,36 @@ def cancel_appointment(db: Session, appointment_id: int) -> Optional[Appointment
     db.refresh(db_appointment)
     return db_appointment
 
+
+def get_recent_checked_in_appointment(
+    db: Session,
+    patient_id: int,
+    within_hours: int = 12
+) -> Optional[Appointment]:
+    """Fetch the most recent appointment that has been checked in (or is in progress)."""
+    threshold = datetime.now() - timedelta(hours=within_hours)
+    return (
+        db.query(Appointment)
+        .filter(
+            Appointment.patient_id == patient_id,
+            Appointment.is_active == True,
+            Appointment.status.in_([
+                AppointmentStatus.CHECKED_IN,
+                AppointmentStatus.IN_PROGRESS
+            ]),
+            or_(
+                Appointment.checked_in_at.isnot(None),
+                Appointment.scheduled_date.isnot(None)
+            ),
+            or_(
+                Appointment.checked_in_at >= threshold,
+                Appointment.scheduled_date >= threshold
+            )
+        )
+        .order_by(
+            Appointment.checked_in_at.desc(),
+            Appointment.scheduled_date.desc()
+        )
+        .first()
+    )
+

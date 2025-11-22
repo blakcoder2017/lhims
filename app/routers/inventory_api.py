@@ -500,7 +500,7 @@ def adjust_stock(
 # Stock Check API
 @router.get("/api/v1/inventory/medications/search", name="search_medications")
 def search_medications_api(
-    search: str = Query(..., min_length=1),
+    search: Optional[str] = Query(None, min_length=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -508,12 +508,23 @@ def search_medications_api(
     """Search medications from inventory for autocomplete"""
     from fastapi.responses import JSONResponse
     
+    # If no search term, return empty results
+    if not search or len(search.strip()) < 1:
+        return JSONResponse(content={"medications": []})
+    
     medications = inventory_crud.get_medications(db, search=search, limit=limit)
     
     results = []
     for med in medications:
         # Check stock availability
-        stock_check = inventory_crud.check_stock_availability(db, med.id, 1)
+        try:
+            stock_check = inventory_crud.check_stock_availability(db, med.id, 1)
+            in_stock = stock_check.is_available if stock_check else False
+            available_quantity = stock_check.available_quantity if stock_check else 0
+        except Exception:
+            # If stock check fails, assume not in stock
+            in_stock = False
+            available_quantity = 0
         
         results.append({
             "id": med.id,
@@ -524,8 +535,9 @@ def search_medications_api(
             "strength": med.strength,
             "dosage_form": med.dosage_form,
             "unit": med.unit,
-            "in_stock": stock_check.is_available if stock_check else False,
-            "available_quantity": stock_check.available_quantity if stock_check else 0
+            "unit_price": float(med.unit_price) if med.unit_price else None,
+            "in_stock": in_stock,
+            "available_quantity": available_quantity
         })
     
     return JSONResponse(content={"medications": results})

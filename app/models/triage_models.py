@@ -44,12 +44,19 @@ class TriageVitals(Base):
     # Pain scale (1-10)
     pain_scale = Column(Integer, nullable=True)  # Pain scale from 1-10
     
+    # Triage Level Assignment (Critical, Urgent, Routine)
+    triage_level = Column(String(20), nullable=True)  # P1, P2, P3 or Red, Yellow, Green
+    triage_category = Column(String(50), nullable=True)  # Critical, Urgent, Routine
+    triage_assigned_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    triage_assigned_at = Column(DateTime, nullable=True)  # When triage level was assigned
+    
     # Timestamps
     recorded_at = Column(DateTime, default=func.now())
 
     # Relationships
     patient = relationship("Patient", back_populates="vitals_records")
-    recorded_by = relationship("User")
+    recorded_by = relationship("User", foreign_keys=[recorded_by_id])
+    triage_assigned_by = relationship("User", foreign_keys=[triage_assigned_by_id])
     
     def calculate_bmi(self):
         """Calculate BMI from weight (kg) and height (cm)."""

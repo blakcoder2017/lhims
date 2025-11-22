@@ -46,6 +46,16 @@
                                         <th>Procedure Name:</th>
                                         <td><strong>{{ procedure.procedure_name }}</strong></td>
                                     </tr>
+                                    {% if procedure.procedure_catalog_id and procedure.procedure_catalog %}
+                                    <tr>
+                                        <th>Procedure Catalog:</th>
+                                        <td>
+                                            <a href="{{ url_for('view_procedure_catalog', catalog_id=procedure.procedure_catalog_id) }}" class="btn btn-sm btn-info">
+                                                <i class="fas fa-book-medical mr-1"></i> {{ procedure.procedure_catalog.procedure_name }}
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endif %}
                                     <tr>
                                         <th>Patient:</th>
                                         <td>
@@ -154,6 +164,154 @@
                                 <a href="{{ url_for('procedures_list') }}" class="btn btn-secondary">
                                     <i class="fas fa-arrow-left mr-1"></i> Back to Procedures
                                 </a>
+                            </div>
+                        </div>
+
+                        <!-- Procedure Results Recording -->
+                        {% if user_role in ['Admin', 'Doctor', 'Clinician'] %}
+                        {% if procedure.status.value != 'completed' %}
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-clipboard-check mr-1"></i> Record Procedure Results</h3>
+                            </div>
+                            <div class="card-body">
+                                <form method="POST" action="{{ url_for('update_procedure', procedure_id=procedure.id) }}">
+                                    <div class="form-group">
+                                        <label for="findings">Findings</label>
+                                        <textarea class="form-control" id="findings" name="findings" rows="4" 
+                                                  placeholder="Record findings during the procedure...">{{ procedure.findings or '' }}</textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="complications">Complications</label>
+                                        <textarea class="form-control" id="complications" name="complications" rows="3" 
+                                                  placeholder="Record any complications...">{{ procedure.complications or '' }}</textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="outcome">Outcome</label>
+                                        <textarea class="form-control" id="outcome" name="outcome" rows="3" 
+                                                  placeholder="Record procedure outcome...">{{ procedure.outcome or '' }}</textarea>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="start_time">Start Time</label>
+                                                <input type="datetime-local" class="form-control" id="start_time" name="start_time" 
+                                                       value="{% if procedure.start_time %}{{ procedure.start_time.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="end_time">End Time</label>
+                                                <input type="datetime-local" class="form-control" id="end_time" name="end_time" 
+                                                       value="{% if procedure.end_time %}{{ procedure.end_time.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="status">Status</label>
+                                        <select class="form-control" id="status" name="status">
+                                            <option value="scheduled" {{ 'selected' if procedure.status.value == 'scheduled' else '' }}>Scheduled</option>
+                                            <option value="in_progress" {{ 'selected' if procedure.status.value == 'in_progress' else '' }}>In Progress</option>
+                                            <option value="completed" {{ 'selected' if procedure.status.value == 'completed' else '' }}>Completed</option>
+                                            <option value="cancelled" {{ 'selected' if procedure.status.value == 'cancelled' else '' }}>Cancelled</option>
+                                            <option value="postponed" {{ 'selected' if procedure.status.value == 'postponed' else '' }}>Postponed</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="notes">Additional Notes</label>
+                                        <textarea class="form-control" id="notes" name="notes" rows="2" 
+                                                  placeholder="Additional notes...">{{ procedure.notes or '' }}</textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-success btn-lg">
+                                        <i class="fas fa-save mr-1"></i> Save Results
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        {% else %}
+                        <!-- Show Results if Completed -->
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-clipboard-check mr-1"></i> Procedure Results</h3>
+                                {% if user_role in ['Admin', 'Doctor'] %}
+                                <div class="card-tools">
+                                    <a href="{{ url_for('procedure_edit_form', procedure_id=procedure.id) }}" class="btn btn-sm btn-warning">
+                                        <i class="fas fa-edit"></i> Edit Results
+                                    </a>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="card-body">
+                                {% if procedure.findings or procedure.complications or procedure.outcome %}
+                                <table class="table table-bordered">
+                                    {% if procedure.findings %}
+                                    <tr>
+                                        <th width="20%">Findings:</th>
+                                        <td>{{ procedure.findings }}</td>
+                                    </tr>
+                                    {% endif %}
+                                    {% if procedure.complications %}
+                                    <tr>
+                                        <th>Complications:</th>
+                                        <td><span class="badge badge-warning">{{ procedure.complications }}</span></td>
+                                    </tr>
+                                    {% endif %}
+                                    {% if procedure.outcome %}
+                                    <tr>
+                                        <th>Outcome:</th>
+                                        <td><span class="badge badge-success">{{ procedure.outcome }}</span></td>
+                                    </tr>
+                                    {% endif %}
+                                </table>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle mr-1"></i> No results recorded yet.
+                                    {% if user_role in ['Admin', 'Doctor'] %}
+                                    <a href="{{ url_for('procedure_edit_form', procedure_id=procedure.id) }}" class="btn btn-sm btn-primary ml-2">
+                                        <i class="fas fa-edit"></i> Record Results
+                                    </a>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-4">
+                        <!-- Quick Actions -->
+                        <div class="card card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-bolt mr-1"></i> Quick Actions</h3>
+                            </div>
+                            <div class="card-body">
+                                {% if user_role in ['Admin', 'Doctor'] %}
+                                <a href="{{ url_for('procedure_edit_form', procedure_id=procedure.id) }}" class="btn btn-warning btn-block mb-2">
+                                    <i class="fas fa-edit mr-1"></i> Edit Procedure
+                                </a>
+                                {% endif %}
+                                <a href="{{ url_for('view_patient_records', patient_id=procedure.patient_id) }}" class="btn btn-primary btn-block mb-2">
+                                    <i class="fas fa-user-injured mr-1"></i> View Patient Records
+                                </a>
+                                <a href="{{ url_for('procedures_list') }}" class="btn btn-secondary btn-block">
+                                    <i class="fas fa-arrow-left mr-1"></i> Back to Procedures
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Patient Information -->
+                        <div class="card card-info">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-user-injured mr-1"></i> Patient Information</h3>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>Name:</strong> {{ procedure.patient.first_name }} {{ procedure.patient.last_name }}</p>
+                                <p><strong>Patient Number:</strong> {{ procedure.patient.patient_number or 'N/A' }}</p>
+                                <p><strong>Gender:</strong> {{ procedure.patient.gender }}</p>
+                                {% if procedure.patient.date_of_birth %}
+                                <p><strong>Date of Birth:</strong> {{ procedure.patient.date_of_birth }}</p>
+                                {% endif %}
                             </div>
                         </div>
                     </div>

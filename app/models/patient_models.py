@@ -50,6 +50,7 @@ class Patient(Base):
     encounters = relationship("Encounter", back_populates="patient")
     invoices = relationship("Invoice", back_populates="patient")
     admissions = relationship("Admission", back_populates="patient")
+    opd_visits = relationship("OPDVisit", back_populates="patient")
     procedures = relationship("Procedure", back_populates="patient")
     lab_orders = relationship("LabOrder", back_populates="patient")
     radiology_orders = relationship("RadiologyOrder", back_populates="patient")
