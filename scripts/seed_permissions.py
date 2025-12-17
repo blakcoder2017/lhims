@@ -2,6 +2,15 @@
 Script to seed default permissions for the LHIMS system.
 Run this after creating the permissions table.
 """
+import sys
+import os
+
+# --- Add app to Python path ---
+# This allows us to import from 'app'
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+# --- End path setup ---
+
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.models.permission_models import Permission
