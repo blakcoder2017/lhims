@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from app.models.opd_models import OPDVisit, OPDVisitStatus
 from app.models.patient_models import Patient
-from app.models.appointment_models import Appointment
+from app.models.appointment_models import OPDQueue
 from app.schemas.opd_schemas import (
     OPDVisitCreate, OPDVisitUpdate
 )
@@ -47,6 +47,7 @@ def create_opd_visit(db: Session, opd_visit: OPDVisitCreate, patient_id: int) ->
     db_opd_visit = OPDVisit(
         opd_number=opd_number,
         patient_id=patient_id,
+        queue_entry_id=opd_visit.queue_entry_id,
         appointment_id=opd_visit.appointment_id,
         visit_date=opd_visit.visit_date or datetime.now(),
         status=opd_visit.status or OPDVisitStatus.ACTIVE,
@@ -68,7 +69,7 @@ def get_opd_visit(db: Session, opd_visit_id: int) -> Optional[OPDVisit]:
     """Get an OPD visit by ID with relationships"""
     return db.query(OPDVisit).options(
         joinedload(OPDVisit.patient),
-        joinedload(OPDVisit.appointment)
+        joinedload(OPDVisit.queue_entry)
     ).filter(OPDVisit.id == opd_visit_id, OPDVisit.is_active == True).first()
 
 
@@ -76,7 +77,7 @@ def get_opd_visit_by_number(db: Session, opd_number: str) -> Optional[OPDVisit]:
     """Get an OPD visit by OPD number"""
     return db.query(OPDVisit).options(
         joinedload(OPDVisit.patient),
-        joinedload(OPDVisit.appointment)
+        joinedload(OPDVisit.queue_entry)
     ).filter(OPDVisit.opd_number == opd_number, OPDVisit.is_active == True).first()
 
 
@@ -90,7 +91,7 @@ def get_opd_visits_by_patient(
     """Get all OPD visits for a patient"""
     query = db.query(OPDVisit).options(
         joinedload(OPDVisit.patient),
-        joinedload(OPDVisit.appointment)
+        joinedload(OPDVisit.queue_entry)
     ).filter(
         OPDVisit.patient_id == patient_id,
         OPDVisit.is_active == True
@@ -113,7 +114,7 @@ def get_opd_visits(
     """Get all OPD visits with optional filters"""
     query = db.query(OPDVisit).options(
         joinedload(OPDVisit.patient),
-        joinedload(OPDVisit.appointment)
+        joinedload(OPDVisit.queue_entry)
     ).filter(OPDVisit.is_active == True)
     
     if status:
@@ -132,7 +133,7 @@ def get_active_opd_visit_by_patient(db: Session, patient_id: int) -> Optional[OP
     """Get the active OPD visit for a patient (if any)"""
     return db.query(OPDVisit).options(
         joinedload(OPDVisit.patient),
-        joinedload(OPDVisit.appointment)
+        joinedload(OPDVisit.queue_entry)
     ).filter(
         OPDVisit.patient_id == patient_id,
         OPDVisit.status == OPDVisitStatus.ACTIVE,
@@ -155,18 +156,40 @@ def update_opd_visit(db: Session, opd_visit_id: int, opd_visit_update: OPDVisitU
     return db_opd_visit
 
 
-def complete_opd_visit(db: Session, opd_visit_id: int) -> Optional[OPDVisit]:
-    """Mark an OPD visit as completed"""
+def complete_opd_visit(db: Session, opd_visit_id: int, completion_outcome: Optional[str] = None) -> Optional[OPDVisit]:
+    """Mark an OPD visit as completed. Optionally set completion_outcome: 'death', 'transfer', 'absconded'."""
     db_opd_visit = get_opd_visit(db, opd_visit_id)
     if not db_opd_visit:
         return None
-    
+
     db_opd_visit.status = OPDVisitStatus.COMPLETED
     db_opd_visit.completed_at = datetime.now()
-    
+    if completion_outcome and completion_outcome.lower() in ("death", "transfer", "absconded"):
+        db_opd_visit.completion_outcome = completion_outcome.lower()
+
     db.commit()
     db.refresh(db_opd_visit)
     return db_opd_visit
+
+
+def complete_all_active_opd_visits_for_patient(db: Session, patient_id: int) -> int:
+    """
+    Mark all active OPD visits for a patient as completed.
+    Used when patient is admitted to IPD so OPD visit is closed.
+    Returns the number of visits completed.
+    """
+    active_visits = db.query(OPDVisit).filter(
+        OPDVisit.patient_id == patient_id,
+        OPDVisit.status == OPDVisitStatus.ACTIVE,
+        OPDVisit.is_active == True
+    ).all()
+    now = datetime.now()
+    for v in active_visits:
+        v.status = OPDVisitStatus.COMPLETED
+        v.completed_at = now
+    if active_visits:
+        db.commit()
+    return len(active_visits)
 
 
 def cancel_opd_visit(db: Session, opd_visit_id: int) -> Optional[OPDVisit]:

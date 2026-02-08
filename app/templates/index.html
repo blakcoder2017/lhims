@@ -28,11 +28,10 @@
                     <p>Your current role is <strong>{{ user_role }}</strong>. Here's an overview of today's activities.</p>
                 </div>
 
-                <!-- Key Metrics Row -->
+                <!-- Row 1: Green - Patients & Clinical -->
                 <div class="row">
-                    <!-- Patients -->
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-info">
+                        <div class="small-box bg-success">
                             <div class="inner">
                                 <h3>{{ total_patients }}</h3>
                                 <p>Total Patients</p>
@@ -45,8 +44,6 @@
                             </a>
                         </div>
                     </div>
-                    
-                    <!-- New Patients Today -->
                     <div class="col-lg-3 col-6">
                         <div class="small-box bg-success">
                             <div class="inner">
@@ -61,10 +58,8 @@
                             </a>
                         </div>
                     </div>
-                    
-                    <!-- Appointments Today -->
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-warning">
+                        <div class="small-box bg-success">
                             <div class="inner">
                                 <h3>{{ total_appointments_today }}</h3>
                                 <p>Appointments Today</p>
@@ -77,10 +72,8 @@
                             </a>
                         </div>
                     </div>
-                    
-                    <!-- Pending Encounters -->
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-danger">
+                        <div class="small-box bg-success">
                             <div class="inner">
                                 <h3>{{ pending_encounters }}</h3>
                                 <p>Pending Encounters</p>
@@ -95,86 +88,11 @@
                     </div>
                 </div>
 
-                <!-- Secondary Metrics Row -->
-                <div class="row">
-                    <!-- Revenue Today -->
-                    {% if user_role in ['Admin', 'Management', 'Finance'] %}
-                    <div class="col-lg-3 col-6">
-                        <div class="small-box bg-success">
-                            <div class="inner">
-                                <h3>GHS {{ "%.2f"|format(revenue_today) }}</h3>
-                                <p>Revenue Today</p>
-                            </div>
-                            <div class="icon">
-                                <i class="fas fa-money-bill-wave"></i>
-                            </div>
-                            <a href="{{ url_for('reports_dashboard') }}" class="small-box-footer">
-                                View Reports <i class="fas fa-arrow-circle-right"></i>
-                            </a>
-                        </div>
-                    </div>
-                    
-                    <!-- Revenue This Month -->
-                    <div class="col-lg-3 col-6">
-                        <div class="small-box bg-primary">
-                            <div class="inner">
-                                <h3>GHS {{ "%.2f"|format(revenue_month) }}</h3>
-                                <p>Revenue This Month</p>
-                            </div>
-                            <div class="icon">
-                                <i class="fas fa-chart-line"></i>
-                            </div>
-                            <a href="{{ url_for('financial_report') }}" class="small-box-footer">
-                                View Details <i class="fas fa-arrow-circle-right"></i>
-                            </a>
-                        </div>
-                    </div>
-                    {% endif %}
-                    
-                    <!-- Outstanding Invoices -->
-                    {% if user_role in ['Admin', 'Finance', 'Front Office'] %}
-                    <div class="col-lg-3 col-6">
-                        <div class="small-box bg-warning">
-                            <div class="inner">
-                                <h3>{{ outstanding_invoices }}</h3>
-                                <p>Outstanding Invoices</p>
-                                <small>GHS {{ "%.2f"|format(total_outstanding) }}</small>
-                            </div>
-                            <div class="icon">
-                                <i class="fas fa-file-invoice-dollar"></i>
-                            </div>
-                            <a href="{{ url_for('billing_dashboard') }}" class="small-box-footer">
-                                View Invoices <i class="fas fa-arrow-circle-right"></i>
-                            </a>
-                        </div>
-                    </div>
-                    {% endif %}
-                    
-                    <!-- Pending Lab Orders -->
-                    {% if user_role in ['Admin', 'Lab Staff', 'Clinician'] %}
-                    <div class="col-lg-3 col-6">
-                        <div class="small-box bg-info">
-                            <div class="inner">
-                                <h3>{{ pending_lab_orders }}</h3>
-                                <p>Pending Lab Orders</p>
-                            </div>
-                            <div class="icon">
-                                <i class="fas fa-flask"></i>
-                            </div>
-                            <a href="{{ url_for('lab_dashboard') }}" class="small-box-footer">
-                                View Lab <i class="fas fa-arrow-circle-right"></i>
-                            </a>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-
-                <!-- IPD Statistics Row -->
+                <!-- Row 2: Yellow - IPD -->
                 {% if user_role in ['Admin', 'Front Office', 'Clinician'] %}
                 <div class="row">
-                    <!-- Current Admissions -->
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-danger">
+                        <div class="small-box bg-warning">
                             <div class="inner">
                                 <h3>{{ current_admissions }}</h3>
                                 <p>Current Admissions</p>
@@ -187,10 +105,38 @@
                             </a>
                         </div>
                     </div>
-                    
-                    <!-- Bed Occupancy -->
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-{{ 'danger' if bed_occupancy_percentage > 90 else 'warning' if bed_occupancy_percentage > 80 else 'info' }}">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ active_wards }}/{{ total_wards }}</h3>
+                                <p>Active Wards</p>
+                                <small>Total: {{ total_wards }}</small>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-building"></i>
+                            </div>
+                            <a href="{{ url_for('ipd_wards_list') }}" class="small-box-footer">
+                                View Wards <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ available_beds }}</h3>
+                                <p>Available Beds</p>
+                                <small>Free for admission</small>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-bed"></i>
+                            </div>
+                            <a href="{{ url_for('ipd_beds_list') }}" class="small-box-footer">
+                                View Beds <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
                             <div class="inner">
                                 <h3>{{ occupied_beds }}/{{ total_beds }}</h3>
                                 <p>Beds Occupied</p>
@@ -207,85 +153,61 @@
                             </a>
                         </div>
                     </div>
-                    
-                    <!-- Available Beds -->
-                    <div class="col-lg-3 col-6">
-                        <div class="small-box bg-{{ 'success' if available_beds > 0 else 'danger' }}">
-                            <div class="inner">
-                                <h3>{{ available_beds }}</h3>
-                                <p>Available Beds</p>
-                                <small>Free for admission</small>
-                            </div>
-                            <div class="icon">
-                                <i class="fas fa-bed"></i>
-                            </div>
-                            <a href="{{ url_for('ipd_beds_list') }}" class="small-box-footer">
-                                View Beds <i class="fas fa-arrow-circle-right"></i>
-                            </a>
-                        </div>
-                    </div>
-                    
-                    <!-- Active Wards -->
-                    <div class="col-lg-3 col-6">
-                        <div class="small-box bg-primary">
-                            <div class="inner">
-                                <h3>{{ active_wards }}/{{ total_wards }}</h3>
-                                <p>Active Wards</p>
-                                <small>Total: {{ total_wards }}</small>
-                            </div>
-                            <div class="icon">
-                                <i class="fas fa-building"></i>
-                            </div>
-                            <a href="{{ url_for('ipd_wards_list') }}" class="small-box-footer">
-                                View Wards <i class="fas fa-arrow-circle-right"></i>
-                            </a>
-                        </div>
-                    </div>
                 </div>
                 {% endif %}
 
-                <!-- Pending Orders Row -->
+                <!-- Row 3: Blue - Finance & Stock -->
                 <div class="row">
-                    <!-- Pending Radiology -->
-                    {% if user_role in ['Admin', 'Radiology Staff', 'Clinician'] %}
+                    {% if user_role in ['Admin', 'Management', 'Finance'] %}
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-purple">
+                        <div class="small-box bg-info">
                             <div class="inner">
-                                <h3>{{ pending_radiology_orders }}</h3>
-                                <p>Pending Radiology</p>
+                                <h3>GHS {{ "%.2f"|format(revenue_today) }}</h3>
+                                <p>Revenue Today</p>
                             </div>
                             <div class="icon">
-                                <i class="fas fa-x-ray"></i>
+                                <i class="fas fa-money-bill-wave"></i>
                             </div>
-                            <a href="{{ url_for('radiology_dashboard') }}" class="small-box-footer">
-                                View Radiology <i class="fas fa-arrow-circle-right"></i>
+                            <a href="{{ url_for('reports_dashboard') }}" class="small-box-footer">
+                                View Reports <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>GHS {{ "%.2f"|format(revenue_month) }}</h3>
+                                <p>Revenue This Month</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <a href="{{ url_for('financial_report') }}" class="small-box-footer">
+                                View Details <i class="fas fa-arrow-circle-right"></i>
                             </a>
                         </div>
                     </div>
                     {% endif %}
-                    
-                    <!-- Pending Prescriptions -->
-                    {% if user_role in ['Admin', 'Pharmacy Staff', 'Clinician'] %}
+                    {% if user_role in ['Admin', 'Finance', 'Front Office'] %}
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-teal">
+                        <div class="small-box bg-info">
                             <div class="inner">
-                                <h3>{{ pending_prescriptions }}</h3>
-                                <p>Pending Prescriptions</p>
+                                <h3>{{ outstanding_invoices }}</h3>
+                                <p>Outstanding Invoices</p>
+                                <small>GHS {{ "%.2f"|format(total_outstanding) }}</small>
                             </div>
                             <div class="icon">
-                                <i class="fas fa-prescription-bottle-alt"></i>
+                                <i class="fas fa-file-invoice-dollar"></i>
                             </div>
-                            <a href="{{ url_for('pharmacy_dashboard') }}" class="small-box-footer">
-                                View Pharmacy <i class="fas fa-arrow-circle-right"></i>
+                            <a href="{{ url_for('billing_dashboard') }}" class="small-box-footer">
+                                View Invoices <i class="fas fa-arrow-circle-right"></i>
                             </a>
                         </div>
                     </div>
                     {% endif %}
-                    
-                    <!-- Inventory Alerts -->
                     {% if user_role in ['Admin', 'Pharmacy Staff'] %}
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-{{ 'danger' if low_stock_items > 0 or out_of_stock_items > 0 else 'success' }}">
+                        <div class="small-box bg-info">
                             <div class="inner">
                                 <h3>{{ low_stock_items + out_of_stock_items }}</h3>
                                 <p>Stock Alerts</p>
@@ -300,11 +222,45 @@
                         </div>
                     </div>
                     {% endif %}
-                    
-                    <!-- Pending Samples -->
+                </div>
+
+                <!-- Row 4: Red - Pending Orders (Lab, Pharmacy, Radiology, Samples) -->
+                <div class="row">
+                    {% if user_role in ['Admin', 'Pharmacy Staff', 'Clinician'] %}
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ pending_prescriptions }}</h3>
+                                <p>Pending Prescriptions</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-prescription-bottle-alt"></i>
+                            </div>
+                            <a href="{{ url_for('pharmacy_dashboard') }}" class="small-box-footer">
+                                View Pharmacy <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if user_role in ['Admin', 'Lab Staff', 'Clinician'] %}
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ pending_lab_orders }}</h3>
+                                <p>Pending Lab Orders</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-flask"></i>
+                            </div>
+                            <a href="{{ url_for('lab_dashboard') }}" class="small-box-footer">
+                                View Lab <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    {% endif %}
                     {% if user_role in ['Admin', 'Lab Staff'] %}
                     <div class="col-lg-3 col-6">
-                        <div class="small-box bg-warning">
+                        <div class="small-box bg-danger">
                             <div class="inner">
                                 <h3>{{ pending_samples }}</h3>
                                 <p>Pending Samples</p>
@@ -314,6 +270,22 @@
                             </div>
                             <a href="{{ url_for('lab_samples_dashboard') }}" class="small-box-footer">
                                 View Samples <i class="fas fa-arrow-circle-right"></i>
+                            </a>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if user_role in ['Admin', 'Radiology Staff', 'Clinician'] %}
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ pending_radiology_orders }}</h3>
+                                <p>Pending Radiology</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-x-ray"></i>
+                            </div>
+                            <a href="{{ url_for('radiology_dashboard') }}" class="small-box-footer">
+                                View Radiology <i class="fas fa-arrow-circle-right"></i>
                             </a>
                         </div>
                     </div>

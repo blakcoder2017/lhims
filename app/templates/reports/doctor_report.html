@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-user-md mr-2"></i>Doctor Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">Doctor Report</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Select Doctor & Period</h3>
+                        {% if report_data %}
+                        <div class="card-tools">
+                            <button onclick="window.print()" class="btn btn-sm btn-info mr-2">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('doctor_report') }}">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Doctor / Clinician</label>
+                                        <select name="doctor_id" class="form-control">
+                                            <option value="">-- Select Doctor --</option>
+                                            {% for doc in clinicians %}
+                                            <option value="{{ doc.id }}" {% if doctor_id and doctor_id|string == doc.id|string %}selected{% endif %}>
+                                                {{ doc.full_name or doc.username }} ({{ doc.role.name if doc.role else 'N/A' }})
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search mr-1"></i> Generate
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                        <p class="text-muted mb-0">
+                            <i class="fas fa-info-circle"></i>
+                            Report shows patient consultations (encounters) by the selected doctor within the date range.
+                            Payment = Consultation fee (GHS {{ "{:,.2f}".format(consultation_fee) }}) × number of patients.
+                        </p>
+                    </div>
+                </div>
+
+                {% if report_data %}
+                <!-- Summary Cards -->
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card card-info">
+                            <div class="card-body">
+                                <h5><i class="fas fa-user-md mr-1"></i> Doctor</h5>
+                                <p class="mb-0"><strong>{{ report_data.doctor.full_name or report_data.doctor.username }}</strong></p>
+                                <small class="text-muted">{{ report_data.doctor.role.name if report_data.doctor.role else '' }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card card-success">
+                            <div class="card-body">
+                                <h5><i class="fas fa-users mr-1"></i> Patients Seen</h5>
+                                <p class="mb-0 display-4">{{ report_data.patient_count }}</p>
+                                <small class="text-muted">{{ start_date }} to {{ end_date }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card card-warning">
+                            <div class="card-body">
+                                <h5><i class="fas fa-money-bill-wave mr-1"></i> Amount Due</h5>
+                                <p class="mb-0 display-4">GHS {{ "{:,.2f}".format(report_data.total_amount) }}</p>
+                                <small class="text-muted">{{ "{:,.2f}".format(report_data.consultation_fee) }} × {{ report_data.patient_count }} patients</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calculation Breakdown -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-calculator mr-1"></i> Payment Calculation</h3>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-bordered">
+                            <tr>
+                                <td><strong>Consultation fee per patient</strong></td>
+                                <td>GHS {{ "{:,.2f}".format(report_data.consultation_fee) }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Number of patients consulted</strong></td>
+                                <td>{{ report_data.patient_count }}</td>
+                            </tr>
+                            <tr class="table-success">
+                                <td><strong>Total amount due ({{ report_data.doctor.full_name or report_data.doctor.username }})</strong></td>
+                                <td><strong>GHS {{ "{:,.2f}".format(report_data.total_amount) }}</strong></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Encounter List (Sample) -->
+                {% if report_data.encounters %}
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-list mr-1"></i> Recent Encounters (up to 100)</h3>
+                    </div>
+                    <div class="card-body table-responsive p-0">
+                        <table class="table table-hover table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Patient</th>
+                                    <th>Chief Complaint</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for enc in report_data.encounters %}
+                                <tr>
+                                    <td>{{ enc.encounter_date.strftime('%Y-%m-%d %H:%M') if enc.encounter_date else '–' }}</td>
+                                    <td>
+                                        {% if enc.patient %}
+                                        <a href="{{ url_for('view_patient_records', patient_id=enc.patient_id) }}">
+                                            {{ enc.patient.first_name }} {{ enc.patient.last_name }}
+                                        </a>
+                                        {% else %}
+                                        –
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ enc.chief_complaint[:50] if enc.chief_complaint else '–' }}{% if enc.chief_complaint and enc.chief_complaint|length > 50 %}...{% endif %}</td>
+                                    <td><span class="badge badge-{{ 'success' if enc.status.value == 'completed' else 'info' }}">{{ enc.status.value|title }}</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
+                {% elif doctor_id %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> No report data. Please ensure a valid doctor is selected and has encounters in the date range.
+                </div>
+                {% else %}
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> Select a doctor and date range, then click <strong>Generate</strong> to view the report.
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+{% endblock %}

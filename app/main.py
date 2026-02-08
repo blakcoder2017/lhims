@@ -345,10 +345,14 @@ async def template_not_found_handler(request: Request, exc: TemplateNotFound):
 app.include_router(auth_router)             # /api/v1/auth/token
 app.include_router(triage_api.router)       # /triage routes
 
-# 2. UI Routers (No prefix required)
+# 1. UI Routers (No prefix required)
 app.include_router(ui_routes.router)        # CRITICAL: Includes the GET / dashboard route
 app.include_router(auth_ui_router)          # /login, /logout
 app.include_router(patient_api.router, prefix="", tags=["Patients"]) # /patient routes
+
+# 1.5. Simple UI Redirect Routes
+from app.routers import simple_ui_routes
+app.include_router(simple_ui_routes.router, prefix="", tags=["Simple UI Redirects"])
 
 # 3. Appointment & Queue Management Routers
 from app.routers import appointment_api
@@ -363,6 +367,12 @@ from app.routers import encounter_api
 app.include_router(encounter_api.router)  # /api/v1/encounters routes
 app.include_router(opd_api.router, prefix="", tags=["OPD"])  # /api/v1/opd-visits routes
 app.include_router(opd_ui_routes.router, prefix="", tags=["OPD UI"])  # /opd/* UI routes for OPD management
+from app.routers import emergency_ui_routes
+app.include_router(emergency_ui_routes.router, prefix="", tags=["Emergency UI"])  # /emergency/* UI routes
+from app.routers import midwife_antenatal_ui_routes
+app.include_router(midwife_antenatal_ui_routes.router, prefix="", tags=["Midwife/Antenatal"])  # /midwife/* UI routes
+from app.routers import birth_ui_routes
+app.include_router(birth_ui_routes.router, prefix="", tags=["Births/Delivery"])  # /births/* UI routes
 app.include_router(ipd_api.router, prefix="", tags=["IPD"])  # /api/v1/wards, /api/v1/beds, /api/v1/admissions, /api/v1/doctor-duties routes
 app.include_router(ipd_ui_routes.router, prefix="", tags=["IPD UI"])  # /ipd/* UI routes for IPD management
 from app.routers import drug_administration_api
@@ -384,7 +394,13 @@ from app.routers import billing_api
 app.include_router(billing_api.router, prefix="", tags=["Billing"])  # /billing routes
 app.include_router(payment_ui_routes.router, prefix="", tags=["Payment UI"])  # /patients/{patient_id}/pay/* routes
 
-# 8. Reports & Analytics Routers
+# 8. Appointments Management Routers
+from app.routers import scheduled_appointment_api, appointments_ui_routes, queue_api
+app.include_router(scheduled_appointment_api.router, prefix="", tags=["Scheduled Appointments"])  # /api/v1/appointments routes
+app.include_router(appointments_ui_routes.router, prefix="", tags=["Appointments UI"])  # /appointments routes
+app.include_router(queue_api.router, prefix="", tags=["OPD Queue"])  # /api/v1/queue routes
+
+# 9. Reports & Analytics Routers
 from app.routers import reports_api
 app.include_router(reports_api.router, prefix="", tags=["Reports"])  # /reports routes
 
@@ -450,6 +466,14 @@ app.include_router(radiology_scheduling_api.router, prefix="", tags=["Radiology 
 # 16. NHIS Claims Routers
 from app.routers import claims_api
 app.include_router(claims_api.router, prefix="", tags=["NHIS Claims"])  # /claims routes
+
+# 16a. SMS Test Routers (Admin only)
+from app.routers import sms_test_api
+app.include_router(sms_test_api.router, prefix="", tags=["SMS Testing"])
+
+# 16b. SMS Messaging (Admin only – clients/staff messaging)
+from app.routers import sms_messaging_api
+app.include_router(sms_messaging_api.router, prefix="", tags=["SMS Messaging"])
 
 # 17. Backup & Recovery Routers
 from app.routers import backup_api

@@ -23,6 +23,7 @@ ROLES_TO_CREATE = [
     {"name": "Front Office", "description": "Registration, Triage, Appointments"},
     {"name": "Doctor", "description": "Physicians - Clinical encounters, diagnoses, and treatment orders"},
     {"name": "Nurse", "description": "Nurses - Patient care, triage, and clinical support"},
+    {"name": "Midwife", "description": "Midwives - Antenatal care, patient information, and pregnancy management"},
     {"name": "Clinician", "description": "Legacy role - Doctors, Nurses - Clinical Encounters (kept for backward compatibility)"},
     {"name": "Lab Staff", "description": "Fulfills laboratory orders"},
     {"name": "Pharmacy Staff", "description": "Dispenses medication, manages inventory"},

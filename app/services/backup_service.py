@@ -15,7 +15,7 @@ from sqlalchemy import text
 from app.models.patient_models import Patient
 from app.models.billing_models import Invoice, Payment
 from app.models.encounter_models import Encounter
-from app.models.appointment_models import Appointment
+from app.models.scheduled_appointment_models import Appointment
 
 
 BACKUP_DIR = Path("backups")
@@ -54,7 +54,9 @@ def backup_table_to_csv(db: Session, table_name: str, output_path: Path) -> bool
             writer = csv.DictWriter(f, fieldnames=columns)
             writer.writeheader()
             for row in rows:
-                writer.writerow(dict(row))
+                # Convert RowProxy to dict properly
+                row_dict = {key: value for key, value in zip(columns, row)}
+                writer.writerow(row_dict)
         
         return True
     except Exception as e:

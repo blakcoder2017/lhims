@@ -253,6 +253,30 @@
                         </div>
                     </div>
                     {% endif %}
+
+                    <!-- Doctor Report -->
+                    {% if user_role in ['Admin', 'Finance', 'Management', 'Doctor'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-user-md mr-1"></i> Doctor Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Patient consultations per doctor with automatic payment calculation.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Patients seen per doctor</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Consultation fee × patient count</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Total amount due per doctor</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('doctor_report') }}" class="btn btn-success btn-block">
+                                    <i class="fas fa-user-md mr-1"></i> View Doctor Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
 
                 <!-- Quick Stats -->

@@ -19,15 +19,17 @@ sys.path.insert(0, str(BASE_DIR))
 from app.db.database import SessionLocal
 from app.services.backup_service import create_full_backup, list_backups, BACKUP_DIR
 from app.crud.hospital_settings_crud import get_hospital_settings
+from scripts.backup_to_drive import BackupToDrive
 
 
-def run_scheduled_backup(days_to_keep: int = 30):
+def run_scheduled_backup(days_to_keep: int = 30, include_drive_upload: bool = True):
     """
     Execute a scheduled backup.
     This function is designed to be called by cron jobs or scheduled tasks.
     
     Args:
         days_to_keep: Number of days of backups to retain (default: 30)
+        include_drive_upload: Whether to upload to Google Drive (default: True)
     """
     db = SessionLocal()
     try:
@@ -35,19 +37,34 @@ def run_scheduled_backup(days_to_keep: int = 30):
         settings = get_hospital_settings(db)
         prefix = settings.hospital_name.lower().replace(" ", "_")[:10] if settings else "lhims"
         
-        # Create backup
-        backup_path = create_full_backup(db, include_data=True)
-        
-        if backup_path:
-            print(f"[{datetime.now()}] Backup created successfully: {backup_path}")
+        # Create backup using enhanced backup system
+        if include_drive_upload:
+            # Use comprehensive backup system with Drive upload
+            backup_system = BackupToDrive()
+            success = backup_system.run_backup()
             
-            # Clean up old backups
-            cleanup_old_backups(days_to_keep=days_to_keep)
-            
-            return True
+            if success:
+                print(f"[{datetime.now()}] Comprehensive backup with Drive upload completed successfully")
+            else:
+                print(f"[{datetime.now()}] ERROR: Comprehensive backup failed")
+                return False
         else:
-            print(f"[{datetime.now()}] ERROR: Failed to create backup")
-            return False
+            # Use original backup system
+            backup_path = create_full_backup(db, include_data=True)
+            
+            if backup_path:
+                print(f"[{datetime.now()}] Backup created successfully: {backup_path}")
+                
+                # Clean up old backups
+                cleanup_old_backups(days_to_keep=days_to_keep)
+                
+                return True
+            else:
+                print(f"[{datetime.now()}] ERROR: Failed to create backup")
+                return False
+        
+        return True
+        
     except Exception as e:
         print(f"[{datetime.now()}] ERROR: {str(e)}")
         return False
@@ -115,7 +132,7 @@ def generate_cron_job_entry(
     script_path = Path(__file__).resolve()
     
     # Generate cron entry
-    cron_entry = f"{minute} {hour} * * * cd {project_path} && {python_path} -c \"from app.services.backup_scheduler import run_scheduled_backup; run_scheduled_backup()\""
+    cron_entry = f"{minute} {hour} * * * cd {project_path} && {python_path} -c \"from app.services.backup_scheduler import run_scheduled_backup; run_scheduled_backup(include_drive_upload=True)\""
     
     return cron_entry
 

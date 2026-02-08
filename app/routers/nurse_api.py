@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, date
 from app.db.database import get_db
 from app.core.deps import get_current_user, role_required
 from app.models.user_models import User
-from app.models.appointment_models import Appointment, AppointmentStatus
+from app.models.appointment_models import OPDQueue, QueueStatus
 from app.models.triage_models import TriageVitals
 from app.models.patient_models import Patient
 from app.crud import appointment_crud, triage_crud, patient_crud
@@ -39,7 +39,6 @@ def nurse_dashboard(
 ):
     """Nurse dashboard with triage queue and IPD workflow"""
     from datetime import datetime, date, timedelta
-    from app.models.appointment_models import AppointmentStatus
     from app.models.triage_models import TriageVitals
     from app.models.ipd_models import Admission, AdmissionStatus
     
@@ -47,38 +46,37 @@ def nurse_dashboard(
     today_start = datetime.combine(today, datetime.min.time())
     today_end = datetime.combine(today, datetime.max.time())
     
-    # Get appointments that need triage (checked in but no recent vitals)
-    # Patients with appointments today who either:
+    # Get queue entries that need triage (checked in but no recent vitals)
+    # Patients in queue today who either:
     # 1. Have no vitals recorded today, OR
-    # 2. Have appointments but vitals were recorded before appointment time
+    # 2. Have queue entries but vitals were recorded before check-in time
     
-    appointments_today = db.query(Appointment).options(
-        joinedload(Appointment.patient)
+    queue_today = db.query(OPDQueue).options(
+        joinedload(OPDQueue.patient)
     ).filter(
-        Appointment.scheduled_date >= today_start,
-        Appointment.scheduled_date <= today_end,
-        Appointment.status.in_([
-            AppointmentStatus.SCHEDULED.value,
-            AppointmentStatus.CHECKED_IN.value
+        func.date(OPDQueue.created_at) == today,
+        OPDQueue.status.in_([
+            QueueStatus.WAITING.value,
+            QueueStatus.IN_PROGRESS.value
         ]),
-        Appointment.is_active == True
+        OPDQueue.is_active == True
     ).order_by(
-        Appointment.priority.asc(),
-        Appointment.scheduled_date.asc()
+        OPDQueue.priority.asc(),
+        OPDQueue.queue_number.asc()
     ).all()
     
     # Filter to get patients who need triage
     triage_queue = []
-    for appointment in appointments_today:
+    for queue_entry in queue_today:
         # Check if patient has vitals recorded today
         recent_vitals = db.query(TriageVitals).filter(
-            TriageVitals.patient_id == appointment.patient_id,
+            TriageVitals.patient_id == queue_entry.patient_id,
             func.date(TriageVitals.recorded_at) == today
         ).order_by(TriageVitals.recorded_at.desc()).first()
         
-        # If no vitals today, or vitals recorded before appointment, add to queue
-        if not recent_vitals or recent_vitals.recorded_at < appointment.scheduled_date:
-            triage_queue.append(appointment)
+        # If no vitals today, add to queue
+        if not recent_vitals:
+            triage_queue.append(queue_entry)
     
     # Get IPD admissions needing nursing care
     ipd_admissions = db.query(Admission).options(
@@ -120,52 +118,50 @@ def nurse_triage_queue(
 ):
     """Triage queue for nurses - patients awaiting vital signs"""
     from datetime import datetime, date
-    from app.models.appointment_models import AppointmentStatus
     from app.models.triage_models import TriageVitals
     
     today = date.today()
     today_start = datetime.combine(today, datetime.min.time())
     today_end = datetime.combine(today, datetime.max.time())
     
-    # Get appointments that need triage
-    query = db.query(Appointment).options(
-        joinedload(Appointment.patient)
+    # Get queue entries that need triage
+    query = db.query(OPDQueue).options(
+        joinedload(OPDQueue.patient)
     ).filter(
-        Appointment.scheduled_date >= today_start,
-        Appointment.scheduled_date <= today_end,
-        Appointment.status.in_([
-            AppointmentStatus.SCHEDULED.value,
-            AppointmentStatus.CHECKED_IN.value
+        func.date(OPDQueue.created_at) == today,
+        OPDQueue.status.in_([
+            QueueStatus.WAITING.value,
+            QueueStatus.IN_PROGRESS.value
         ]),
-        Appointment.is_active == True
+        OPDQueue.is_active == True
     )
     
     if department:
-        query = query.filter(Appointment.department == department)
+        query = query.filter(OPDQueue.department == department)
     
-    appointments = query.order_by(
-        Appointment.priority.asc(),
-        Appointment.scheduled_date.asc()
+    queue_entries = query.order_by(
+        OPDQueue.priority.asc(),
+        OPDQueue.queue_number.asc()
     ).all()
     
     # Filter to get patients who need triage (no recent vitals today)
     from app.crud import appointment_crud
     triage_queue = []
-    for appointment in appointments:
+    for queue_entry in queue_entries:
         # Check if patient has vitals recorded today
         recent_vitals = db.query(TriageVitals).filter(
-            TriageVitals.patient_id == appointment.patient_id,
+            TriageVitals.patient_id == queue_entry.patient_id,
             func.date(TriageVitals.recorded_at) == today
         ).order_by(TriageVitals.recorded_at.desc()).first()
         
         # Calculate wait time
-        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time = appointment_crud.calculate_wait_time(queue_entry)
         wait_time_str = appointment_crud.format_wait_time(wait_time)
         
         # Add to queue if no vitals today, or if status filter requires it
         if status_filter == "needs_triage" and not recent_vitals:
             triage_queue.append({
-                "appointment": appointment,
+                "queue_entry": queue_entry,
                 "has_vitals": False,
                 "last_vitals": None,
                 "wait_time": wait_time,
@@ -173,7 +169,7 @@ def nurse_triage_queue(
             })
         elif status_filter == "completed" and recent_vitals:
             triage_queue.append({
-                "appointment": appointment,
+                "queue_entry": queue_entry,
                 "has_vitals": True,
                 "last_vitals": recent_vitals,
                 "wait_time": wait_time,
@@ -182,7 +178,7 @@ def nurse_triage_queue(
         elif not status_filter:
             # Show all - mark which need triage
             triage_queue.append({
-                "appointment": appointment,
+                "queue_entry": queue_entry,
                 "has_vitals": recent_vitals is not None,
                 "last_vitals": recent_vitals,
                 "wait_time": wait_time,
@@ -190,29 +186,29 @@ def nurse_triage_queue(
             })
     
     # Get unfulfilled queues from previous days
-    previous_appointments = appointment_crud.get_unfulfilled_queues_previous_days(
+    previous_queue_entries = appointment_crud.get_unfulfilled_queues_previous_days(
         db, department, None, days_back=7
     )
     
-    # Filter previous appointments to only SCHEDULED or CHECKED_IN (need triage)
-    previous_appointments = [
-        appt for appt in previous_appointments 
-        if appt.status.value in [AppointmentStatus.SCHEDULED.value, AppointmentStatus.CHECKED_IN.value]
+    # Filter previous queue entries to only WAITING or IN_PROGRESS (need triage)
+    previous_queue_entries = [
+        entry for entry in previous_queue_entries 
+        if entry.status.value in [QueueStatus.WAITING.value, QueueStatus.IN_PROGRESS.value]
     ]
     
     # Calculate wait times and check vitals for previous day queues
     triage_queue_previous = []
-    for appointment in previous_appointments:
+    for queue_entry in previous_queue_entries:
         # Check if patient has vitals recorded
         recent_vitals = db.query(TriageVitals).filter(
-            TriageVitals.patient_id == appointment.patient_id
+            TriageVitals.patient_id == queue_entry.patient_id
         ).order_by(TriageVitals.recorded_at.desc()).first()
         
-        wait_time = appointment_crud.calculate_wait_time(appointment)
+        wait_time = appointment_crud.calculate_wait_time(queue_entry)
         wait_time_str = appointment_crud.format_wait_time(wait_time)
         
         triage_queue_previous.append({
-            "appointment": appointment,
+            "queue_entry": queue_entry,
             "has_vitals": recent_vitals is not None,
             "last_vitals": recent_vitals,
             "wait_time": wait_time,
@@ -220,7 +216,7 @@ def nurse_triage_queue(
         })
     
     # Get unique departments for filter
-    departments = db.query(Appointment.department).distinct().all()
+    departments = db.query(OPDQueue.department).distinct().all()
     departments = [d[0] for d in departments]
     
     context = {

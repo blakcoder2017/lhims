@@ -357,86 +357,397 @@
                     </div>
                 </div>
 
-                <!-- Billing Summary -->
-                <div class="card card-info card-outline">
+                <!-- Vital Signs History -->
+                <div class="card card-primary card-outline">
                     <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-file-invoice-dollar mr-1"></i> Billing Summary</h3>
-                        <div class="card-tools">
-                            <span class="badge badge-primary">
-                                {{ invoice_summary.overall.invoice_count }} invoice{{ 's' if invoice_summary.overall.invoice_count != 1 else '' }}
-                            </span>
-                            <span class="badge badge-warning ml-2">
-                                {{ invoice_summary.overall.open_invoices }} open
-                            </span>
-                        </div>
+                        <h3 class="card-title"><i class="fas fa-heartbeat mr-1"></i> Vital Signs History</h3>
                     </div>
                     <div class="card-body">
-                        {% if invoice_summary.overall.invoice_count > 0 %}
+                        {% if vitals_history %}
                         <div class="table-responsive">
-                            <table class="table table-bordered table-striped">
-                                <thead class="thead-light">
+                            <table class="table table-bordered table-striped table-sm">
+                                <thead>
                                     <tr>
-                                        <th>Payment Mechanism</th>
-                                        <th class="text-center">Invoices</th>
-                                        <th class="text-center">Open</th>
-                                        <th class="text-right">Total Billed (GHS)</th>
-                                        <th class="text-right">Total Paid (GHS)</th>
-                                        <th class="text-right">Outstanding (GHS)</th>
+                                        <th>Date & Time</th>
+                                        <th>Triage</th>
+                                        <th>Temp (°C)</th>
+                                        <th>BP (mmHg)</th>
+                                        <th>Pulse (bpm)</th>
+                                        <th>Resp Rate</th>
+                                        <th>SpO2 (%)</th>
+                                        <th>Weight (kg)</th>
+                                        <th>Height (cm)</th>
+                                        <th>BMI</th>
+                                        <th>Pain (1-10)</th>
+                                        <th>Recorded By</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for summary in invoice_summary.by_mechanism %}
+                                    {% for vital in vitals_history %}
                                     <tr>
-                                        <td>{{ summary.label }}</td>
-                                        <td class="text-center">{{ summary.invoice_count }}</td>
-                                        <td class="text-center">
-                                            {% if summary.open_invoices > 0 %}
-                                            <span class="badge badge-warning">{{ summary.open_invoices }}</span>
+                                        <td>{{ vital.recorded_at.strftime('%Y-%m-%d %I:%M %p') }}</td>
+                                        <td>
+                                            {% if vital.triage_level %}
+                                                {% if vital.triage_level == 'P1' or vital.triage_category == 'Critical' %}
+                                                    <span class="badge badge-danger">{{ vital.triage_level }} - {{ vital.triage_category or 'Critical' }}</span>
+                                                {% elif vital.triage_level == 'P2' or vital.triage_category == 'Urgent' %}
+                                                    <span class="badge badge-warning">{{ vital.triage_level }} - {{ vital.triage_category or 'Urgent' }}</span>
+                                                {% elif vital.triage_level == 'P3' or vital.triage_category == 'Routine' %}
+                                                    <span class="badge badge-success">{{ vital.triage_level }} - {{ vital.triage_category or 'Routine' }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-info">{{ vital.triage_level }}{% if vital.triage_category %} - {{ vital.triage_category }}{% endif %}</span>
+                                                {% endif %}
                                             {% else %}
-                                            <span class="badge badge-success">0</span>
+                                                <span class="text-muted">—</span>
                                             {% endif %}
                                         </td>
-                                        <td class="text-right">{{ "{:,.2f}".format(summary.total_billed) }}</td>
-                                        <td class="text-right text-success">{{ "{:,.2f}".format(summary.total_paid) }}</td>
-                                        <td class="text-right text-danger">{{ "{:,.2f}".format(summary.total_balance) }}</td>
+                                        <td>
+                                            {% if vital.temperature %}
+                                                {% if vital.temperature < 36.1 or vital.temperature > 37.2 %}
+                                                    <span class="badge badge-warning">{{ "%.1f"|format(vital.temperature) }}</span>
+                                                {% else %}
+                                                    {{ "%.1f"|format(vital.temperature) }}
+                                                {% endif %}
+                                            {% else %}—{% endif %}
+                                        </td>
+                                        <td>
+                                            {% if vital.systolic_bp and vital.diastolic_bp %}
+                                                {{ vital.systolic_bp }}/{{ vital.diastolic_bp }}
+                                            {% elif vital.blood_pressure %}
+                                                {{ vital.blood_pressure }}
+                                            {% else %}—{% endif %}
+                                        </td>
+                                        <td>
+                                            {% if vital.pulse_rate %}
+                                                {% if vital.pulse_rate < 60 or vital.pulse_rate > 100 %}
+                                                    <span class="badge badge-warning">{{ vital.pulse_rate }}</span>
+                                                {% else %}
+                                                    {{ vital.pulse_rate }}
+                                                {% endif %}
+                                            {% else %}—{% endif %}
+                                        </td>
+                                        <td>
+                                            {% if vital.respiratory_rate %}
+                                                {% if vital.respiratory_rate < 12 or vital.respiratory_rate > 20 %}
+                                                    <span class="badge badge-warning">{{ vital.respiratory_rate }}</span>
+                                                {% else %}
+                                                    {{ vital.respiratory_rate }}
+                                                {% endif %}
+                                            {% else %}—{% endif %}
+                                        </td>
+                                        <td>
+                                            {% if vital.oxygen_saturation %}
+                                                {% if vital.oxygen_saturation < 95 %}
+                                                    <span class="badge badge-danger">{{ vital.oxygen_saturation }}%</span>
+                                                {% else %}
+                                                    <span class="badge badge-success">{{ vital.oxygen_saturation }}%</span>
+                                                {% endif %}
+                                            {% else %}—{% endif %}
+                                        </td>
+                                        <td>{% if vital.weight %}{{ "%.1f"|format(vital.weight) }}{% else %}—{% endif %}</td>
+                                        <td>{% if vital.height %}{{ "%.1f"|format(vital.height) }}{% else %}—{% endif %}</td>
+                                        <td>
+                                            {% if vital.bmi %}
+                                                {% if vital.bmi < 18.5 %}
+                                                    <span class="badge badge-info">{{ "%.1f"|format(vital.bmi) }}</span>
+                                                {% elif vital.bmi < 25 %}
+                                                    <span class="badge badge-success">{{ "%.1f"|format(vital.bmi) }}</span>
+                                                {% elif vital.bmi < 30 %}
+                                                    <span class="badge badge-warning">{{ "%.1f"|format(vital.bmi) }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-danger">{{ "%.1f"|format(vital.bmi) }}</span>
+                                                {% endif %}
+                                            {% else %}—{% endif %}
+                                        </td>
+                                        <td>
+                                            {% if vital.pain_scale is not none %}
+                                                {% if vital.pain_scale >= 7 %}
+                                                    <span class="badge badge-danger">{{ vital.pain_scale }}</span>
+                                                {% elif vital.pain_scale >= 4 %}
+                                                    <span class="badge badge-warning">{{ vital.pain_scale }}</span>
+                                                {% else %}
+                                                    <span class="badge badge-success">{{ vital.pain_scale }}</span>
+                                                {% endif %}
+                                            {% else %}—{% endif %}
+                                        </td>
+                                        <td>{{ vital.recorded_by.full_name or vital.recorded_by.username }}</td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
-                                <tfoot>
-                                    <tr class="font-weight-bold">
-                                        <td>All Payment Mechanisms</td>
-                                        <td class="text-center">{{ invoice_summary.overall.invoice_count }}</td>
-                                        <td class="text-center">
-                                            {% if invoice_summary.overall.open_invoices > 0 %}
-                                            <span class="badge badge-warning">{{ invoice_summary.overall.open_invoices }}</span>
-                                            {% else %}
-                                            <span class="badge badge-success">0</span>
-                                            {% endif %}
-                                        </td>
-                                        <td class="text-right">{{ "{:,.2f}".format(invoice_summary.overall.total_billed) }}</td>
-                                        <td class="text-right text-success">{{ "{:,.2f}".format(invoice_summary.overall.total_paid) }}</td>
-                                        <td class="text-right text-danger">{{ "{:,.2f}".format(invoice_summary.overall.total_balance) }}</td>
-                                    </tr>
-                                </tfoot>
                             </table>
                         </div>
-                        <p class="text-muted mb-0">
-                            <i class="fas fa-info-circle"></i> Outstanding balances must be settled before discharge for cash/self-pay patients. 
-                            Insurance totals reflect amounts to include in claim packages.
-                        </p>
                         {% else %}
-                        <div class="alert alert-info mb-0">
-                            <h5 class="mb-1"><i class="icon fas fa-info-circle"></i> No Billing Records</h5>
-                            This patient does not have any invoices yet. Charges will appear here once services are billed.
+                        <div class="alert alert-info">
+                            No vital signs recorded for this patient.
                         </div>
                         {% endif %}
                     </div>
                 </div>
 
-                <!-- Vital Signs Trends -->
+                <!-- All Appointments -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-calendar-check mr-1"></i> All Appointments</h3>
+                    </div>
+                    <div class="card-body">
+                        {% if appointments %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Date & Time</th>
+                                        <th>Department</th>
+                                        <th>Type</th>
+                                        <th>Status</th>
+                                        <th>Priority</th>
+                                        <th>Chief Complaint</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for appointment in appointments %}
+                                    <tr>
+                                        <td>{{ appointment.scheduled_date.strftime('%Y-%m-%d %I:%M %p') }}</td>
+                                        <td>{{ appointment.department }}</td>
+                                        <td>{{ appointment.appointment_type.value.replace('_', ' ').title() }}</td>
+                                        <td>
+                                            {% if appointment.status.value == 'completed' %}
+                                                <span class="badge badge-success">Completed</span>
+                                            {% elif appointment.status.value == 'in_progress' %}
+                                                <span class="badge badge-warning">In Progress</span>
+                                            {% elif appointment.status.value == 'checked_in' %}
+                                                <span class="badge badge-info">Checked In</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">{{ appointment.status.value.replace('_', ' ').title() }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                {{ appointment.priority }}
+                                            </span>
+                                        </td>
+                                        <td>{{ appointment.chief_complaint or 'N/A' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            No appointments recorded for this patient.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- OPD Visits History -->
+                <div class="card card-info card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-clipboard-list mr-1"></i> OPD Visits History</h3>
+                        {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
+                        <div class="card-tools">
+                            <form method="POST" action="{{ url_for('start_new_opd_visit', patient_id=patient.id) }}" style="display: inline;">
+                                <button type="submit" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-plus mr-1"></i> Start New Visit
+                                </button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        {% if active_opd_visit %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info-circle"></i> Active OPD Visit</h5>
+                            <p>
+                                <strong>OPD Number:</strong> {{ active_opd_visit.opd_number }}<br>
+                                <strong>Visit Date:</strong> {{ active_opd_visit.visit_date.strftime('%Y-%m-%d %H:%M') }}<br>
+                                <strong>Status:</strong> 
+                                {% if active_opd_visit.status.value == 'active' %}
+                                    <span class="badge badge-info">Active</span>
+                                {% elif active_opd_visit.status.value == 'completed' %}
+                                    <span class="badge badge-success">Completed</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">Cancelled</span>
+                                {% endif %}<br>
+                                <strong>Payment Status:</strong> 
+                                {% if active_opd_visit.payment_status == 'paid' %}
+                                    <span class="badge badge-success">Paid</span>
+                                {% elif active_opd_visit.payment_status == 'pending' %}
+                                    <span class="badge badge-warning">Pending</span>
+                                {% elif active_opd_visit.payment_status == 'emergency' %}
+                                    <span class="badge badge-danger">Emergency</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">{{ active_opd_visit.payment_status.title() }}</span>
+                                {% endif %}
+                            </p>
+                            {% if active_opd_visit.status.value == 'active' and user_role in ['Admin', 'Front Office', 'Nurse', 'Doctor', 'Clinician'] %}
+                            <form method="POST" action="{{ url_for('complete_opd_visit', patient_id=patient.id, opd_visit_id=active_opd_visit.id) }}" style="display: inline;">
+                                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Are you sure you want to complete this OPD visit? This action cannot be undone.');">
+                                    <i class="fas fa-check-circle mr-1"></i> Complete Visit
+                                </button>
+                            </form>
+                            {% if active_opd_visit.visit_type == 'emergency' %}
+                            <form method="POST" action="{{ url_for('complete_opd_visit', patient_id=patient.id, opd_visit_id=active_opd_visit.id) }}" style="display: inline;" onsubmit="return confirm('Mark this patient as deceased? This will close the emergency visit.');">
+                                <input type="hidden" name="completion_outcome" value="death">
+                                <button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-times-circle mr-1"></i> Mark as Death</button>
+                            </form>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        
+                        {% if opd_visits %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>OPD Number</th>
+                                        <th>Visit Date</th>
+                                        <th>Status</th>
+                                        <th>Payment Status</th>
+                                        <th>Visit Type</th>
+                                        <th>Total Charges</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for opd_visit in opd_visits %}
+                                    <tr>
+                                        <td><strong>{{ opd_visit.opd_number }}</strong></td>
+                                        <td>{{ opd_visit.visit_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>
+                                            {% if opd_visit.status.value == 'active' %}
+                                                <span class="badge badge-info">Active</span>
+                                            {% elif opd_visit.status.value == 'completed' and opd_visit.completion_outcome == 'death' %}
+                                                <span class="badge badge-danger">Death</span>
+                                            {% elif opd_visit.status.value == 'completed' %}
+                                                <span class="badge badge-success">Completed</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">Cancelled</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if opd_visit.payment_status == 'paid' %}
+                                                <span class="badge badge-success">Paid</span>
+                                            {% elif opd_visit.payment_status == 'pending' %}
+                                                <span class="badge badge-warning">Pending</span>
+                                            {% elif opd_visit.payment_status == 'emergency' %}
+                                                <span class="badge badge-danger">Emergency</span>
+                                            {% else %}
+                                                <span class="badge badge-secondary">{{ opd_visit.payment_status.title() }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ opd_visit.visit_type.replace('_', ' ').title() if opd_visit.visit_type else 'N/A' }}</td>
+                                        <td><strong>GHS {{ "{:,.2f}".format(opd_visit.total_charges) }}</strong></td>
+                                        <td>
+                                            {% if opd_visit.status.value == 'active' %}
+                                            <a href="{{ url_for('patient_triage', patient_id=patient.id) }}?opd_visit_id={{ opd_visit.id }}" class="btn btn-sm btn-info">
+                                                <i class="fas fa-edit"></i> Continue Visit
+                                            </a>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> No OPD Visits</h5>
+                            This patient has no OPD visit history.
+                            {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
+                            <a href="#" onclick="document.querySelector('form[action*=\"start_new_opd_visit\"]').submit(); return false;">Start a new visit</a>.
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Admissions History -->
+                <div class="card card-primary card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-hospital mr-1"></i> Admissions History</h3>
+                        {% if user_role in ['Admin', 'Front Office'] and not current_admission %}
+                        <div class="card-tools">
+                            <a href="{{ url_for('ipd_admission_create_form') }}?patient_id={{ patient.id }}" class="btn btn-sm btn-primary">
+                                <i class="fas fa-plus mr-1"></i> Admit Patient
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        {% if current_admission %}
+                        <div class="alert alert-warning">
+                            <h5><i class="icon fas fa-exclamation-triangle"></i> Currently Admitted</h5>
+                            <p>
+                                <strong>Admission Number:</strong> {{ current_admission.admission_number }}<br>
+                                <strong>Ward:</strong> {{ current_admission.ward.name }}<br>
+                                <strong>Bed:</strong> {{ current_admission.bed.bed_number }}<br>
+                                <strong>Admission Date:</strong> {{ current_admission.admission_date.strftime('%Y-%m-%d %H:%M') }}
+                            </p>
+                            <a href="{{ url_for('ipd_admission_detail', admission_id=current_admission.id) }}" class="btn btn-sm btn-primary">
+                                <i class="fas fa-eye"></i> View Admission Details
+                            </a>
+                        </div>
+                        {% endif %}
+                        
+                        {% if admissions %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Admission Number</th>
+                                        <th>Ward</th>
+                                        <th>Bed</th>
+                                        <th>Admission Date</th>
+                                        <th>Discharge Date</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for admission in admissions %}
+                                    <tr>
+                                        <td><strong>{{ admission.admission_number }}</strong></td>
+                                        <td>{{ admission.ward.name }}</td>
+                                        <td>{{ admission.bed.bed_number }}</td>
+                                        <td>{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>{{ admission.discharge_date.strftime('%Y-%m-%d %H:%M') if admission.discharge_date else 'N/A' }}</td>
+                                        <td>
+                                            {% if admission.status.value == 'admitted' %}
+                                                <span class="badge badge-success">Admitted</span>
+                                            {% elif admission.status.value == 'discharged' %}
+                                                <span class="badge badge-secondary">Discharged</span>
+                                            {% elif admission.status.value == 'transferred' %}
+                                                <span class="badge badge-info">Transferred</span>
+                                            {% else %}
+                                                <span class="badge badge-danger">Absconded</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-sm btn-primary">
+                                                <i class="fas fa-eye"></i> View
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="icon fas fa-info"></i> No Admissions</h5>
+                            This patient has no admission history.
+                            {% if user_role in ['Admin', 'Front Office'] %}
+                            <a href="{{ url_for('ipd_admission_create_form') }}?patient_id={{ patient.id }}">Admit patient</a>.
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Vital Signs Trends (Charts) - at bottom -->
                 {% if vitals_chart_data.dates %}
                 <div class="row">
-                    <!-- Blood Pressure Chart -->
                     <div class="col-lg-6">
                         <div class="card card-primary card-outline">
                             <div class="card-header">
@@ -454,8 +765,6 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Temperature, Pulse, Respiratory Rate Chart -->
                     <div class="col-lg-6">
                         <div class="card card-info card-outline">
                             <div class="card-header">
@@ -474,8 +783,6 @@
                         </div>
                     </div>
                 </div>
-                
-                <!-- Oxygen Saturation & Pain Scale Chart -->
                 <div class="row">
                     <div class="col-lg-6">
                         <div class="card card-success card-outline">
@@ -494,7 +801,6 @@
                             </div>
                         </div>
                     </div>
-                    
                     <div class="col-lg-6">
                         <div class="card card-warning card-outline">
                             <div class="card-header">
@@ -515,7 +821,7 @@
                 </div>
                 {% endif %}
 
-                <!-- Medical History Timeline -->
+                <!-- Medical History Timeline - at bottom -->
                 <div class="card card-primary card-outline">
                     <div class="card-header">
                         <h3 class="card-title"><i class="fas fa-history mr-1"></i> Medical History Timeline</h3>
@@ -725,386 +1031,6 @@
                         <div class="alert alert-info">
                             <h5><i class="icon fas fa-info"></i> No Medical History</h5>
                             This patient has no recorded medical history yet. Start by recording vital signs or creating an appointment.
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <!-- Appointments Table -->
-                <div class="card card-primary card-outline">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-calendar-check mr-1"></i> All Appointments</h3>
-                    </div>
-                    <div class="card-body">
-                        {% if appointments %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Date & Time</th>
-                                        <th>Department</th>
-                                        <th>Type</th>
-                                        <th>Status</th>
-                                        <th>Priority</th>
-                                        <th>Chief Complaint</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for appointment in appointments %}
-                                    <tr>
-                                        <td>{{ appointment.scheduled_date.strftime('%Y-%m-%d %I:%M %p') }}</td>
-                                        <td>{{ appointment.department }}</td>
-                                        <td>{{ appointment.appointment_type.value.replace('_', ' ').title() }}</td>
-                                        <td>
-                                            {% if appointment.status.value == 'completed' %}
-                                                <span class="badge badge-success">Completed</span>
-                                            {% elif appointment.status.value == 'in_progress' %}
-                                                <span class="badge badge-warning">In Progress</span>
-                                            {% elif appointment.status.value == 'checked_in' %}
-                                                <span class="badge badge-info">Checked In</span>
-                                            {% else %}
-                                                <span class="badge badge-secondary">{{ appointment.status.value.replace('_', ' ').title() }}</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
-                                                {{ appointment.priority }}
-                                            </span>
-                                        </td>
-                                        <td>{{ appointment.chief_complaint or 'N/A' }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <div class="alert alert-info">
-                            No appointments recorded for this patient.
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <!-- OPD Visits History -->
-                <div class="card card-info card-outline">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-clipboard-list mr-1"></i> OPD Visits History</h3>
-                        {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
-                        <div class="card-tools">
-                            <form method="POST" action="{{ url_for('start_new_opd_visit', patient_id=patient.id) }}" style="display: inline;">
-                                <button type="submit" class="btn btn-sm btn-primary">
-                                    <i class="fas fa-plus mr-1"></i> Start New Visit
-                                </button>
-                            </form>
-                        </div>
-                        {% endif %}
-                    </div>
-                    <div class="card-body">
-                        {% if active_opd_visit %}
-                        <div class="alert alert-info">
-                            <h5><i class="icon fas fa-info-circle"></i> Active OPD Visit</h5>
-                            <p>
-                                <strong>OPD Number:</strong> {{ active_opd_visit.opd_number }}<br>
-                                <strong>Visit Date:</strong> {{ active_opd_visit.visit_date.strftime('%Y-%m-%d %H:%M') }}<br>
-                                <strong>Status:</strong> 
-                                {% if active_opd_visit.status.value == 'active' %}
-                                    <span class="badge badge-info">Active</span>
-                                {% elif active_opd_visit.status.value == 'completed' %}
-                                    <span class="badge badge-success">Completed</span>
-                                {% else %}
-                                    <span class="badge badge-secondary">Cancelled</span>
-                                {% endif %}<br>
-                                <strong>Payment Status:</strong> 
-                                {% if active_opd_visit.payment_status == 'paid' %}
-                                    <span class="badge badge-success">Paid</span>
-                                {% elif active_opd_visit.payment_status == 'pending' %}
-                                    <span class="badge badge-warning">Pending</span>
-                                {% elif active_opd_visit.payment_status == 'emergency' %}
-                                    <span class="badge badge-danger">Emergency</span>
-                                {% else %}
-                                    <span class="badge badge-secondary">{{ active_opd_visit.payment_status.title() }}</span>
-                                {% endif %}
-                            </p>
-                            {% if active_opd_visit.status.value == 'active' and user_role in ['Admin', 'Front Office', 'Nurse', 'Doctor', 'Clinician'] %}
-                            <form method="POST" action="{{ url_for('complete_opd_visit', patient_id=patient.id, opd_visit_id=active_opd_visit.id) }}" style="display: inline;">
-                                <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Are you sure you want to complete this OPD visit? This action cannot be undone.');">
-                                    <i class="fas fa-check-circle mr-1"></i> Complete Visit
-                                </button>
-                            </form>
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                        
-                        {% if opd_visits %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>OPD Number</th>
-                                        <th>Visit Date</th>
-                                        <th>Status</th>
-                                        <th>Payment Status</th>
-                                        <th>Visit Type</th>
-                                        <th>Total Charges</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for opd_visit in opd_visits %}
-                                    <tr>
-                                        <td><strong>{{ opd_visit.opd_number }}</strong></td>
-                                        <td>{{ opd_visit.visit_date.strftime('%Y-%m-%d %H:%M') }}</td>
-                                        <td>
-                                            {% if opd_visit.status.value == 'active' %}
-                                                <span class="badge badge-info">Active</span>
-                                            {% elif opd_visit.status.value == 'completed' %}
-                                                <span class="badge badge-success">Completed</span>
-                                            {% else %}
-                                                <span class="badge badge-secondary">Cancelled</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% if opd_visit.payment_status == 'paid' %}
-                                                <span class="badge badge-success">Paid</span>
-                                            {% elif opd_visit.payment_status == 'pending' %}
-                                                <span class="badge badge-warning">Pending</span>
-                                            {% elif opd_visit.payment_status == 'emergency' %}
-                                                <span class="badge badge-danger">Emergency</span>
-                                            {% else %}
-                                                <span class="badge badge-secondary">{{ opd_visit.payment_status.title() }}</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>{{ opd_visit.visit_type.replace('_', ' ').title() if opd_visit.visit_type else 'N/A' }}</td>
-                                        <td><strong>GHS {{ "{:,.2f}".format(opd_visit.total_charges) }}</strong></td>
-                                        <td>
-                                            {% if opd_visit.status.value == 'active' %}
-                                            <a href="{{ url_for('patient_triage', patient_id=patient.id) }}?opd_visit_id={{ opd_visit.id }}" class="btn btn-sm btn-info">
-                                                <i class="fas fa-edit"></i> Continue Visit
-                                            </a>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <div class="alert alert-info">
-                            <h5><i class="icon fas fa-info"></i> No OPD Visits</h5>
-                            This patient has no OPD visit history.
-                            {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
-                            <a href="#" onclick="document.querySelector('form[action*=\"start_new_opd_visit\"]').submit(); return false;">Start a new visit</a>.
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <!-- Admissions History -->
-                <div class="card card-primary card-outline">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-hospital mr-1"></i> Admissions History</h3>
-                        {% if user_role in ['Admin', 'Front Office'] and not current_admission %}
-                        <div class="card-tools">
-                            <a href="{{ url_for('ipd_admission_create_form') }}?patient_id={{ patient.id }}" class="btn btn-sm btn-primary">
-                                <i class="fas fa-plus mr-1"></i> Admit Patient
-                            </a>
-                        </div>
-                        {% endif %}
-                    </div>
-                    <div class="card-body">
-                        {% if current_admission %}
-                        <div class="alert alert-warning">
-                            <h5><i class="icon fas fa-exclamation-triangle"></i> Currently Admitted</h5>
-                            <p>
-                                <strong>Admission Number:</strong> {{ current_admission.admission_number }}<br>
-                                <strong>Ward:</strong> {{ current_admission.ward.name }}<br>
-                                <strong>Bed:</strong> {{ current_admission.bed.bed_number }}<br>
-                                <strong>Admission Date:</strong> {{ current_admission.admission_date.strftime('%Y-%m-%d %H:%M') }}
-                            </p>
-                            <a href="{{ url_for('ipd_admission_detail', admission_id=current_admission.id) }}" class="btn btn-sm btn-primary">
-                                <i class="fas fa-eye"></i> View Admission Details
-                            </a>
-                        </div>
-                        {% endif %}
-                        
-                        {% if admissions %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Admission Number</th>
-                                        <th>Ward</th>
-                                        <th>Bed</th>
-                                        <th>Admission Date</th>
-                                        <th>Discharge Date</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for admission in admissions %}
-                                    <tr>
-                                        <td><strong>{{ admission.admission_number }}</strong></td>
-                                        <td>{{ admission.ward.name }}</td>
-                                        <td>{{ admission.bed.bed_number }}</td>
-                                        <td>{{ admission.admission_date.strftime('%Y-%m-%d %H:%M') }}</td>
-                                        <td>{{ admission.discharge_date.strftime('%Y-%m-%d %H:%M') if admission.discharge_date else 'N/A' }}</td>
-                                        <td>
-                                            {% if admission.status.value == 'admitted' %}
-                                                <span class="badge badge-success">Admitted</span>
-                                            {% elif admission.status.value == 'discharged' %}
-                                                <span class="badge badge-secondary">Discharged</span>
-                                            {% elif admission.status.value == 'transferred' %}
-                                                <span class="badge badge-info">Transferred</span>
-                                            {% else %}
-                                                <span class="badge badge-danger">Absconded</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            <a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}" class="btn btn-sm btn-primary">
-                                                <i class="fas fa-eye"></i> View
-                                            </a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <div class="alert alert-info">
-                            <h5><i class="icon fas fa-info"></i> No Admissions</h5>
-                            This patient has no admission history.
-                            {% if user_role in ['Admin', 'Front Office'] %}
-                            <a href="{{ url_for('ipd_admission_create_form') }}?patient_id={{ patient.id }}">Admit patient</a>.
-                            {% endif %}
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <!-- Vital Signs History -->
-                <div class="card card-primary card-outline">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-heartbeat mr-1"></i> Vital Signs History</h3>
-                    </div>
-                    <div class="card-body">
-                        {% if vitals_history %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-striped table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>Date & Time</th>
-                                        <th>Triage</th>
-                                        <th>Temp (°C)</th>
-                                        <th>BP (mmHg)</th>
-                                        <th>Pulse (bpm)</th>
-                                        <th>Resp Rate</th>
-                                        <th>SpO2 (%)</th>
-                                        <th>Weight (kg)</th>
-                                        <th>Height (cm)</th>
-                                        <th>BMI</th>
-                                        <th>Pain (1-10)</th>
-                                        <th>Recorded By</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for vital in vitals_history %}
-                                    <tr>
-                                        <td>{{ vital.recorded_at.strftime('%Y-%m-%d %I:%M %p') }}</td>
-                                        <td>
-                                            {% if vital.triage_level %}
-                                                {% if vital.triage_level == 'P1' or vital.triage_category == 'Critical' %}
-                                                    <span class="badge badge-danger">{{ vital.triage_level }} - {{ vital.triage_category or 'Critical' }}</span>
-                                                {% elif vital.triage_level == 'P2' or vital.triage_category == 'Urgent' %}
-                                                    <span class="badge badge-warning">{{ vital.triage_level }} - {{ vital.triage_category or 'Urgent' }}</span>
-                                                {% elif vital.triage_level == 'P3' or vital.triage_category == 'Routine' %}
-                                                    <span class="badge badge-success">{{ vital.triage_level }} - {{ vital.triage_category or 'Routine' }}</span>
-                                                {% else %}
-                                                    <span class="badge badge-info">{{ vital.triage_level }}{% if vital.triage_category %} - {{ vital.triage_category }}{% endif %}</span>
-                                                {% endif %}
-                                            {% else %}
-                                                <span class="text-muted">—</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>
-                                            {% if vital.temperature %}
-                                                {% if vital.temperature < 36.1 or vital.temperature > 37.2 %}
-                                                    <span class="badge badge-warning">{{ "%.1f"|format(vital.temperature) }}</span>
-                                                {% else %}
-                                                    {{ "%.1f"|format(vital.temperature) }}
-                                                {% endif %}
-                                            {% else %}—{% endif %}
-                                        </td>
-                                        <td>
-                                            {% if vital.systolic_bp and vital.diastolic_bp %}
-                                                {{ vital.systolic_bp }}/{{ vital.diastolic_bp }}
-                                            {% elif vital.blood_pressure %}
-                                                {{ vital.blood_pressure }}
-                                            {% else %}—{% endif %}
-                                        </td>
-                                        <td>
-                                            {% if vital.pulse_rate %}
-                                                {% if vital.pulse_rate < 60 or vital.pulse_rate > 100 %}
-                                                    <span class="badge badge-warning">{{ vital.pulse_rate }}</span>
-                                                {% else %}
-                                                    {{ vital.pulse_rate }}
-                                                {% endif %}
-                                            {% else %}—{% endif %}
-                                        </td>
-                                        <td>
-                                            {% if vital.respiratory_rate %}
-                                                {% if vital.respiratory_rate < 12 or vital.respiratory_rate > 20 %}
-                                                    <span class="badge badge-warning">{{ vital.respiratory_rate }}</span>
-                                                {% else %}
-                                                    {{ vital.respiratory_rate }}
-                                                {% endif %}
-                                            {% else %}—{% endif %}
-                                        </td>
-                                        <td>
-                                            {% if vital.oxygen_saturation %}
-                                                {% if vital.oxygen_saturation < 95 %}
-                                                    <span class="badge badge-danger">{{ vital.oxygen_saturation }}%</span>
-                                                {% else %}
-                                                    <span class="badge badge-success">{{ vital.oxygen_saturation }}%</span>
-                                                {% endif %}
-                                            {% else %}—{% endif %}
-                                        </td>
-                                        <td>{% if vital.weight %}{{ "%.1f"|format(vital.weight) }}{% else %}—{% endif %}</td>
-                                        <td>{% if vital.height %}{{ "%.1f"|format(vital.height) }}{% else %}—{% endif %}</td>
-                                        <td>
-                                            {% if vital.bmi %}
-                                                {% if vital.bmi < 18.5 %}
-                                                    <span class="badge badge-info">{{ "%.1f"|format(vital.bmi) }}</span>
-                                                {% elif vital.bmi < 25 %}
-                                                    <span class="badge badge-success">{{ "%.1f"|format(vital.bmi) }}</span>
-                                                {% elif vital.bmi < 30 %}
-                                                    <span class="badge badge-warning">{{ "%.1f"|format(vital.bmi) }}</span>
-                                                {% else %}
-                                                    <span class="badge badge-danger">{{ "%.1f"|format(vital.bmi) }}</span>
-                                                {% endif %}
-                                            {% else %}—{% endif %}
-                                        </td>
-                                        <td>
-                                            {% if vital.pain_scale is not none %}
-                                                {% if vital.pain_scale >= 7 %}
-                                                    <span class="badge badge-danger">{{ vital.pain_scale }}</span>
-                                                {% elif vital.pain_scale >= 4 %}
-                                                    <span class="badge badge-warning">{{ vital.pain_scale }}</span>
-                                                {% else %}
-                                                    <span class="badge badge-success">{{ vital.pain_scale }}</span>
-                                                {% endif %}
-                                            {% else %}—{% endif %}
-                                        </td>
-                                        <td>{{ vital.recorded_by.full_name or vital.recorded_by.username }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <div class="alert alert-info">
-                            No vital signs recorded for this patient.
                         </div>
                         {% endif %}
                     </div>

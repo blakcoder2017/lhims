@@ -16,7 +16,7 @@ from app.core.deps import get_current_user, role_required
 from app.models.user_models import User
 from app.models.opd_models import OPDVisit, OPDVisitStatus
 from app.models.encounter_models import Encounter, EncounterStatus
-from app.models.appointment_models import Appointment, AppointmentStatus
+from app.models.appointment_models import OPDQueue, QueueStatus
 from app.models.billing_models import Invoice, InvoiceStatus, Payment, PaymentStatus
 from app.crud import opd_crud
 
@@ -56,16 +56,16 @@ def opd_dashboard(
         OPDVisit.is_active == True
     ).scalar() or 0
     
-    # Appointment Statistics
-    pending_appointments = db.query(func.count(Appointment.id)).filter(
-        Appointment.status == AppointmentStatus.SCHEDULED.value,
-        Appointment.is_active == True
+    # Queue Statistics
+    waiting_patients = db.query(func.count(OPDQueue.id)).filter(
+        OPDQueue.status == QueueStatus.WAITING.value,
+        OPDQueue.is_active == True
     ).scalar() or 0
     
-    checked_in_today = db.query(func.count(Appointment.id)).filter(
-        Appointment.status == AppointmentStatus.CHECKED_IN.value,
-        func.date(Appointment.checked_in_at) == today,
-        Appointment.is_active == True
+    checked_in_today = db.query(func.count(OPDQueue.id)).filter(
+        OPDQueue.status == QueueStatus.IN_PROGRESS.value,
+        func.date(OPDQueue.checked_in_at) == today,
+        OPDQueue.is_active == True
     ).scalar() or 0
     
     # Encounter Statistics
@@ -117,7 +117,7 @@ def opd_dashboard(
         "active_visits": active_visits,
         "completed_visits_today": completed_visits_today,
         "visits_this_month": visits_this_month,
-        "pending_appointments": pending_appointments,
+        "waiting_patients": waiting_patients,
         "checked_in_today": checked_in_today,
         "pending_encounters": pending_encounters,
         "revenue_today": revenue_today,

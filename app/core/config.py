@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int
+    
+    # SMS Settings (SMSOnlineGH)
+    SMSONLINEGH_API_KEY: str = ""
+    SMSONLINEGH_SENDER: str = "LHIMS"
 
     # Configuration for Pydantic to load the .env file
     # This is a different syntax for Pydantic v2

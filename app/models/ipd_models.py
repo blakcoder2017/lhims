@@ -201,6 +201,7 @@ class Admission(Base):
     transferred_to_ward = relationship("Ward", foreign_keys=[transferred_to_ward_id])
     admission_notes = relationship("AdmissionNote", back_populates="admission", cascade="all, delete-orphan")
     drug_administrations = relationship("DrugAdministration", back_populates="admission")
+    fluid_balance_entries = relationship("FluidBalance", back_populates="admission", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Admission(id={self.id}, patient_id={self.patient_id}, ward_id={self.ward_id}, bed_id={self.bed_id}, status={self.status.value})>"

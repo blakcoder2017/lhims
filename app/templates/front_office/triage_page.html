@@ -406,9 +406,9 @@
                                 <!-- Temperature -->
                                 <div class="col-md-3">
                                     <div class="form-group">
-                                        <label>Temperature (°C) <span class="text-danger">*</span></label>
+                                        <label>Temperature (°C)</label>
                                         <input type="number" step="0.1" class="form-control" name="temperature" 
-                                               min="30" max="45" required placeholder="36.5"
+                                               min="30" max="45" placeholder="36.5"
                                                {% if payment_required and not payment_paid %}disabled{% endif %}>
                                         <small class="form-text text-muted">Normal: 36.1-37.2°C</small>
                                     </div>
@@ -586,6 +586,9 @@
                             </button>
                             {% endif %}
                             <input type="hidden" name="create_encounter" id="create_encounter_flag" value="no">
+                            {% if from_admission %}
+                            <input type="hidden" name="from_admission" value="{{ from_admission }}">
+                            {% endif %}
                         </div>
                     </form>
                 </div>
@@ -742,21 +745,21 @@
                 </div>
                 {% endif %}
 
-                <!-- Appointment/Queue Creation - Step 2 (Advanced - Hidden by default, can be shown if needed) -->
-                <div class="card card-primary card-outline" style="display: none;" id="appointment-form-card">
+                <!-- Queue Creation - Step 2 -->
+                <div class="card card-primary card-outline" id="queue-form-card">
                     <div class="card-header patient-header">
-                        <h3 class="card-title"><i class="fas fa-calendar-check mr-1"></i> Create Appointment / Add to Queue - Step 2 (Advanced)</h3>
+                        <h3 class="card-title"><i class="fas fa-users mr-1"></i> Step 2: Add to OPD Queue</h3>
                         <div class="card-tools">
-                            <button type="button" class="btn btn-tool" onclick="document.getElementById('appointment-form-card').style.display='none';">
-                                <i class="fas fa-times"></i>
+                            <button type="button" class="btn btn-tool" onclick="document.getElementById('queue-form-card').style.display = document.getElementById('queue-form-card').style.display === 'none' ? 'block' : 'none';">
+                                <i class="fas fa-chevron-up" id="queue-form-toggle-icon"></i>
                             </button>
                         </div>
                     </div>
-                    <form method="POST" action="/api/v1/appointments/create">
+                    <form method="POST" action="/api/v1/queue/add">
                         <input type="hidden" name="patient_id" value="{{ patient.id }}">
                         <div class="card-body">
                             <div class="row">
-                                <div class="col-md-3">
+                                <div class="col-md-4">
                                     <div class="form-group">
                                         <label for="department_type">Department Type <span class="text-danger">*</span></label>
                                         <select class="form-control" id="department_type" name="department_type" required>
@@ -767,7 +770,7 @@
                                         <small class="form-text text-muted">Select OPD for outpatient, IPD for inpatient</small>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-md-4">
                                     <div class="form-group">
                                         <label for="department">Department <span class="text-danger">*</span></label>
                                         <select class="form-control" id="department" name="department" required>
@@ -784,61 +787,23 @@
                                         </select>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-md-4">
                                     <div class="form-group">
-                                        <label for="appointment_type">Appointment Type <span class="text-danger">*</span></label>
-                                        <select class="form-control" id="appointment_type" name="appointment_type" required>
-                                            <option value="walk_in">Walk-In</option>
-                                            <option value="scheduled">Scheduled</option>
-                                            <option value="emergency">Emergency</option>
-                                            <option value="follow_up">Follow-Up</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="col-md-3">
-                                    <div class="form-group">
-                                        <label for="priority">Priority (1-10) <span class="text-danger">*</span></label>
-                                        <input type="number" class="form-control" id="priority" name="priority" min="1" max="10" value="5" required>
+                                        <label for="priority">Priority (1-10)</label>
+                                        <input type="number" class="form-control" id="priority" name="priority" min="1" max="10" value="5">
                                         <small class="form-text text-muted">1 = Highest Priority, 10 = Lowest Priority</small>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <div class="form-group">
-                                        <label for="scheduled_date">Scheduled Date <span class="text-danger">*</span></label>
-                                        <input type="date" class="form-control" id="scheduled_date" name="scheduled_date" required>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="form-group">
-                                        <label for="scheduled_time">Scheduled Time <span class="text-danger">*</span></label>
-                                        <input type="time" class="form-control" id="scheduled_time" name="scheduled_time" required>
                                     </div>
                                 </div>
                             </div>
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
-                                        <label for="assigned_clinician_id">Assign Doctor (Optional)</label>
-                                        <select class="form-control" id="assigned_clinician_id" name="assigned_clinician_id">
-                                            <option value="">Auto-assign (from doctors on duty)</option>
-                                            {% if doctors_on_duty %}
-                                            <optgroup label="Doctors on Duty">
-                                                {% for duty in doctors_on_duty %}
-                                                <option value="{{ duty.doctor_id }}">{{ duty.doctor.first_name }} {{ duty.doctor.last_name }} ({{ duty.department }}) - On Duty</option>
-                                                {% endfor %}
-                                            </optgroup>
-                                            {% endif %}
-                                            {% if clinicians %}
-                                            <optgroup label="All Clinicians">
-                                                {% for clinician in clinicians %}
-                                                <option value="{{ clinician.id }}">{{ clinician.first_name }} {{ clinician.last_name }}</option>
-                                                {% endfor %}
-                                            </optgroup>
-                                            {% endif %}
+                                        <label for="visit_type">Visit Type <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="visit_type" name="visit_type" required>
+                                            <option value="walk_in" selected>Walk-In</option>
+                                            <option value="emergency">Emergency</option>
+                                            <option value="follow_up">Follow-Up</option>
                                         </select>
-                                        <small class="form-text text-muted">Leave empty to auto-assign from doctors on duty, or select a specific doctor</small>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
@@ -858,7 +823,7 @@
                             </div>
                         </div>
                         <div class="card-footer">
-                            <button type="submit" class="btn btn-action float-right"><i class="fas fa-calendar-plus mr-1"></i> Create Appointment</button>
+                            <button type="submit" class="btn btn-action float-right"><i class="fas fa-user-plus mr-1"></i> Add to Queue</button>
                             <a href="{{ url_for('view_queue') }}" class="btn btn-secondary mr-2"><i class="fas fa-list mr-1"></i> View Queue</a>
                         </div>
                     </form>
@@ -1042,14 +1007,22 @@
             const scheduledDateInput = document.getElementById('scheduled_date');
             if (scheduledDateInput) {
                 scheduledDateInput.valueAsDate = new Date();
-                // Set current time as default for scheduled_time
-                const now = new Date();
-                const hours = String(now.getHours()).padStart(2, '0');
-                const minutes = String(now.getMinutes()).padStart(2, '0');
-                const scheduledTimeInput = document.getElementById('scheduled_time');
-                if (scheduledTimeInput) {
-                    scheduledTimeInput.value = `${hours}:${minutes}`;
-                }
+                // Allow selecting today or future dates
+                scheduledDateInput.min = new Date().toISOString().split('T')[0];
+            }
+            
+            // Set default time for scheduled_time (if appointment form exists)
+            const scheduledTimeInput = document.getElementById('scheduled_time');
+            if (scheduledTimeInput) {
+                // Default to 9:00 AM, but allow any time
+                scheduledTimeInput.value = '09:00';
+            }
+            
+            // Toggle appointment form visibility
+            const appointmentFormCard = document.getElementById('appointment-form-card');
+            if (appointmentFormCard) {
+                // Make form visible by default
+                appointmentFormCard.style.display = 'block';
             }
             
             // Handle "Save Vitals & Create Encounter" button

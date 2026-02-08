@@ -305,65 +305,6 @@ def create_claim_from_encounter(
         )
 
 
-@router.get("/claims/{claim_id}", name="view_claim")
-def view_claim(
-    request: Request,
-    claim_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Finance"]))
-):
-    """View a specific NHIS claim"""
-    claim = claims_crud.get_claim(db, claim_id)
-    if not claim:
-        raise HTTPException(status_code=404, detail="Claim not found")
-    
-    context = {
-        "request": request,
-        "title": f"NHIS Claim {claim.claim_number}",
-        "current_user": current_user,
-        "user_role": current_user.role.name,
-        "claim": claim,
-        "encounter": claim.encounter,
-        "patient": claim.patient,
-        "invoice": claim.invoice
-    }
-    return templates.TemplateResponse("claims/claim_detail.html", context)
-
-
-@router.post("/claims/{claim_id}/submit", name="submit_claim", status_code=302)
-def submit_claim(
-    request: Request,
-    claim_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Finance"]))
-):
-    """
-    Submit claim to NHIA.
-    Note: Actual API submission is pending NHIA API integration.
-    This currently marks the claim as submitted.
-    """
-    claim = claims_crud.get_claim(db, claim_id)
-    if not claim:
-        raise HTTPException(status_code=404, detail="Claim not found")
-    
-    # TODO: When NHIA API is available, implement actual submission
-    # For now, just update status
-    updated_claim = claims_crud.update_claim_status(
-        db, claim_id, ClaimStatus.SUBMITTED
-    )
-    
-    if updated_claim:
-        # Set submission reference
-        updated_claim.submission_reference = f"SUBM-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        db.commit()
-    else:
-        raise HTTPException(status_code=400, detail="Failed to submit claim")
-    
-    return RedirectResponse(
-        url=f"/claims/{claim_id}?status=submitted"
-    )
-
-
 @router.get("/claims/export", name="export_nhis_claims")
 def export_nhis_claims(
     request: Request,
@@ -507,6 +448,65 @@ def export_nhis_claims(
             )
         except ImportError:
             raise HTTPException(status_code=500, detail="openpyxl is required for Excel export. Install it with: pip install openpyxl")
+
+
+@router.get("/claims/{claim_id}", name="view_claim")
+def view_claim(
+    request: Request,
+    claim_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance"]))
+):
+    """View a specific NHIS claim"""
+    claim = claims_crud.get_claim(db, claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    
+    context = {
+        "request": request,
+        "title": f"NHIS Claim {claim.claim_number}",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "claim": claim,
+        "encounter": claim.encounter,
+        "patient": claim.patient,
+        "invoice": claim.invoice
+    }
+    return templates.TemplateResponse("claims/claim_detail.html", context)
+
+
+@router.post("/claims/{claim_id}/submit", name="submit_claim", status_code=302)
+def submit_claim(
+    request: Request,
+    claim_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance"]))
+):
+    """
+    Submit claim to NHIA.
+    Note: Actual API submission is pending NHIA API integration.
+    This currently marks the claim as submitted.
+    """
+    claim = claims_crud.get_claim(db, claim_id)
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    
+    # TODO: When NHIA API is available, implement actual submission
+    # For now, just update status
+    updated_claim = claims_crud.update_claim_status(
+        db, claim_id, ClaimStatus.SUBMITTED
+    )
+    
+    if updated_claim:
+        # Set submission reference
+        updated_claim.submission_reference = f"SUBM-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        db.commit()
+    else:
+        raise HTTPException(status_code=400, detail="Failed to submit claim")
+    
+    return RedirectResponse(
+        url=f"/claims/{claim_id}?status=submitted"
+    )
 
 
 @router.post("/claims/{claim_id}/update-status", name="update_nhis_claim_status")

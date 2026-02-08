@@ -6,7 +6,7 @@ from decimal import Decimal
 class TriageVitalsBase(BaseModel):
     """Base schema for vital signs with all required fields."""
     # Temperature measurement
-    temperature: float = Field(..., description="Temperature in Celsius", ge=30.0, le=45.0)
+    temperature: Optional[float] = Field(None, description="Temperature in Celsius", ge=30.0, le=45.0)
     
     # Blood pressure (Systolic/Diastolic) - separate fields preferred
     systolic_bp: Optional[int] = Field(None, description="Systolic BP in mmHg", ge=50, le=250)

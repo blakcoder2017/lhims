@@ -23,14 +23,17 @@ from app.crud import ipd_crud, patient_crud, billing_crud, drug_administration_c
 from app.models.ipd_models import Admission, AdmissionStatus, AdmissionNote
 from app.models.billing_models import Invoice, Charge, ChargeType, Payment, PaymentStatus
 from app.models.patient_models import Patient, PaymentMechanism
-from app.models.encounter_models import Encounter, LabOrder, RadiologyOrder, Prescription
+from app.models.encounter_models import Encounter, EncounterStatus, LabOrder, RadiologyOrder, Prescription
 from app.models.procedure_models import Procedure
 from app.models.expense_models import Expense, ExpenseCategory, ExpenseStatus
 from app.models.opd_models import OPDVisit, OPDVisitStatus
 from app.models.disease_models import Disease, EncounterDisease
-from app.crud import hospital_settings_crud, opd_crud
+from app.crud import hospital_settings_crud, opd_crud, user_crud, service_pricing_crud
+from app.models.user_models import User, Role
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+
+DEFAULT_CONSULTATION_FEE = Decimal('100.00')
 templates = Jinja2Templates(directory="app/templates")
 
 
@@ -49,6 +52,52 @@ def reports_dashboard(
         "user_role": current_user.role.name
     }
     return templates.TemplateResponse("reports/dashboard.html", context)
+
+
+@router.get("/admissions/{admission_id}/referral", name="referral_report")
+def referral_report(
+    request: Request,
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Doctor", "Nurse", "Front Office"])),
+    receiving_hospital: Optional[str] = Query(None, description="Name of receiving hospital"),
+    reason_for_referral: Optional[str] = Query(None, description="Reason for referral"),
+    format: str = Query("html", regex="^(html|pdf)$")
+):
+    """
+    Generate a referral report for patient transfer to another hospital.
+    Can be regenerated as needed.
+    """
+    from app.services.referral_report_service import generate_referral_report
+    
+    try:
+        report_data = generate_referral_report(
+            db, 
+            admission_id, 
+            receiving_hospital=receiving_hospital,
+            reason_for_referral=reason_for_referral
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    
+    context = {
+        "request": request,
+        "title": f"Referral Report - {report_data['admission'].admission_number}",
+        "current_user": current_user,
+        **report_data
+    }
+    
+    if format == "pdf":
+        from app.utils.pdf_generator import generate_referral_report_pdf
+        pdf_content = generate_referral_report_pdf(context)
+        filename_safe = f"referral_report_{report_data['admission'].admission_number}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    
+    return templates.TemplateResponse("reports/referral_report.html", context)
 
 
 @router.get("/admissions/{admission_id}/report", name="admission_report")
@@ -1826,3 +1875,131 @@ def disease_report(
         )
     
     return templates.TemplateResponse("reports/disease_report.html", context)
+
+
+@router.get("/doctor", name="doctor_report")
+def doctor_report(
+    request: Request,
+    doctor_id: Optional[int] = Query(None, description="Doctor/Clinician ID"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance", "Management", "Doctor"]))
+):
+    """
+    Doctor Report: How many patients a doctor saw within a period, and calculated payment.
+    Payment = consultation_fee × patient_count (e.g. 300 cedis × 5 patients = 1,500 cedis).
+    """
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=30)
+
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+
+    # Get doctors and clinicians (users who can document encounters)
+    doctor_role = db.query(Role).filter(Role.name == "Doctor").first()
+    clinician_role = db.query(Role).filter(Role.name == "Clinician").first()
+    doctor_ids = []
+    if doctor_role:
+        doctor_ids.extend([u.id for u in db.query(User).filter(User.role_id == doctor_role.id, User.is_active == True).all()])
+    if clinician_role:
+        doctor_ids.extend([u.id for u in db.query(User).filter(User.role_id == clinician_role.id, User.is_active == True).all()])
+    doctor_ids = list(set(doctor_ids))
+
+    clinicians = db.query(User).options(joinedload(User.role)).filter(
+        User.id.in_(doctor_ids),
+        User.is_active == True
+    ).order_by(User.full_name.asc()).all()
+
+    # Get consultation fee from service pricing
+    consultation_fee = service_pricing_crud.get_default_price_for_service(db, "Consultation", "consultation")
+    if consultation_fee is None:
+        consultation_fee = DEFAULT_CONSULTATION_FEE
+
+    report_data = None
+    selected_doctor = None
+
+    if doctor_id:
+        selected_doctor = db.query(User).options(joinedload(User.role)).filter(User.id == doctor_id).first()
+        if selected_doctor:
+            # Count encounters by this clinician (exclude cancelled)
+            encounter_count = db.query(func.count(Encounter.id)).filter(
+                Encounter.clinician_id == doctor_id,
+                Encounter.is_active == True,
+                Encounter.status != EncounterStatus.CANCELLED,
+                func.date(Encounter.encounter_date) >= start,
+                func.date(Encounter.encounter_date) <= end
+            ).scalar() or 0
+
+            total_amount = consultation_fee * encounter_count
+
+            report_data = {
+                "doctor": selected_doctor,
+                "patient_count": encounter_count,
+                "consultation_fee": consultation_fee,
+                "total_amount": total_amount,
+                "encounters": db.query(Encounter)
+                    .options(
+                        joinedload(Encounter.patient),
+                        joinedload(Encounter.clinician)
+                    )
+                    .filter(
+                        Encounter.clinician_id == doctor_id,
+                        Encounter.is_active == True,
+                        Encounter.status != EncounterStatus.CANCELLED,
+                        func.date(Encounter.encounter_date) >= start,
+                        func.date(Encounter.encounter_date) <= end
+                    )
+                    .order_by(Encounter.encounter_date.desc())
+                    .limit(100)
+                    .all()
+            }
+
+    context = {
+        "request": request,
+        "title": "Doctor Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "clinicians": clinicians,
+        "doctor_id": doctor_id,
+        "start_date": start_date if start_date else start.strftime("%Y-%m-%d"),
+        "end_date": end_date if end_date else end.strftime("%Y-%m-%d"),
+        "consultation_fee": consultation_fee,
+        "report_data": report_data,
+        "selected_doctor": selected_doctor,
+    }
+
+    if format == "pdf" and report_data:
+        try:
+            from app.utils.pdf_generator import generate_doctor_report_pdf
+            pdf_content = generate_doctor_report_pdf(context)
+            doc_name = (selected_doctor.full_name or selected_doctor.username or "doctor").replace(" ", "_")
+            filename_safe = f"doctor_report_{doc_name}_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.pdf"
+            return Response(
+                content=pdf_content,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+            )
+        except (ImportError, AttributeError):
+            pass  # Fall through to HTML
+    elif format == "excel" and report_data:
+        try:
+            from app.utils.excel_generator import generate_doctor_report_excel
+            excel_content = generate_doctor_report_excel(context)
+            doc_name = (selected_doctor.full_name or selected_doctor.username or "doctor").replace(" ", "_")
+            filename_safe = f"doctor_report_{doc_name}_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.xlsx"
+            return Response(
+                content=excel_content,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+            )
+        except (ImportError, AttributeError):
+            pass  # Fall through to HTML
+
+    return templates.TemplateResponse("reports/doctor_report.html", context)

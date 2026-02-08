@@ -206,110 +206,6 @@
                     </div>
                 </div>
 
-                <!-- Differential Diagnosis (G-STG) -->
-                <div class="card card-secondary card-outline" id="gstgDifferentialsCard">
-                    <div class="card-header">
-                        <h3 class="card-title">
-                            <i class="fas fa-project-diagram mr-1"></i>
-                            Differential Diagnosis (G-STG)
-                        </h3>
-                        <div class="card-tools">
-                            <span class="badge badge-primary">Beta</span>
-                            {% if differential_data and differential_data.suggestions %}
-                            <a href="{{ url_for('view_differential_report', encounter_id=encounter.id) }}" class="btn btn-sm btn-outline-light ml-2" target="_blank">
-                                <i class="fas fa-file-alt mr-1"></i> Report
-                            </a>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div id="gstgAlert" class="alert d-none" role="alert"></div>
-                        <div class="row">
-                            <div class="col-md-5 border-right">
-                                <div class="form-group">
-                                    <label for="gstgSummaryInput">Clinical Summary *</label>
-                                    <textarea class="form-control" id="gstgSummaryInput" rows="6" placeholder="Summarize the case...">{% if differential_data and differential_data.clinical_summary %}{{ differential_data.clinical_summary }}{% else %}{% if encounter.chief_complaint %}Chief Complaint: {{ encounter.chief_complaint }}{% endif %}
-{% if encounter_diseases %}
-Diagnoses:
-{% for diagnosis in encounter_diseases %}{% if diagnosis.is_primary %}Primary: {% else %}Secondary: {% endif %}{{ diagnosis.name }}{% if diagnosis.code %} ({{ diagnosis.code }}){% endif %}
-{% endfor %}{% endif %}
-{% if encounter.assessment %}Assessment: {{ encounter.assessment }}{% elif encounter.history_of_present_illness %}History: {{ encounter.history_of_present_illness }}{% endif %}{% endif %}</textarea>
-                                    <small class="form-text text-muted">
-                                        Auto-filled from chief complaint, diagnoses, and assessment; edit before generating to improve accuracy.
-                                    </small>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group col-md-4">
-                                        <label for="gstgAgeInput">Age (years)</label>
-                                        <input type="number" min="0" class="form-control" id="gstgAgeInput" value="{{ patient_age.years if patient_age else '' }}">
-                                    </div>
-                                    <div class="form-group col-md-4">
-                                        <label for="gstgSexInput">Sex</label>
-                                        <select class="form-control" id="gstgSexInput">
-                                            <option value="">—</option>
-                                            <option value="male" {% if patient.gender and patient.gender|lower == 'male' %}selected{% endif %}>Male</option>
-                                            <option value="female" {% if patient.gender and patient.gender|lower == 'female' %}selected{% endif %}>Female</option>
-                                            <option value="other" {% if patient.gender and patient.gender|lower not in ['male','female'] %}selected{% endif %}>Other</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group col-md-4">
-                                        <label for="gstgVitalsInput">Key Vitals</label>
-                                        <input type="text" class="form-control" id="gstgVitalsInput" placeholder="Temp 38.5°C, BP 160/100">
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="gstgLabsInput">Key Labs/Findings</label>
-                                    <textarea class="form-control" id="gstgLabsInput" rows="2" placeholder="Hb 7.8 g/dL, RBS 24 mmol/L"></textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label for="gstgNotesInput">Clinical Notes (optional)</label>
-                                    <textarea class="form-control" id="gstgNotesInput" rows="2" placeholder="Notes for the care team">{{ differential_data.notes if differential_data and differential_data.notes else '' }}</textarea>
-                                </div>
-                                <button class="btn btn-secondary btn-block" id="gstgGenerateBtn">
-                                    <i class="fas fa-magic mr-1"></i> Generate from Ghana STG
-                                </button>
-                                <small class="text-muted d-block mt-2" id="gstgGenerateStatus">
-                                    Provide a concise summary plus vitals/labs to improve matching accuracy.
-                                </small>
-                            </div>
-                            <div class="col-md-7">
-                                <div id="gstgResultsPlaceholder" class="alert alert-info mb-3 {% if differential_data and differential_data.suggestions %}d-none{% endif %}">
-                                    <i class="fas fa-info-circle mr-1"></i>
-                                    No suggestions yet. Click the button to pull guideline-aligned differentials.
-                                </div>
-                                <div class="table-responsive {% if not (differential_data and differential_data.suggestions) %}d-none{% endif %}" id="gstgResultsWrapper">
-                                    <table class="table table-sm table-hover">
-                                        <thead class="thead-light">
-                                            <tr>
-                                                <th>Diagnosis</th>
-                                                <th>STG Reference</th>
-                                                <th>Score</th>
-                                                <th>Flags</th>
-                                                <th>Status</th>
-                                                <th style="width: 170px;">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="gstgResultsBody"></tbody>
-                                    </table>
-                                </div>
-                                <div class="d-flex justify-content-between align-items-center mt-3">
-                                    <div>
-                                        <button class="btn btn-success" id="gstgSaveBtn" disabled>
-                                            <i class="fas fa-save mr-1"></i> Save selections
-                                        </button>
-                                        <button class="btn btn-outline-secondary btn-sm ml-2" id="gstgResetBtn">
-                                            Reset
-                                        </button>
-                                    </div>
-                                    <small class="text-muted">
-                                        Tag items as <span class="badge badge-success">Working Dx</span> or <span class="badge badge-secondary">Rule Out</span>, then save.
-                                    </small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Patient Admission Information -->
                 {% if current_admission %}
                 <div class="card card-warning card-outline">
@@ -1107,7 +1003,7 @@ Diagnoses:
                                 {% endif %}
                             </div>
                             <div class="card-footer text-center">
-                                <a href="#clinical-documents" class="btn btn-link btn-sm" onclick="window.scrollTo({ top: document.getElementById('gstgDifferentialsCard').offsetTop - 120, behavior: 'smooth' }); return false;">
+                                <a href="#clinical-documents" class="btn btn-link btn-sm">
                                     View full documentation
                                 </a>
                             </div>
@@ -1172,6 +1068,69 @@ Diagnoses:
                         {% else %}
                         <!-- Patient is not admitted - show admit and detain buttons -->
                         {% if user_role in ['Doctor', 'Admin'] %}
+                        <!-- Follow-Up Appointment Form (Collapsible) -->
+                        <div class="card card-info card-outline mb-3">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-calendar-plus mr-1"></i> Schedule Follow-Up Appointment
+                                </h5>
+                                <div class="card-tools">
+                                    <button type="button" class="btn btn-tool" data-toggle="collapse" data-target="#followUpAppointmentForm">
+                                        <i class="fas fa-chevron-down"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="followUpAppointmentForm" class="collapse">
+                                <div class="card-body">
+                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/create-appointment">
+                                        <div class="row">
+                                            <div class="col-md-4">
+                                                <div class="form-group">
+                                                    <label for="followup_scheduled_date">Return Date <span class="text-danger">*</span></label>
+                                                    <input type="date" class="form-control" id="followup_scheduled_date" name="scheduled_date" required>
+                                                    <small class="form-text text-muted">Select when patient should return</small>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="form-group">
+                                                    <label for="followup_scheduled_time">Return Time <span class="text-danger">*</span></label>
+                                                    <input type="time" class="form-control" id="followup_scheduled_time" name="scheduled_time" required>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="form-group">
+                                                    <label for="followup_department">Department <span class="text-danger">*</span></label>
+                                                    <select class="form-control" id="followup_department" name="department" required>
+                                                        <option value="General Medicine" selected>General Medicine</option>
+                                                        <option value="Pediatrics">Pediatrics</option>
+                                                        <option value="Obstetrics & Gynecology">Obstetrics & Gynecology</option>
+                                                        <option value="Antenatal">Antenatal</option>
+                                                        <option value="Emergency">Emergency</option>
+                                                        <option value="Surgery">Surgery</option>
+                                                        <option value="Cardiology">Cardiology</option>
+                                                        <option value="Dermatology">Dermatology</option>
+                                                        <option value="Orthopedics">Orthopedics</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-12">
+                                                <div class="form-group">
+                                                    <label for="followup_notes">Notes (Optional)</label>
+                                                    <textarea class="form-control" id="followup_notes" name="notes" rows="2" placeholder="Reason for follow-up or instructions for patient"></textarea>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <input type="hidden" name="appointment_type" value="follow_up">
+                                        <button type="submit" class="btn btn-info">
+                                            <i class="fas fa-calendar-check mr-1"></i> Schedule Follow-Up Appointment
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/detain" style="display: inline;" onsubmit="detainEncounter(event, {{ encounter.id }}); return false;">
                             <button type="submit" class="btn btn-warning float-right mr-2" {% if encounter.status.value == 'detained' %}disabled title="Patient already detained"{% endif %}>
                                 <i class="fas fa-clock mr-1"></i> {% if encounter.status.value == 'detained' %}Detained{% else %}Detain Patient{% endif %}
@@ -1203,28 +1162,8 @@ Diagnoses:
         </section>
     </div>
 
-    <!-- STG Summary Modal -->
-    <div class="modal fade" id="gstgStgModal" tabindex="-1" role="dialog" aria-labelledby="gstgStgModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="gstgStgModalLabel">Ghana STG Summary</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <div class="modal-body" id="gstgStgModalBody">
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
         const encounterId = {{ encounter.id }};
-        const gstgInitialData = {{ differential_data|tojson }};
 
         function attachServiceSelect(selectId, nameFieldId, codeFieldId, helperTextId) {
             const selectEl = document.getElementById(selectId);
@@ -1268,295 +1207,25 @@ Diagnoses:
             updateFields();
         }
 
-        function initGstgDifferentialUI() {
-            const card = document.getElementById('gstgDifferentialsCard');
-            if (!card) {
-                return;
-            }
-            const elements = {
-                summary: document.getElementById('gstgSummaryInput'),
-                age: document.getElementById('gstgAgeInput'),
-                sex: document.getElementById('gstgSexInput'),
-                vitals: document.getElementById('gstgVitalsInput'),
-                labs: document.getElementById('gstgLabsInput'),
-                notes: document.getElementById('gstgNotesInput'),
-                alert: document.getElementById('gstgAlert'),
-                placeholder: document.getElementById('gstgResultsPlaceholder'),
-                wrapper: document.getElementById('gstgResultsWrapper'),
-                tbody: document.getElementById('gstgResultsBody'),
-                saveBtn: document.getElementById('gstgSaveBtn'),
-                resetBtn: document.getElementById('gstgResetBtn'),
-                generateBtn: document.getElementById('gstgGenerateBtn'),
-                status: document.getElementById('gstgGenerateStatus'),
-                modalTitle: document.getElementById('gstgStgModalLabel'),
-                modalBody: document.getElementById('gstgStgModalBody')
-            };
-            const initialSuggestions = Array.isArray(gstgInitialData && gstgInitialData.suggestions)
-                ? JSON.parse(JSON.stringify(gstgInitialData.suggestions))
-                : [];
-            const gstgState = {
-                suggestions: initialSuggestions,
-                notes: gstgInitialData && gstgInitialData.notes ? gstgInitialData.notes : '',
-                isDirty: false
-            };
-            if (elements.notes && gstgState.notes) {
-                elements.notes.value = gstgState.notes;
-            }
-
-            function setAlert(type, message) {
-                if (!elements.alert) return;
-                if (!message) {
-                    elements.alert.classList.add('d-none');
-                    return;
-                }
-                const classes = {
-                    success: 'alert alert-success',
-                    danger: 'alert alert-danger',
-                    warning: 'alert alert-warning',
-                    info: 'alert alert-info'
-                };
-                elements.alert.className = classes[type] || 'alert alert-info';
-                elements.alert.textContent = message;
-                elements.alert.classList.remove('d-none');
-            }
-
-            function statusMeta(status) {
-                switch (status) {
-                    case 'working':
-                        return { label: 'Working Dx', className: 'badge badge-success' };
-                    case 'ruled_out':
-                    case 'ruled-out':
-                        return { label: 'Rule Out', className: 'badge badge-secondary' };
-                    default:
-                        return { label: 'Suggested', className: 'badge badge-light text-dark border' };
-                }
-            }
-
-            function scoreBadge(score) {
-                const value = Number(score || 0);
-                let badgeClass = 'badge badge-secondary';
-                if (value >= 1.2) badgeClass = 'badge badge-success';
-                else if (value >= 0.7) badgeClass = 'badge badge-warning';
-                return `<span class="${badgeClass}">${value.toFixed(2)}</span>`;
-            }
-
-            function renderTable() {
-                if (!elements.tbody) return;
-                if (!gstgState.suggestions.length) {
-                    elements.tbody.innerHTML = '';
-                    elements.placeholder && elements.placeholder.classList.remove('d-none');
-                    elements.wrapper && elements.wrapper.classList.add('d-none');
-                    if (elements.saveBtn) {
-                        elements.saveBtn.disabled = true;
-                    }
-                    return;
-                }
-                if (elements.placeholder) {
-                    elements.placeholder.classList.add('d-none');
-                }
-                if (elements.wrapper) {
-                    elements.wrapper.classList.remove('d-none');
-                }
-                elements.tbody.innerHTML = '';
-                gstgState.suggestions.forEach((suggestion, index) => {
-                    const flags = (suggestion.flags || []).map(flag => `<span class="badge badge-info mr-1">${flag}</span>`).join(' ');
-                    const meta = statusMeta(suggestion.status);
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>
-                            <strong>${suggestion.diagnosis || 'N/A'}</strong><br>
-                            <small class="text-muted">${suggestion.body_system || '—'}</small>
-                        </td>
-                        <td>${suggestion.stg_reference || '—'}</td>
-                        <td>${scoreBadge(suggestion.relevance_score)}</td>
-                        <td>${flags || '<span class="text-muted">—</span>'}</td>
-                        <td><span class="${meta.className}">${meta.label}</span></td>
-                        <td>
-                            <div class="btn-group btn-group-sm">
-                                <button type="button" class="btn btn-success gstg-status-btn" data-status="working" data-index="${index}" title="Mark as working diagnosis">
-                                    <i class="fas fa-check"></i>
-                                </button>
-                                <button type="button" class="btn btn-secondary gstg-status-btn" data-status="ruled_out" data-index="${index}" title="Mark as rule out">
-                                    <i class="fas fa-ban"></i>
-                                </button>
-                                <button type="button" class="btn btn-outline-dark gstg-status-btn" data-status="suggested" data-index="${index}" title="Reset status">
-                                    <i class="fas fa-undo"></i>
-                                </button>
-                                <button type="button" class="btn btn-info gstg-summary-btn" data-index="${index}" title="View STG summary">
-                                    <i class="fas fa-book-open"></i>
-                                </button>
-                            </div>
-                        </td>
-                    `;
-                    elements.tbody.appendChild(row);
-                });
-                if (elements.saveBtn) {
-                    elements.saveBtn.disabled = !gstgState.suggestions.length;
-                }
-            }
-
-            function updateStatus(index, status) {
-                if (!gstgState.suggestions[index]) return;
-                gstgState.suggestions[index].status = status === 'ruled_out' ? 'ruled_out' : status;
-                gstgState.isDirty = true;
-                renderTable();
-            }
-
-            function openSummaryModal(index) {
-                if (!gstgState.suggestions[index]) return;
-                const suggestion = gstgState.suggestions[index];
-                if (elements.modalTitle) {
-                    elements.modalTitle.textContent = `${suggestion.diagnosis || 'Ghana STG'} — Summary`;
-                }
-                if (elements.modalBody) {
-                    elements.modalBody.innerHTML = `
-                        <p><strong>Body System:</strong> ${suggestion.body_system || 'N/A'}</p>
-                        <p><strong>STG Reference:</strong> ${suggestion.stg_reference || 'N/A'}</p>
-                        <div class="alert alert-light border">
-                            ${suggestion.stg_summary || 'Summary not available for this diagnosis.'}
-                        </div>
-                    `;
-                }
-                if (window.$) {
-                    $('#gstgStgModal').modal('show');
-                }
-            }
-
-            async function handleGenerate() {
-                if (!elements.generateBtn) return;
-                const payload = {
-                    clinical_summary: elements.summary ? elements.summary.value.trim() : '',
-                    age: elements.age && elements.age.value ? Number(elements.age.value) : null,
-                    sex: elements.sex ? (elements.sex.value || null) : null,
-                    key_vitals: elements.vitals ? elements.vitals.value.trim() : '',
-                    key_labs: elements.labs ? elements.labs.value.trim() : ''
-                };
-                if (!payload.clinical_summary) {
-                    setAlert('warning', 'Please enter a brief clinical summary before generating.');
-                    return;
-                }
-                const originalLabel = elements.generateBtn.innerHTML;
-                elements.generateBtn.disabled = true;
-                elements.generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
-                setAlert(null, null);
-                try {
-                    const response = await fetch(`/api/v1/encounters/${encounterId}/differentials/generate`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    const data = await response.json();
-                    if (!response.ok) {
-                        throw new Error(data.detail || 'Unable to generate differentials.');
-                    }
-                    gstgState.suggestions = Array.isArray(data.suggestions) ? data.suggestions.map(item => ({ ...item })) : [];
-                    gstgState.notes = data.notes || '';
-                    gstgState.isDirty = false;
-                    if (elements.summary && data.clinical_summary) {
-                        elements.summary.value = data.clinical_summary;
-                    }
-                    if (elements.notes) {
-                        elements.notes.value = gstgState.notes || '';
-                    }
-                    renderTable();
-                    setAlert('success', 'Differentials generated from Ghana STG.');
-                } catch (error) {
-                    setAlert('danger', error.message || 'Failed to generate differentials.');
-                } finally {
-                    elements.generateBtn.disabled = false;
-                    elements.generateBtn.innerHTML = originalLabel;
-                }
-            }
-
-            async function handleSave() {
-                if (!gstgState.suggestions.length) {
-                    setAlert('warning', 'Generate differentials before saving.');
-                    return;
-                }
-                if (!elements.summary || !elements.summary.value.trim()) {
-                    setAlert('warning', 'Clinical summary is required.');
-                    return;
-                }
-                const notesValue = elements.notes ? elements.notes.value.trim() : '';
-                const payload = {
-                    clinical_summary: elements.summary.value.trim(),
-                    notes: notesValue || null,
-                    suggestions: gstgState.suggestions
-                };
-                if (elements.saveBtn) {
-                    elements.saveBtn.disabled = true;
-                    elements.saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-                }
-                try {
-                    const response = await fetch(`/api/v1/encounters/${encounterId}/differentials/save`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    const data = await response.json();
-                    if (!response.ok) {
-                        throw new Error(data.detail || 'Unable to save selections.');
-                    }
-                    gstgState.suggestions = Array.isArray(data.suggestions) ? data.suggestions.map(item => ({ ...item })) : [];
-                    gstgState.notes = data.notes || '';
-                    gstgState.isDirty = false;
-                    if (elements.notes) {
-                        elements.notes.value = gstgState.notes || '';
-                    }
-                    renderTable();
-                    setAlert('success', 'Differential selections saved to the encounter.');
-                } catch (error) {
-                    setAlert('danger', error.message || 'Failed to save selections.');
-                } finally {
-                    if (elements.saveBtn) {
-                        elements.saveBtn.disabled = false;
-                        elements.saveBtn.innerHTML = '<i class="fas fa-save mr-1"></i> Save selections';
-                    }
-                }
-            }
-
-            if (elements.generateBtn) {
-                elements.generateBtn.addEventListener('click', handleGenerate);
-            }
-            if (elements.saveBtn) {
-                elements.saveBtn.addEventListener('click', handleSave);
-            }
-            if (elements.resetBtn) {
-                elements.resetBtn.addEventListener('click', function() {
-                    if (!gstgState.suggestions.length) {
-                        return;
-                    }
-                    gstgState.suggestions = gstgState.suggestions.map(item => ({ ...item, status: 'suggested' }));
-                    gstgState.isDirty = true;
-                    renderTable();
-                    setAlert('info', 'Statuses reset to suggested.');
-                });
-            }
-            if (elements.tbody) {
-                elements.tbody.addEventListener('click', function(event) {
-                    const button = event.target.closest('button');
-                    if (!button) return;
-                    const index = Number(button.dataset.index);
-                    if (button.classList.contains('gstg-status-btn')) {
-                        updateStatus(index, button.dataset.status || 'suggested');
-                    } else if (button.classList.contains('gstg-summary-btn')) {
-                        openSummaryModal(index);
-                    }
-                });
-            }
-            if (elements.notes) {
-                elements.notes.addEventListener('input', function() {
-                    gstgState.notes = elements.notes.value;
-                    gstgState.isDirty = true;
-                });
-            }
-            renderTable();
-        }
-
         document.addEventListener('DOMContentLoaded', function() {
             attachServiceSelect('labServiceSelect', 'lab_test_name', 'lab_test_code', 'labSelectedPriceText');
             attachServiceSelect('radiologyServiceSelect', 'radiology_study_name', 'radiology_study_code', 'radiologySelectedPriceText');
-            initGstgDifferentialUI();
+            
+            // Set minimum date for follow-up appointment (tomorrow)
+            const followupDateInput = document.getElementById('followup_scheduled_date');
+            if (followupDateInput) {
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                followupDateInput.min = tomorrow.toISOString().split('T')[0];
+                // Set default to tomorrow
+                followupDateInput.valueAsDate = tomorrow;
+            }
+            
+            // Set default time for follow-up appointment (9:00 AM)
+            const followupTimeInput = document.getElementById('followup_scheduled_time');
+            if (followupTimeInput) {
+                followupTimeInput.value = '09:00';
+            }
         });
 
         // Medication Search Autocomplete

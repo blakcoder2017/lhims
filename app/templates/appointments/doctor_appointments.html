@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-calendar-check mr-2"></i>My Appointments</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">My Appointments</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Date Filter -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-calendar-alt mr-2"></i>Select Date</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" class="row align-items-end">
+                            <div class="col-md-4">
+                                <label for="date_filter">Date</label>
+                                <input type="date" name="date_filter" id="date_filter" 
+                                       class="form-control" value="{{ selected_date }}">
+                            </div>
+                            {% if departments %}
+                            <div class="col-md-4">
+                                <label for="department">Department</label>
+                                <select name="department" id="department" class="form-control">
+                                    <option value="">All Departments</option>
+                                    {% for dept in departments %}
+                                    <option value="{{ dept }}" {% if selected_department == dept %}selected{% endif %}>
+                                        {{ dept }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            {% endif %}
+                            <div class="col-md-4">
+                                <label>&nbsp;</label>
+                                <div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-search mr-1"></i> View Appointments
+                                    </button>
+                                    <a href="{{ url_for('doctor_appointments') }}" class="btn btn-secondary">
+                                        <i class="fas fa-calendar-day mr-1"></i> Today
+                                    </a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Appointments List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-list mr-2"></i>
+                            Appointments for {{ selected_date.strftime('%d %B %Y') }}
+                        </h3>
+                        <div class="card-tools">
+                            {% if upcoming_appointments %}
+                            <span class="badge badge-info">{{ upcoming_appointments|length }} Upcoming</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        {% if appointments %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Patient</th>
+                                        <th>Department</th>
+                                        <th>Reason / Complaint</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for appointment in appointments %}
+                                    <tr>
+                                        <td>
+                                            {% if appointment.scheduled_date %}
+                                            {{ appointment.scheduled_date.strftime('%H:%M') }}
+                                            {% elif appointment.appointment_date %}
+                                            {{ appointment.appointment_date.strftime('%H:%M') }}
+                                            {% else %}
+                                            <span class="text-muted">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment.patient %}
+                                                <a href="{{ url_for('view_patient_records', patient_id=appointment.patient.id) }}">
+                                                    {{ appointment.patient.first_name }} {{ appointment.patient.last_name }}
+                                                </a>
+                                                <br><small class="text-muted">{{ appointment.patient.patient_number or 'No ID' }}</small>
+                                                <br><small class="text-muted"><i class="fas fa-phone"></i> {{ appointment.patient.phone_number or 'N/A' }}</small>
+                                            {% elif appointment.patient_name %}
+                                                {{ appointment.patient_name }}
+                                                {% if appointment.patient_phone %}
+                                                <br><small class="text-muted"><i class="fas fa-phone"></i> {{ appointment.patient_phone }}</small>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="text-muted">Unknown</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment.department %}
+                                            {{ appointment.department }}
+                                            {% else %}
+                                            <span class="text-muted">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment.reason_complaint %}
+                                            {{ appointment.reason_complaint[:100] }}{% if appointment.reason_complaint|length > 100 %}...{% endif %}
+                                            {% elif appointment.chief_complaint %}
+                                            {{ appointment.chief_complaint[:100] }}{% if appointment.chief_complaint|length > 100 %}...{% endif %}
+                                            {% elif appointment.notes %}
+                                            {{ appointment.notes[:100] }}{% if appointment.notes|length > 100 %}...{% endif %}
+                                            {% else %}
+                                            <span class="text-muted">No reason specified</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment.status %}
+                                                {% if appointment.status == 'scheduled' %}
+                                                <span class="badge badge-secondary">Scheduled</span>
+                                                {% elif appointment.status == 'confirmed' %}
+                                                <span class="badge badge-info">Confirmed</span>
+                                                {% elif appointment.status == 'completed' %}
+                                                <span class="badge badge-success">Completed</span>
+                                                {% elif appointment.status == 'cancelled' %}
+                                                <span class="badge badge-danger">Cancelled</span>
+                                                {% elif appointment.status == 'no_show' %}
+                                                <span class="badge badge-warning">No Show</span>
+                                                {% elif appointment.status == 'in_progress' %}
+                                                <span class="badge badge-primary">In Progress</span>
+                                                {% elif appointment.status == 'waiting' %}
+                                                <span class="badge badge-warning">Waiting</span>
+                                                {% else %}
+                                                <span class="badge badge-light">{{ appointment.status }}</span>
+                                                {% endif %}
+                                            {% else %}
+                                            <span class="badge badge-secondary">Pending</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                {% if appointment.patient %}
+                                                <a href="{{ url_for('view_patient_records', patient_id=appointment.patient.id) }}" 
+                                                   class="btn btn-info" title="View Patient">
+                                                    <i class="fas fa-user"></i>
+                                                </a>
+                                                {% endif %}
+                                                {% if appointment.id %}
+                                                <a href="{{ url_for('view_appointment', appointment_id=appointment.id) }}" 
+                                                   class="btn btn-primary" title="View Details">
+                                                    <i class="fas fa-eye"></i>
+                                                </a>
+                                                {% endif %}
+                                                {% if appointment.status in ['scheduled', 'confirmed'] %}
+                                                <a href="#" class="btn btn-success" title="Start Consultation"
+                                                   onclick="startConsultation({{ appointment.id }}); return false;">
+                                                    <i class="fas fa-play"></i>
+                                                </a>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <h5><i class="fas fa-info-circle"></i> No Appointments Found</h5>
+                            <p class="mb-0">
+                                {% if selected_date == current_date %}
+                                You have no appointments scheduled for today.
+                                {% else %}
+                                You have no appointments scheduled for {{ selected_date.strftime('%d %B %Y') }}.
+                                {% endif %}
+                            </p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Upcoming Appointments -->
+                {% if upcoming_appointments %}
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-calendar mr-2"></i>
+                            Upcoming Appointments (Next 7 Days)
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Date & Time</th>
+                                        <th>Patient</th>
+                                        <th>Department</th>
+                                        <th>Reason</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for appointment in upcoming_appointments %}
+                                    <tr>
+                                        <td>
+                                            {% if appointment.appointment_date %}
+                                            {{ appointment.appointment_date.strftime('%d %b %Y, %H:%M') }}
+                                            {% else %}
+                                            <span class="text-muted">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if appointment.patient %}
+                                                {{ appointment.patient.first_name }} {{ appointment.patient.last_name }}
+                                                <br><small class="text-muted">{{ appointment.patient.patient_number or '' }}</small>
+                                            {% elif appointment.patient_name %}
+                                                {{ appointment.patient_name }}
+                                            {% else %}
+                                                <span class="text-muted">Unknown</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ appointment.department or 'N/A' }}</td>
+                                        <td>
+                                            {% if appointment.reason_complaint %}
+                                            {{ appointment.reason_complaint[:50] }}{% if appointment.reason_complaint|length > 50 %}...{% endif %}
+                                            {% else %}
+                                            <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-secondary">{{ appointment.status or 'Scheduled' }}</span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <script>
+        function startConsultation(appointmentId) {
+            if (appointmentId) {
+                // Redirect to patient encounter or start consultation
+                window.location.href = '/encounters/new?appointment_id=' + appointmentId;
+            }
+        }
+
+        // Set today as default date if not set
+        document.addEventListener('DOMContentLoaded', function() {
+            const dateFilter = document.getElementById('date_filter');
+            if (dateFilter && !dateFilter.value) {
+                const today = new Date().toISOString().split('T')[0];
+                dateFilter.value = today;
+            }
+        });
+    </script>
+
+{% endblock %}

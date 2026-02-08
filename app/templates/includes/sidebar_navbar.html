@@ -73,7 +73,13 @@
                             <li class="nav-item">
                                 <a href="{{ url_for('view_queue') }}" class="nav-link">
                                     <i class="fas fa-users nav-icon"></i>
-                                    <p>Appointment & Queue</p>
+                                    <p>OPD Queue</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('manage_appointments') }}" class="nav-link">
+                                    <i class="fas fa-calendar-alt nav-icon"></i>
+                                    <p>Appointments</p>
                                 </a>
                             </li>
                             <li class="nav-item">
@@ -134,15 +140,15 @@
                                 </a>
                             </li>
                             <li class="nav-item">
-                                <a href="{{ url_for('doctor_queue') }}" class="nav-link">
-                                    <i class="fas fa-list nav-icon"></i>
-                                    <p>Patient Queue</p>
+                                <a href="{{ url_for('doctor_appointments') }}" class="nav-link">
+                                    <i class="fas fa-calendar-alt nav-icon"></i>
+                                    <p>Appointments</p>
                                 </a>
                             </li>
                             <li class="nav-item">
-                                <a href="{{ url_for('view_queue') }}" class="nav-link">
-                                    <i class="fas fa-calendar-check nav-icon"></i>
-                                    <p>Appointments</p>
+                                <a href="{{ url_for('doctor_queue') }}" class="nav-link">
+                                    <i class="fas fa-list nav-icon"></i>
+                                    <p>Queue</p>
                                 </a>
                             </li>
                         </ul>
@@ -208,6 +214,36 @@
                                 <a href="{{ url_for('opd_dashboard') }}" class="nav-link">
                                     <i class="fas fa-tachometer-alt nav-icon"></i>
                                     <p>OPD Dashboard</p>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    {% endif %}
+
+                    <!-- Emergency Section -->
+                    {% if user_role in ['Admin', 'Front Office', 'Doctor', 'Nurse', 'Clinician'] %}
+                    <li class="nav-item has-treeview">
+                        <a href="#" class="nav-link">
+                            <i class="nav-icon fas fa-ambulance"></i>
+                            <p>Emergency <i class="right fas fa-angle-left"></i></p>
+                        </a>
+                        <ul class="nav nav-treeview">
+                            <li class="nav-item">
+                                <a href="{{ url_for('emergency_dashboard') }}" class="nav-link">
+                                    <i class="fas fa-tachometer-alt nav-icon"></i>
+                                    <p>Emergency Dashboard</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('emergency_visits_list') }}" class="nav-link">
+                                    <i class="fas fa-list nav-icon"></i>
+                                    <p>Emergency Visits</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('emergency_quick_register') }}" class="nav-link">
+                                    <i class="fas fa-user-plus nav-icon"></i>
+                                    <p>Quick Register (no details)</p>
                                 </a>
                             </li>
                         </ul>
@@ -301,7 +337,7 @@
                         </a>
                         <ul class="nav nav-treeview">
                             <li class="nav-item">
-                                <a href="/pharmacy" class="nav-link">
+                                <a href="{{ url_for('pharmacy_dashboard') }}" class="nav-link">
                                     <i class="fas fa-tachometer-alt nav-icon"></i>
                                     <p>Pharmacy Dashboard</p>
                                 </a>
@@ -345,7 +381,7 @@
                         </a>
                         <ul class="nav nav-treeview">
                             <li class="nav-item">
-                                <a href="/lab" class="nav-link">
+                                <a href="{{ url_for('lab_dashboard') }}" class="nav-link">
                                     <i class="fas fa-tachometer-alt nav-icon"></i>
                                     <p>Lab Dashboard</p>
                                 </a>
@@ -389,7 +425,7 @@
                         </a>
                         <ul class="nav nav-treeview">
                             <li class="nav-item">
-                                <a href="/radiology" class="nav-link">
+                                <a href="{{ url_for('radiology_dashboard') }}" class="nav-link">
                                     <i class="fas fa-tachometer-alt nav-icon"></i>
                                     <p>Radiology Dashboard</p>
                                 </a>
@@ -423,6 +459,12 @@
                         </a>
                         <ul class="nav nav-treeview">
                             <li class="nav-item">
+                                <a href="{{ url_for('procedure_dashboard') }}" class="nav-link {{ 'active' if request.url.path == '/procedures/dashboard' else '' }}">
+                                    <i class="fas fa-tachometer-alt nav-icon"></i>
+                                    <p>Procedure Dashboard</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
                                 <a href="{{ url_for('procedures_list') }}" class="nav-link">
                                     <i class="fas fa-list nav-icon"></i>
                                     <p>Procedures List</p>
@@ -448,8 +490,56 @@
                     </li>
                     {% endif %}
 
-                    
-                    
+                    <!-- Maternity Section (Antenatal + Births) -->
+                    {% if user_role in ['Admin', 'Doctor', 'Nurse', 'Clinician', 'Midwife'] %}
+                    <li class="nav-item has-treeview">
+                        <a href="#" class="nav-link">
+                            <i class="nav-icon fas fa-notes-medical"></i>
+                            <p>Maternity<i class="right fas fa-angle-left"></i></p>
+                        </a>
+                        <ul class="nav nav-treeview">
+                            <li class="nav-header">Antenatal</li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('midwife_antenatal_dashboard') }}" class="nav-link">
+                                    <i class="fas fa-tachometer-alt nav-icon"></i>
+                                    <p>Antenatal Dashboard</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('midwife_antenatal_visits_list') }}" class="nav-link">
+                                    <i class="fas fa-list nav-icon"></i>
+                                    <p>Antenatal Visits</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('midwife_antenatal_visit_create_form') }}" class="nav-link">
+                                    <i class="fas fa-plus nav-icon"></i>
+                                    <p>New Antenatal Visit</p>
+                                </a>
+                            </li>
+                            <li class="nav-header mt-2">Maternity</li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('births_dashboard') }}" class="nav-link">
+                                    <i class="fas fa-baby-carriage nav-icon"></i>
+                                    <p>Maternity Ward</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('births_list') }}" class="nav-link">
+                                    <i class="fas fa-list nav-icon"></i>
+                                    <p>Birth Records</p>
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="{{ url_for('birth_record_create_form') }}" class="nav-link">
+                                    <i class="fas fa-plus nav-icon"></i>
+                                    <p>Record Birth</p>
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                    {% endif %}
+
                     <!-- Finance Section -->
                     {% if user_role in ['Admin', 'Finance', 'Front Office'] %}
                     <li class="nav-item has-treeview">
@@ -611,7 +701,7 @@
                             <p>System Admin <i class="right fas fa-angle-left"></i></p>
                         </a>
                         <ul class="nav nav-treeview">
-                            <li class="nav-item"><a href="/admin/users" class="nav-link"><i class="fas fa-user-cog nav-icon"></i><p>User & Role Management</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('users_management') }}" class="nav-link"><i class="fas fa-user-cog nav-icon"></i><p>User & Role Management</p></a></li>
                             <li class="nav-item"><a href="{{ url_for('doctors_list') }}" class="nav-link"><i class="fas fa-user-md nav-icon"></i><p>Doctors List</p></a></li>
                             <li class="nav-item"><a href="{{ url_for('hospital_settings') }}" class="nav-link"><i class="fas fa-hospital nav-icon"></i><p>Hospital Settings</p></a></li>
                             <li class="nav-item"><a href="{{ url_for('service_pricing_management') }}" class="nav-link"><i class="fas fa-tags nav-icon"></i><p>Service Pricing</p></a></li>
@@ -625,6 +715,8 @@
                             <li class="nav-item"><a href="/admin/roles/permissions" class="nav-link"><i class="fas fa-user-shield nav-icon"></i><p>Role Permissions</p></a></li>
                             <li class="nav-item"><a href="/admin/settings" class="nav-link"><i class="fas fa-database nav-icon"></i><p>DB/System Settings</p></a></li>
                             <li class="nav-item"><a href="/admin/audit-logs" class="nav-link"><i class="fas fa-history nav-icon"></i><p>Audit Logs</p></a></li>
+                            <li class="nav-item"><a href="/api/v1/sms/test" class="nav-link"><i class="fas fa-sms nav-icon"></i><p>SMS Test</p></a></li>
+                            <li class="nav-item"><a href="{{ url_for('sms_messaging_page') }}" class="nav-link"><i class="fas fa-comment-dots nav-icon"></i><p>SMS Messaging</p></a></li>
                         </ul>
                     </li>
                     {% endif %}

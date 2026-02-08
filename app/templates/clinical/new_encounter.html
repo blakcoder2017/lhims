@@ -9,120 +9,329 @@
         position: relative;
     }
     
-    /* Fix input wrapper spacing and duplication */
+    /* Input wrapper - modern select-like appearance */
     .custom-multi-select-input-wrapper {
-        min-height: 42px;
-        max-height: 140px;
+        min-height: 46px;
+        max-height: 120px;
         overflow-y: auto;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        padding: 6px 10px;
+        padding: 6px 12px;
+        background: #fff;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        cursor: text;
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
     
-    /* Ensure dropdown appears ABOVE other elements */
+    .custom-multi-select-input-wrapper:hover {
+        border-color: #bdbdbd;
+    }
+    
+    .custom-multi-select-input-wrapper.active {
+        border-color: #28a745;
+        box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.15);
+    }
+    
+    /* Tags container */
+    .selected-tags-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-right: 8px;
+    }
+    
+    /* Beautiful tag styling */
+    .selected-tag {
+        display: inline-flex;
+        align-items: center;
+        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+        color: #2e7d32;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 500;
+        max-width: calc(100% - 24px);
+        white-space: normal;
+        line-height: 1.3;
+        border: 1px solid #a5d6a7;
+        transition: all 0.2s ease;
+    }
+    
+    .selected-tag:hover {
+        background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .selected-tag .remove-tag {
+        margin-left: 6px;
+        cursor: pointer;
+        opacity: 0.7;
+        font-size: 16px;
+        line-height: 1;
+        transition: opacity 0.2s;
+    }
+    
+    .selected-tag .remove-tag:hover {
+        opacity: 1;
+    }
+    
+    /* Unified search input */
+    .unified-search-input {
+        flex: 1;
+        min-width: 120px;
+        border: none;
+        outline: none;
+        font-size: 14px;
+        padding: 4px 0;
+        background: transparent;
+        color: #333;
+    }
+    
+    .unified-search-input::placeholder {
+        color: #9e9e9e;
+    }
+    
+    /* Input actions (clear button and chevron) */
+    .input-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 4px;
+    }
+    
+    .clear-selection-btn {
+        background: none;
+        border: none;
+        color: #9e9e9e;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    }
+    
+    .clear-selection-btn:hover {
+        background: #f5f5f5;
+        color: #757575;
+    }
+    
+    .toggle-icon {
+        color: #757575;
+        font-size: 14px;
+        transition: transform 0.2s;
+    }
+    
+    .custom-multi-select-input-wrapper.active .toggle-icon {
+        transform: rotate(180deg);
+    }
+    
+    /* Dropdown panel */
     .custom-multi-select-dropdown {
         width: 100%;
         max-width: 100%;
         position: absolute;
-        top: 100%;
-        margin-top: 4px;
+        top: calc(100% + 6px);
         background: white;
-        border-radius: 6px;
-        border: 1px solid #ccc;
+        border-radius: 10px;
+        border: 1px solid #e0e0e0;
         z-index: 9999 !important;
         overflow: hidden;
-    
-        /* --- FIX 1: Dropdown hidden by default --- */
         display: none !important;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.12);
     }
     
-    /* Dropdown visible when programmatically toggled */
     .custom-multi-select-dropdown.show {
         display: block !important;
-        max-height: calc(60vh);
-        overflow-y: auto;
+        animation: slideDown 0.2s ease;
     }
     
-    /* Fix the header layout so "Select all" and "Clear filter" don't break */
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-8px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Dropdown header */
     .dropdown-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 10px;
-        background: #f7f7f7;
-        border-bottom: 1px solid #ddd;
+        padding: 12px 16px;
+        background: #fafafa;
+        border-bottom: 1px solid #eee;
         flex-wrap: wrap;
+        gap: 10px;
     }
     
-    /* Ensure the options list scrolls independently */
-    .options-list {
-        max-height: 45vh;  /* scrollable area */
-        overflow-y: auto;
-        padding-right: 6px;
-        position: relative;  /* Ensure items scroll together */
-        -webkit-overflow-scrolling: touch;  /* Smooth scrolling on mobile */
-    }
-    
-    .option-item {
-        padding: 8px 12px 8px 16px !important;  /* moves checkbox away from left */
+    .select-all-controls {
         display: flex;
         align-items: center;
-        gap: 10px;
-        position: relative;  /* Ensure checkbox stays with item during scroll */
-        min-height: 38px;  /* Ensure consistent height */
+        gap: 8px;
+    }
+    
+    .select-all-controls .form-check-input {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+    
+    .select-all-controls label {
+        font-size: 13px;
+        color: #555;
+        cursor: pointer;
+    }
+    
+    .clear-filter-btn {
+        padding: 5px 12px;
+        font-size: 12px;
+        border-radius: 6px;
+        transition: all 0.2s;
+    }
+    
+    .clear-filter-btn:hover {
+        background: #e0e0e0;
+    }
+    
+    /* Options list */
+    .options-list {
+        max-height: 280px;
+        overflow-y: auto;
+        padding: 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .options-list::-webkit-scrollbar {
+        width: 8px;
+    }
+    
+    .options-list::-webkit-scrollbar-track {
+        background: #f5f5f5;
+    }
+    
+    .options-list::-webkit-scrollbar-thumb {
+        background: #ccc;
+        border-radius: 4px;
+    }
+    
+    .options-list::-webkit-scrollbar-thumb:hover {
+        background: #bbb;
+    }
+    
+    /* Option items */
+    .option-item {
+        padding: 10px 14px 10px 14px !important;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        border-radius: 8px;
+        margin-bottom: 2px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        min-height: 42px;
         box-sizing: border-box;
-    } 
-    /* Keep checkbox + label aligned */
-    /* --- FIX 3: Remove AdminLTE's negative margin --- */
+    }
+    
+    .option-item:hover {
+        background: #f5f9f5;
+    }
+    
+    .option-item.selected {
+        background: #e8f5e9;
+    }
+    
+    .option-item:focus {
+        outline: none;
+        background: #e8f5e9;
+        box-shadow: inset 0 0 0 2px #28a745;
+    }
+    
     .option-item .form-check-input {
         width: 18px;
         height: 18px;
         flex-shrink: 0;
-        margin-left: 0 !important;
-        margin-right: 10px !important;
-        position: relative;  /* Ensure checkbox scrolls with item */
-        top: auto !important;
-        left: auto !important;
+        flex-grow: 0;
+        margin: 2px 0 0 0 !important;
+        cursor: pointer;
+        accent-color: #28a745;
+        position: relative;
         float: none !important;
+        top: 0 !important;
+        left: 0 !important;
     }
-
-    /* NEW FIX — shift text right */
+    
     .option-item label.form-check-label {
         padding-left: 0 !important;
         margin-left: 0 !important;
-        flex: 1;  /* Take remaining space */
+        flex: 1;
+        font-size: 14px;
+        color: #333;
+        cursor: pointer;
         word-wrap: break-word;
         overflow-wrap: break-word;
-        position: relative;  /* Ensure label scrolls with item */
+        line-height: 1.4;
+        display: block;
     }
     
-    /* Tag styling improvements */
-    .selected-tag {
-        max-width: calc(100% - 8px);
-        white-space: normal;
-        line-height: 1.3;
+    .option-item.selected label.form-check-label {
+        color: #1b5e20;
+        font-weight: 500;
     }
     
-    /* MOBILE FIXES */
+    /* No results message */
+    .option-item.no-results {
+        padding: 20px !important;
+        text-align: center;
+        color: #757575;
+        display: block;
+    }
+    
+    .option-item.no-results p {
+        margin: 0;
+        font-size: 14px;
+    }
+    
+    /* Help text */
+    .form-text.text-muted {
+        font-size: 12px;
+        color: #888;
+        margin-top: 6px;
+    }
+    
+    /* Mobile responsive */
     @media (max-width: 576px) {
-    
         .custom-multi-select-dropdown {
             position: fixed;
-            top: 20%;
+            top: 15%;
             left: 4%;
             width: 92%;
             max-height: 60vh;
-            border-radius: 10px;
+            border-radius: 12px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.2);
         }
-    
+        
         .dropdown-header {
             flex-direction: column;
-            gap: 8px;
+            align-items: flex-start;
+            gap: 10px;
         }
-    
+        
         .options-list {
             max-height: 45vh;
+        }
+        
+        .option-item {
+            padding: 12px 14px 12px 16px !important;
         }
     }
 </style>
@@ -204,7 +413,7 @@
                         <div class="row mt-2">
                             <div class="col-md-12">
                                 <strong>Appointment:</strong> #{{ appointment.id }} - {{ appointment.department }} 
-                                ({{ appointment.appointment_type.value }})
+                                ({% if appointment.appointment_type %}{{ appointment.appointment_type.value }}{% elif appointment.visit_type %}{{ appointment.visit_type.value }}{% else %}Walk-in{% endif %})
                             </div>
                         </div>
                         {% endif %}

@@ -27,9 +27,11 @@
                 <div class="alert alert-warning alert-dismissible">
                     <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
                     <h5><i class="icon fas fa-exclamation-triangle"></i> Payment Notice</h5>
+                    <p class="mb-1">
+                        <strong>OPD (outpatient)</strong> cash-paying patients must complete payment at the Finance department before lab results can be saved.
+                    </p>
                     <p class="mb-0">
-                        <strong>Cash-paying patients must complete payment at the Finance department before lab results can be saved.</strong>
-                        Orders requiring payment are highlighted in yellow with a payment notice.
+                        <strong>Patients on admission (IPD)</strong> pay at the end of their stay before discharge; lab results can be saved without prior payment for admitted patients. Orders requiring payment are highlighted in yellow.
                     </p>
                 </div>
 
@@ -113,7 +115,9 @@
                                             <span class="badge badge-{{ 'success' if order.status.value == 'completed' else 'warning' if order.status.value == 'in_progress' else 'info' }}">
                                                 {{ order.status.value.replace('_', ' ').title() }}
                                             </span>
-                                            {% if payment_status and payment_status.payment_required and not payment_status.payment_paid %}
+                                            {% if payment_status and payment_status.get('is_admitted') %}
+                                            <br><small class="text-success"><i class="fas fa-hospital-user"></i> IPD – pay at discharge</small>
+                                            {% elif payment_status and payment_status.payment_required and not payment_status.payment_paid %}
                                             <br><small class="text-danger"><i class="fas fa-exclamation-circle"></i> Payment Required</small>
                                             {% endif %}
                                         </td>

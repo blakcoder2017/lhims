@@ -57,12 +57,15 @@
 
                         <form method="POST" action="{% if service_type == 'vitals' %}{{ url_for('process_vitals_payment', patient_id=patient.id) }}{% elif service_type == 'consultation' %}{{ url_for('process_consultation_payment', patient_id=patient.id) }}{% elif service_type == 'lab' %}{{ url_for('process_lab_payment', patient_id=patient.id) }}{% elif service_type == 'radiology' %}{{ url_for('process_radiology_payment', patient_id=patient.id) }}{% elif service_type == 'pharmacy' %}{{ url_for('process_pharmacy_payment', patient_id=patient.id) }}{% endif %}">
                             <input type="hidden" name="invoice_id" value="{{ invoice.id }}">
-                            <input type="hidden" name="amount" value="{{ charge.total_amount }}">
+                            <input type="hidden" name="amount" value="{{ amount_due if amount_due is defined and amount_due is not none else charge.total_amount }}">
                             {% if return_to %}
                             <input type="hidden" name="return_to" value="{{ return_to }}">
                             {% endif %}
                             {% if encounter_id %}
                             <input type="hidden" name="encounter_id" value="{{ encounter_id }}">
+                            {% endif %}
+                            {% if from_lab is defined and from_lab is not none %}
+                            <input type="hidden" name="from_lab" value="{{ from_lab }}">
                             {% endif %}
                             {% if order_id %}
                             <input type="hidden" name="order_id" value="{{ order_id }}">
@@ -89,7 +92,7 @@
                                                 <span class="input-group-text">GHS</span>
                                             </div>
                                             <input type="text" class="form-control form-control-lg text-success font-weight-bold" 
-                                                   value="{{ "%.2f"|format(charge.total_amount) }}" readonly>
+                                                   value="{{ "%.2f"|format(amount_due if amount_due is defined and amount_due is not none else charge.total_amount) }}" readonly>
                                         </div>
                                     </div>
                                 </div>

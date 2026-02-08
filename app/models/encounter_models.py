@@ -22,7 +22,8 @@ class Encounter(Base):
     
     # Foreign Keys
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
-    appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True)  # Optional link to appointment
+    queue_entry_id = Column(Integer, ForeignKey("opd_queue.id"), nullable=True)  # Optional link to queue entry
+    appointment_id = Column(Integer, ForeignKey("scheduled_appointments.id"), nullable=True)  # Link to scheduled appointment
     clinician_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Doctor/nurse who documented
     opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (for OPD encounters)
     admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (for IPD encounters)
@@ -58,7 +59,8 @@ class Encounter(Base):
     
     # Relationships
     patient = relationship("Patient", back_populates="encounters")
-    appointment = relationship("Appointment", back_populates="encounters")
+    queue_entry = relationship("OPDQueue", back_populates="encounters")
+    appointment = relationship("ScheduledAppointment", back_populates="encounters")
     clinician = relationship("User", foreign_keys=[clinician_id])
     opd_visit = relationship("OPDVisit", back_populates="encounters")
     admission = relationship("Admission", back_populates="encounters", foreign_keys=[admission_id])
@@ -67,7 +69,9 @@ class Encounter(Base):
     prescriptions = relationship("Prescription", back_populates="encounter", cascade="all, delete-orphan")
     procedures = relationship("Procedure", back_populates="encounter", cascade="all, delete-orphan")
     diseases = relationship("EncounterDisease", back_populates="encounter", cascade="all, delete-orphan")
-    
+    antenatal_visits = relationship("AntenatalVisit", back_populates="encounter", foreign_keys="AntenatalVisit.encounter_id")
+    birth_records = relationship("BirthRecord", back_populates="encounter", foreign_keys="BirthRecord.encounter_id")
+
     def __repr__(self):
         return f"<Encounter(id={self.id}, patient_id={self.patient_id}, status={self.status.value})>"
 

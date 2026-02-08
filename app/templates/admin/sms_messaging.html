@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-sms mr-2"></i>SMS Messaging</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                        <li class="breadcrumb-item active">SMS Messaging</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+            {% if not api_key_configured %}
+            <div class="alert alert-warning">
+                <h5><i class="icon fas fa-exclamation-triangle"></i> SMS Not Configured</h5>
+                <p>Configure <code>SMSONLINEGH_API_KEY</code> and <code>SMSONLINEGH_SENDER</code> in your .env to send messages.</p>
+            </div>
+            {% endif %}
+
+            {% if request.query_params.get('error') == 'message_required' %}
+            <div class="alert alert-danger alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                Please enter or select a message to send.
+            </div>
+            {% endif %}
+
+            {% if request.query_params.get('sent') is defined %}
+            <div class="alert alert-info alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                Sent: <strong>{{ request.query_params.get('sent', 0) }}</strong>,
+                Failed: <strong>{{ request.query_params.get('failed', 0) }}</strong>,
+                Total recipients: <strong>{{ request.query_params.get('total', 0) }}</strong>
+            </div>
+            {% endif %}
+
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card card-primary">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-paper-plane mr-1"></i> Send Message to Clients or Staff</h3>
+                        </div>
+                        <form method="POST" action="{{ url_for('sms_messaging_send') }}">
+                            <div class="card-body">
+                                <div class="form-group">
+                                    <label for="audience">Audience <span class="text-danger">*</span></label>
+                                    <select class="form-control" id="audience" name="audience" required>
+                                        <option value="patients_with_phone">All patients with valid phone number</option>
+                                        <option value="staff_by_role">Staff by role</option>
+                                        <option value="custom">Custom phone numbers</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group" id="staff_role_group" style="display: none;">
+                                    <label for="role_id">Staff role</label>
+                                    <select class="form-control" id="role_id" name="role_id">
+                                        <option value="">All staff (with phone)</option>
+                                        {% for role in roles %}
+                                        <option value="{{ role.id }}">{{ role.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div class="form-group" id="custom_numbers_group" style="display: none;">
+                                    <label for="custom_numbers">Phone numbers (one per line or comma-separated)</label>
+                                    <textarea class="form-control" id="custom_numbers" name="custom_numbers" rows="4"
+                                              placeholder="0241234567&#10;0551234567&#10;+233241234567"></textarea>
+                                    <small class="form-text text-muted">Ghana numbers only (0XXXXXXXXX or +233XXXXXXXXX). Invalid numbers are skipped.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="message_type">Message type</label>
+                                    <select class="form-control" id="message_type" name="message_type">
+                                        <option value="festive">Festive / Season's greetings</option>
+                                        <option value="birthday">Birthday wishes</option>
+                                        <option value="alert">Alert / General notice</option>
+                                        <option value="custom">Custom message (enter below)</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="custom_message">Custom message (used when type is "Custom" or to override)</label>
+                                    <textarea class="form-control" id="custom_message" name="custom_message" rows="4"
+                                              placeholder="Enter your message here. Leave blank to use the preset for the selected type."></textarea>
+                                    <small class="form-text text-muted">SMS are sent only to valid Ghana mobile numbers.</small>
+                                </div>
+                            </div>
+                            <div class="card-footer">
+                                <button type="submit" class="btn btn-primary" {% if not api_key_configured %}disabled{% endif %}>
+                                    <i class="fas fa-paper-plane mr-1"></i> Send SMS
+                                </button>
+                                <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="col-md-4">
+                    <div class="card card-info">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Info</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted">
+                                <strong>Audience:</strong> Choose patients (with phone), staff by role, or paste custom numbers.
+                            </p>
+                            <p class="text-muted">
+                                <strong>Message type:</strong> Use preset festive/birthday/alert text or write your own in Custom message.
+                            </p>
+                            <p class="text-muted mb-0">
+                                <strong>Valid numbers:</strong> Only Ghana mobile numbers (0XXXXXXXXX or 233XXXXXXXXX) receive SMS.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="fas fa-cog mr-1"></i> Configuration</h3>
+                        </div>
+                        <div class="card-body">
+                            <p><strong>API Key:</strong> {{ 'Configured' if api_key_configured else 'Not configured' }}</p>
+                            <p class="mb-0"><strong>Sender:</strong> {{ sender }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+(function() {
+    var audience = document.getElementById('audience');
+    var staffRoleGroup = document.getElementById('staff_role_group');
+    var customNumbersGroup = document.getElementById('custom_numbers_group');
+
+    function toggleAudience() {
+        var v = audience.value;
+        staffRoleGroup.style.display = v === 'staff_by_role' ? 'block' : 'none';
+        customNumbersGroup.style.display = v === 'custom' ? 'block' : 'none';
+    }
+
+    audience.addEventListener('change', toggleAudience);
+    toggleAudience();
+})();
+</script>
+{% endblock %}

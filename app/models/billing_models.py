@@ -59,7 +59,7 @@ class Invoice(Base):
     # Foreign Keys
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=True)  # Optional link to encounter
-    appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True)  # Optional link to appointment
+    appointment_id = Column(Integer, ForeignKey("scheduled_appointments.id"), nullable=True)  # Optional link to appointment
     opd_visit_id = Column(Integer, ForeignKey("opd_visits.id"), nullable=True)  # Link to OPD visit (for OPD billing)
     admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=True)  # Link to IPD admission (for IPD billing)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User who created the invoice
@@ -102,7 +102,7 @@ class Invoice(Base):
     # Relationships
     patient = relationship("Patient", back_populates="invoices")
     encounter = relationship("Encounter")
-    appointment = relationship("Appointment")
+    appointment = relationship("ScheduledAppointment")
     opd_visit = relationship("OPDVisit", back_populates="invoices")
     admission = relationship("Admission", foreign_keys=[admission_id])
     created_by = relationship("User", foreign_keys=[created_by_id])

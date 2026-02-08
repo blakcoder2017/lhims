@@ -17,7 +17,7 @@ from app.core.deps import role_required, get_current_user
 from app.models.user_models import User
 from app.models.patient_models import Patient, PaymentMechanism
 from app.models.encounter_models import Encounter
-from app.models.appointment_models import Appointment
+from app.models.scheduled_appointment_models import Appointment, AppointmentStatus
 from app.models.triage_models import TriageVitals
 from app.crud import patient_crud, opd_crud
 from app.schemas.opd_schemas import OPDVisitCreate
@@ -168,7 +168,6 @@ def view_patient_records(
     """
     from app.crud import appointment_crud, triage_crud, ipd_crud
     from app.models.encounter_models import EncounterStatus
-    from app.models.appointment_models import AppointmentStatus
     from app.models.ipd_models import AdmissionStatus
     from app.utils.patient_utils import calculate_age
     
@@ -440,25 +439,26 @@ def complete_opd_visit(
     patient_id: int,
     opd_visit_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin", "Front Office", "Nurse", "Doctor", "Clinician"]))
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Nurse", "Doctor", "Clinician"])),
+    completion_outcome: Optional[str] = Form(None),
 ):
     """
     Complete an OPD visit.
-    Marks the visit as completed and redirects back to patient records.
+    Marks the visit as completed. Optional completion_outcome: death, transfer, absconded.
     """
     # Verify patient exists
     patient = patient_crud.get_patient(db, patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
-    
+
     # Verify OPD visit exists and belongs to patient
     opd_visit = opd_crud.get_opd_visit(db, opd_visit_id)
     if not opd_visit or opd_visit.patient_id != patient_id:
         raise HTTPException(status_code=404, detail="OPD visit not found")
-    
+
     # Complete the visit
     try:
-        completed_visit = opd_crud.complete_opd_visit(db, opd_visit_id)
+        completed_visit = opd_crud.complete_opd_visit(db, opd_visit_id, completion_outcome=completion_outcome)
         if not completed_visit:
             raise HTTPException(status_code=404, detail="Failed to complete OPD visit")
         

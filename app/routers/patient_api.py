@@ -1,9 +1,12 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Query
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import date 
 from app.db.database import get_db
+
+logger = logging.getLogger(__name__)
 
 from app.schemas.patient_schemas import PatientCreate, Patient
 from app.crud import patient_crud
@@ -17,7 +20,7 @@ router = APIRouter(
 @router.post("/register") 
 def register_patient_form(
     db: Session = Depends(get_db),
-    current_user = Depends(role_required("Front Office")), 
+    current_user = Depends(role_required(["Front Office", "Admin"])), 
     
     first_name: str = Form(...),
     last_name: str = Form(...),
@@ -101,22 +104,55 @@ def register_patient_form(
     # 3. Save to database, capture the created patient object
     new_patient = patient_crud.create_patient(db=db, patient=patient_in)
     
+    # 3b. OPD registration SMS (only if valid phone) – log/print outcome for debugging
+    try:
+        from app.services.sms_onlinegh_service import send_personalized_sms_notification, is_valid_phone
+        phone_raw = (new_patient.phone_number or "").strip()
+        has_phone = bool(phone_raw)
+        valid_phone = is_valid_phone(phone_raw) if has_phone else False
+        # Always print so outcome is visible in terminal (uvicorn) regardless of log level
+        print(
+            f"[OPD Registration SMS] patient_id={new_patient.id} name={new_patient.first_name} {new_patient.last_name} "
+            f"phone_raw={repr(phone_raw or '(empty)')} has_phone={has_phone} is_valid_phone={valid_phone}"
+        )
+        logger.info(
+            "OPD registration SMS check: patient_id=%s, name=%s %s, phone_raw=%r, has_phone=%s, is_valid_phone=%s",
+            new_patient.id, new_patient.first_name, new_patient.last_name,
+            phone_raw or "(empty)", has_phone, valid_phone,
+        )
+        if has_phone and valid_phone:
+            msg = "Hello {$name}. You have been registered at Dei Gratia. Your patient number is {$number}. Please proceed to triage. Thank you!"
+            destinations = [{
+                "number": new_patient.phone_number,
+                "values": [f"{new_patient.first_name} {new_patient.last_name}", new_patient.patient_number or "N/A"]
+            }]
+            sent = send_personalized_sms_notification(msg, destinations)
+            print(f"[OPD Registration SMS] patient_id={new_patient.id} phone={repr(phone_raw)} sent={sent}")
+            logger.info("OPD registration SMS send: patient_id=%s, phone=%r, sent=%s", new_patient.id, phone_raw, sent)
+        else:
+            print(f"[OPD Registration SMS] patient_id={new_patient.id} SKIPPED (no valid phone)")
+            logger.info("OPD registration SMS skipped: patient_id=%s (no valid phone)", new_patient.id)
+    except Exception as e:
+        print(f"[OPD Registration SMS] patient_id={new_patient.id} FAILED: {e}")
+        logger.warning(
+            "OPD registration SMS failed: patient_id=%s, phone_raw=%r, error=%s",
+            new_patient.id, getattr(new_patient, "phone_number", ""), e,
+            exc_info=True,
+        )
+    
     # 4. Handle emergency cases - create appointment with high priority and fast-track
     is_emergency_case = is_emergency and is_emergency.lower() == "yes"
     
-    # 5. For cash patients, redirect to consultation fee payment (covers vitals + encounter)
-    # For insurance patients, go directly to triage
-    from app.models.patient_models import PaymentMechanism
+    # 5. Cash and insurance: go to triage first. Cash pays after doctor + labs (see CASH_PAYMENT_FLOW_PLAN).
     from app.utils.payment_verification import is_cash_patient
     
     if is_cash_patient(db, new_patient.id):
-        # Cash patient: redirect to consultation fee payment
-        # EMERGENCY: Skip payment, go directly to vitals (stabilize first)
+        # Cash patient: go to triage (payment is after doctor orders labs, not before)
         if is_emergency_case:
             # For emergency cases, create appointment immediately with highest priority
             from app.crud import appointment_crud
             from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
-            from app.models.appointment_models import AppointmentType, AppointmentStatus
+            from app.models.scheduled_appointment_models import AppointmentType, AppointmentStatus
             from datetime import datetime
             
             emergency_appointment = AppointmentCreate(
@@ -140,11 +176,10 @@ def register_patient_form(
                 AppointmentUpdate(status=AppointmentStatus.CHECKED_IN, checked_in_at=datetime.now())
             )
             
-            # Emergency bypass: Skip payment, go directly to triage
             redirect_url = f"/patients/{new_patient.id}/triage?status=registered&emergency=true&appointment_id={new_appointment.id}&from_registration=true"
         else:
-            # Normal cash patient: payment required
-            redirect_url = f"/patients/{new_patient.id}/pay/consultation?return_to=triage&from_registration=true"
+            # Normal cash: triage first, pay after doctor + labs
+            redirect_url = f"/patients/{new_patient.id}/triage?status=registered&from_registration=true"
     else:
         # Insurance patient: go directly to triage
         redirect_url = f"/patients/{new_patient.id}/triage?status=registered"
@@ -153,7 +188,7 @@ def register_patient_form(
             # For emergency cases, create appointment immediately with highest priority
             from app.crud import appointment_crud
             from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
-            from app.models.appointment_models import AppointmentType, AppointmentStatus
+            from app.models.scheduled_appointment_models import AppointmentType, AppointmentStatus
             from datetime import datetime
             
             emergency_appointment = AppointmentCreate(

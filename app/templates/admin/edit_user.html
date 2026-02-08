@@ -68,6 +68,14 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label for="phone_number">Phone Number</label>
+                                    <input type="tel" class="form-control" id="phone_number" name="phone_number" 
+                                           value="{{ user.phone_number or '' }}"
+                                           placeholder="0XXXXXXXXX or +233XXXXXXXXX">
+                                    <small class="form-text text-muted">Optional. Used for SMS (e.g. login credentials, reminders).</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label for="role_id">Role *</label>
                                     <select class="form-control" id="role_id" name="role_id" required>
                                         <option value="">Select a role</option>

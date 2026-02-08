@@ -32,6 +32,7 @@ def create_user(db: Session, user: UserCreate) -> User:
         username=user.username,
         email=user.email,
         full_name=user.full_name,
+        phone_number=user.phone_number,
         role_id=user.role_id,
         is_active=True
     )

@@ -588,6 +588,25 @@ async def process_payment(
     
     payment = billing_crud.create_payment(db, payment_data, current_user.id)
     
+    # Send SMS notification to patient
+    try:
+        from app.services.sms_onlinegh_service import send_personalized_sms_notification
+        patient = invoice.patient
+        if patient and patient.phone_number:
+            message_template = "Hello {$name}. Payment of GHS {$amount} received. Receipt: {$receipt_number}. Invoice Balance: GHS {$balance}. Thank you!"
+            destinations = [{
+                "number": patient.phone_number,
+                "values": [
+                    f"{patient.first_name} {patient.last_name}",
+                    float(payment.amount),
+                    payment.receipt_number or "N/A",
+                    float(invoice.balance) if invoice.balance else 0.00
+                ]
+            }]
+            send_personalized_sms_notification(message_template, destinations)
+    except Exception as sms_error:
+        print(f"Warning: Unable to send payment SMS: {sms_error}")
+    
     # If specific charges were selected, allocate payment to those charges
     if charge_ids:
         remaining_amount = payment_amount

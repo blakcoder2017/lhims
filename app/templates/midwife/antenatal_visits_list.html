@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+    {% include "includes/sidebar_navbar.html" %}
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6"><h1><i class="fas fa-stethoscope mr-2"></i> Antenatal Visits</h1></div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('midwife_antenatal_dashboard') }}">Maternity</a></li>
+                            <li class="breadcrumb-item active">Visits</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <section class="content">
+            <div class="container-fluid">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Antenatal Visits List</h3>
+                        <a href="{{ url_for('midwife_antenatal_visit_create_form') }}" class="btn btn-primary btn-sm float-right">New Visit</a>
+                    </div>
+                    <div class="card-body">
+                        {% if visits %}
+                        <table class="table table-bordered table-striped">
+                            <thead><tr><th>Patient</th><th>Visit Date</th><th>#</th><th>Gest (wks)</th><th>BP</th><th>Weight</th><th>FHR</th><th>Next Visit</th><th>Actions</th></tr></thead>
+                            <tbody>
+                                {% for v in visits %}
+                                <tr>
+                                    <td><a href="{{ url_for('view_patient_records', patient_id=v.patient_id) }}">{{ v.patient.first_name }} {{ v.patient.last_name }}</a></td>
+                                    <td>{{ v.visit_date.strftime('%Y-%m-%d') }}</td>
+                                    <td>{{ v.visit_number or '–' }}</td>
+                                    <td>{{ v.gestational_weeks or '–' }}</td>
+                                    <td>{% if v.blood_pressure_systolic and v.blood_pressure_diastolic %}{{ v.blood_pressure_systolic }}/{{ v.blood_pressure_diastolic }}{% else %}–{% endif %}</td>
+                                    <td>{{ v.weight_kg or '–' }}</td>
+                                    <td>{{ v.fetal_heart_rate or '–' }}</td>
+                                    <td>{{ v.next_visit_date.strftime('%Y-%m-%d') if v.next_visit_date else '–' }}</td>
+                                    <td><a href="{{ url_for('midwife_antenatal_visit_detail', visit_id=v.id) }}" class="btn btn-sm btn-info"><i class="fas fa-eye"></i></a></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p class="text-muted">No antenatal visits found. <a href="{{ url_for('midwife_antenatal_visit_create_form') }}">Create one</a></p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

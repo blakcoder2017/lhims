@@ -106,6 +106,7 @@ def create_user(
     confirm_password: str = Form(...),
     full_name: Optional[str] = Form(None),
     email: Optional[str] = Form(None),
+    phone_number: Optional[str] = Form(None),
     role_id: int = Form(...),
     is_active: bool = Form(True)
 ):
@@ -151,6 +152,7 @@ def create_user(
             "username": username,
             "full_name": full_name,
             "email": email,
+            "phone_number": phone_number or "",
             "role_id": role_id
         }
         return templates.TemplateResponse("admin/create_user.html", context)
@@ -162,10 +164,21 @@ def create_user(
             password=password,
             full_name=full_name.strip() if full_name else None,
             email=email.strip() if email else None,
+            phone_number=phone_number.strip() if phone_number else None,
             role_id=role_id
         )
         
         new_user = user_crud.create_user(db, user_data)
+        
+        # Send LOGIN CRED SMS if valid phone number provided
+        if phone_number and phone_number.strip():
+            try:
+                from app.services.sms_onlinegh_service import is_valid_phone, send_sms_notification
+                if is_valid_phone(phone_number.strip()):
+                    msg = f"LHIMS: Your account has been created. Username: {new_user.username}, Password: {password}. Please change your password after first login."
+                    send_sms_notification(phone_number.strip(), msg)
+            except Exception as sms_err:
+                print(f"Warning: Could not send login credentials SMS: {sms_err}")
         
         # Log audit
         try:
@@ -200,6 +213,7 @@ def create_user(
             "username": username,
             "full_name": full_name,
             "email": email,
+            "phone_number": phone_number or "",
             "role_id": role_id
         }
         return templates.TemplateResponse("admin/create_user.html", context)
@@ -216,6 +230,7 @@ def create_user(
             "username": username,
             "full_name": full_name,
             "email": email,
+            "phone_number": phone_number or "",
             "role_id": role_id
         }
         return templates.TemplateResponse("admin/create_user.html", context)
@@ -260,6 +275,7 @@ def update_user(
     username: str = Form(...),
     full_name: Optional[str] = Form(None),
     email: Optional[str] = Form(None),
+    phone_number: Optional[str] = Form(None),
     role_id: int = Form(...),
     is_active: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
@@ -318,6 +334,7 @@ def update_user(
             "username": username,
             "full_name": full_name.strip() if full_name else None,
             "email": email.strip() if email else None,
+            "phone_number": phone_number.strip() if phone_number else None,
             "role_id": role_id,
             "is_active": True if is_active else False
         }

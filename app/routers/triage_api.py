@@ -1,7 +1,7 @@
 # In lhims/app/routers/triage_api.py
 
 from fastapi import APIRouter, Depends, status, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from app.db.database import get_db
@@ -35,10 +35,11 @@ def record_vitals_form(
     db: Session = Depends(get_db),
     # Allow Front Office and Nurses to record vitals
     current_user = Depends(role_required(["Front Office", "Nurse", "Admin"])),
-    create_encounter: Optional[str] = Form(None),  # If "yes", create encounter after vitals 
+    create_encounter: Optional[str] = Form(None),  # If "yes", create encounter after vitals
+    from_admission: Optional[str] = Form(None),  # If set, redirect back to IPD admission page after recording
     
-    # Required fields
-    temperature: float = Form(...),
+    # Vital signs (temperature optional)
+    temperature: Optional[str] = Form(None),
     
     # Blood pressure - can use separate fields or legacy string
     systolic_bp: Optional[str] = Form(None),
@@ -160,6 +161,10 @@ def record_vitals_form(
         
         payment_paid = has_paid
         
+        # IPD admission vitals recording: bypass consultation payment (monitoring only)
+        if not payment_paid and from_admission and from_admission.strip():
+            payment_paid = True
+        
         if not payment_paid:
             # For new visits, charge should already exist (created in triage page)
             # For regular visits, create one if it doesn't exist
@@ -212,6 +217,9 @@ def record_vitals_form(
     weight_decimal = Decimal(str(weight_float)) if weight_float is not None else None
     height_decimal = Decimal(str(height_float)) if height_float is not None else None
     
+    # Parse temperature (optional)
+    temperature_float = str_to_float(temperature) if isinstance(temperature, str) else temperature
+    
     # Determine triage level
     final_triage_level = triage_level
     final_triage_category = triage_category
@@ -221,7 +229,7 @@ def record_vitals_form(
         from app.services.triage_level_calculator import calculate_triage_level_from_vitals
         # Create temporary vitals object for calculation
         temp_vitals = TriageVitals(
-            temperature=temperature,
+            temperature=temperature_float,
             systolic_bp=systolic_bp_int,
             diastolic_bp=diastolic_bp_int,
             pulse_rate=pulse_rate_int,
@@ -237,7 +245,7 @@ def record_vitals_form(
     vitals_data = TriageVitalsCreate(
         patient_id=patient_id,
         recorded_by_id=current_user.id, 
-        temperature=temperature,
+        temperature=temperature_float,
         systolic_bp=systolic_bp_int,
         diastolic_bp=diastolic_bp_int,
         blood_pressure=blood_pressure,
@@ -260,6 +268,25 @@ def record_vitals_form(
         db_vitals.triage_assigned_at = datetime.now()
         db.commit()
         db.refresh(db_vitals)
+    
+    # AJAX request (e.g. from admission page modal): return JSON so page can reload instead of redirect
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    if is_ajax:
+        return JSONResponse(
+            content={"success": True, "message": "Vitals recorded successfully."},
+            status_code=status.HTTP_200_OK
+        )
+    
+    # Redirect back to IPD admission page if user came from there (constant monitoring)
+    if from_admission and from_admission.strip():
+        try:
+            admission_id = int(from_admission.strip())
+            return RedirectResponse(
+                url=f"/ipd/admissions/{admission_id}?status=vitals_recorded",
+                status_code=status.HTTP_302_FOUND
+            )
+        except ValueError:
+            pass
     
     # 3. Only doctors/admins can jump straight to encounter creation. Front desk & nurses should check-in only.
     if create_encounter and create_encounter.lower() == "yes" and current_user.role.name in ["Doctor", "Admin"]:

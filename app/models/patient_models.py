@@ -10,7 +10,6 @@ class PaymentMechanism(str, enum.Enum):
     CASH = "cash"
     NHIS = "nhis"  # National Health Insurance Scheme
     PRIVATE_INSURANCE = "private_insurance"
-    SELF_PAY = "self_pay"
 
 
 class Patient(Base):
@@ -46,7 +45,8 @@ class Patient(Base):
     # Patient Status
     is_active = Column(Boolean, default=True) # For deactivating records
     vitals_records = relationship("TriageVitals", back_populates="patient")
-    appointments = relationship("Appointment", back_populates="patient")
+    queue_entries = relationship("OPDQueue", back_populates="patient")
+    scheduled_appointments = relationship("ScheduledAppointment", back_populates="patient")
     encounters = relationship("Encounter", back_populates="patient")
     invoices = relationship("Invoice", back_populates="patient")
     admissions = relationship("Admission", back_populates="patient")
@@ -54,6 +54,8 @@ class Patient(Base):
     procedures = relationship("Procedure", back_populates="patient")
     lab_orders = relationship("LabOrder", back_populates="patient")
     radiology_orders = relationship("RadiologyOrder", back_populates="patient")
+    antenatal_visits = relationship("AntenatalVisit", back_populates="patient", foreign_keys="AntenatalVisit.patient_id")
+    birth_records_as_mother = relationship("BirthRecord", back_populates="mother", foreign_keys="BirthRecord.mother_patient_id")
 
     def __repr__(self):
         return f"<Patient(id={self.id}, name='{self.first_name} {self.last_name}')>"

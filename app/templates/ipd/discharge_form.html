@@ -77,10 +77,15 @@
                                         <select class="form-control" id="discharge_status" name="discharge_status" required>
                                             <option value="">-- Select Discharge Status --</option>
                                             {% for status in discharge_statuses %}
-                                            <option value="{{ status.value }}" {% if status.value == 'normal' %}selected{% endif %}>{{ status.value.title() }}</option>
+                                            <option value="{{ status.value }}" {% if preselect_death and status.value == 'death' %}selected{% elif not preselect_death and status.value == 'normal' %}selected{% endif %}>{{ status.value.title() }}</option>
                                             {% endfor %}
                                         </select>
                                         <small class="form-text text-muted">Select how the patient is being discharged: Normal, Death, or Referral</small>
+                                        {% if preselect_death %}
+                                        <div class="alert alert-warning mt-2 mb-0">
+                                            <i class="fas fa-exclamation-triangle"></i> <strong>Recording death.</strong> Billing can be settled with the family later.
+                                        </div>
+                                        {% endif %}
                                     </div>
 
                                     <div class="form-group">

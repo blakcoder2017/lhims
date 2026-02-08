@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-ambulance mr-2"></i> Emergency Dashboard</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item active">Emergency</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Statistics Cards -->
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ active_visits }}</h3>
+                                <p>Active Emergency Visits</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-ambulance"></i>
+                            </div>
+                            <a href="{{ url_for('emergency_visits_list') }}?status_filter=active" class="small-box-footer">View List <i class="fas fa-arrow-circle-right"></i></a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ completed_visits_today }}</h3>
+                                <p>Completed Today</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <a href="{{ url_for('emergency_visits_list') }}?status_filter=completed" class="small-box-footer">View List <i class="fas fa-arrow-circle-right"></i></a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ waiting_patients }}</h3>
+                                <p>Waiting in Queue</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <a href="{{ url_for('view_queue') }}" class="small-box-footer">Front Office Queue <i class="fas fa-arrow-circle-right"></i></a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ pending_encounters }}</h3>
+                                <p>Pending Encounters</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-file-medical"></i>
+                            </div>
+                            <a href="{{ url_for('doctor_queue') }}" class="small-box-footer">Doctor Queue <i class="fas fa-arrow-circle-right"></i></a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-secondary">
+                            <div class="inner">
+                                <h3>{{ visits_this_month }}</h3>
+                                <p>Emergency Visits This Month</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-calendar-alt"></i>
+                            </div>
+                            <a href="{{ url_for('emergency_visits_list') }}" class="small-box-footer">View All <i class="fas fa-arrow-circle-right"></i></a>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-primary">
+                            <div class="inner">
+                                <h3>{{ in_progress_queue }}</h3>
+                                <p>In Progress (Queue)</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-user-md"></i>
+                            </div>
+                            <a href="{{ url_for('doctor_queue') }}" class="small-box-footer">Doctor Queue <i class="fas fa-arrow-circle-right"></i></a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Completion Rate -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-chart-pie mr-1"></i> Daily Completion Rate</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="progress mb-3" style="height: 30px;">
+                                    <div class="progress-bar {% if completion_rate > 80 %}bg-success{% elif completion_rate > 60 %}bg-warning{% else %}bg-danger{% endif %}"
+                                         role="progressbar"
+                                         style="width: {{ completion_rate }}%"
+                                         aria-valuenow="{{ completion_rate }}"
+                                         aria-valuemin="0"
+                                         aria-valuemax="100">
+                                        <strong>{{ "%.1f"|format(completion_rate) }}%</strong>
+                                    </div>
+                                </div>
+                                <p class="text-muted">
+                                    {{ completed_visits_today }} completed out of {{ active_visits }} active emergency visits today.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Emergency Visits -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-ambulance mr-1"></i> Active Emergency Visits</h3>
+                                <a href="{{ url_for('emergency_visits_list') }}?status_filter=active" class="btn btn-sm btn-outline-light float-right">View All</a>
+                            </div>
+                            <div class="card-body">
+                                {% if recent_active_visits %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>OPD Number</th>
+                                                <th>Patient Name</th>
+                                                <th>Visit Date</th>
+                                                <th>Payment Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for visit in recent_active_visits %}
+                                            <tr>
+                                                <td><strong>{{ visit.opd_number }}</strong></td>
+                                                <td>{{ visit.patient.first_name }} {{ visit.patient.last_name }}</td>
+                                                <td>{{ visit.visit_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>
+                                                    {% if visit.payment_status == 'paid' %}
+                                                        <span class="badge badge-success">Paid</span>
+                                                    {% elif visit.payment_status == 'emergency' %}
+                                                        <span class="badge badge-danger">Emergency</span>
+                                                    {% elif visit.payment_status == 'pending' %}
+                                                        <span class="badge badge-warning">Pending</span>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">{{ visit.payment_status|title }}</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <a href="{{ url_for('patient_triage', patient_id=visit.patient_id) }}?emergency=true" class="btn btn-sm btn-info">
+                                                        <i class="fas fa-heartbeat"></i> Triage
+                                                    </a>
+                                                    <a href="{{ url_for('ipd_admission_create_form') }}?patient_id={{ visit.patient_id }}" class="btn btn-sm btn-success">
+                                                        <i class="fas fa-hospital"></i> Admit to IPD
+                                                    </a>
+                                                    <form method="POST" action="{{ url_for('complete_opd_visit', patient_id=visit.patient_id, opd_visit_id=visit.id) }}" style="display: inline;" onsubmit="return confirm('Mark this patient as deceased? This will close the emergency visit.');">
+                                                        <input type="hidden" name="completion_outcome" value="death">
+                                                        <button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-times-circle"></i> Mark as Death</button>
+                                                    </form>
+                                                    <a href="{{ url_for('view_patient_records', patient_id=visit.patient_id) }}" class="btn btn-sm btn-primary">
+                                                        <i class="fas fa-eye"></i> View
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <h5><i class="icon fas fa-info"></i> No Active Emergency Visits</h5>
+                                    There are currently no active emergency visits.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Completed Emergency Visits -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-check-circle mr-1"></i> Recent Completed Emergency Visits</h3>
+                                <a href="{{ url_for('emergency_visits_list') }}?status_filter=completed" class="btn btn-sm btn-outline-light float-right">View All</a>
+                            </div>
+                            <div class="card-body">
+                                {% if recent_completed_visits %}
+                                <div class="table-responsive">
+                                    <table class="table table-bordered table-striped">
+                                        <thead>
+                                            <tr>
+                                                <th>OPD Number</th>
+                                                <th>Patient Name</th>
+                                                <th>Visit Date</th>
+                                                <th>Completed At</th>
+                                                <th>Outcome</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for visit in recent_completed_visits %}
+                                            <tr>
+                                                <td><strong>{{ visit.opd_number }}</strong></td>
+                                                <td>{{ visit.patient.first_name }} {{ visit.patient.last_name }}</td>
+                                                <td>{{ visit.visit_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                <td>{{ visit.completed_at.strftime('%Y-%m-%d %H:%M') if visit.completed_at else 'N/A' }}</td>
+                                                <td>
+                                                    {% if visit.completion_outcome == 'death' %}
+                                                    <span class="badge badge-danger">Death</span>
+                                                    {% else %}
+                                                    <span class="badge badge-success">Completed</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <a href="{{ url_for('view_patient_records', patient_id=visit.patient_id) }}" class="btn btn-sm btn-primary">
+                                                        <i class="fas fa-eye"></i> View
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-info">
+                                    <h5><i class="icon fas fa-info"></i> No Completed Emergency Visits</h5>
+                                    No emergency visits have been completed recently.
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-bolt mr-1"></i> Quick Actions</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-2 col-6 mb-2">
+                                        <a href="{{ url_for('emergency_quick_register') }}" class="btn btn-block btn-danger btn-lg">
+                                            <i class="fas fa-ambulance mr-2"></i> Quick Register (no details)
+                                        </a>
+                                    </div>
+                                    <div class="col-md-2 col-6 mb-2">
+                                        <a href="{{ url_for('search_patients') }}" class="btn btn-block btn-primary btn-lg">
+                                            <i class="fas fa-search mr-2"></i> Search Patient
+                                        </a>
+                                    </div>
+                                    <div class="col-md-2 col-6 mb-2">
+                                        <a href="{{ url_for('register_patient') }}" class="btn btn-block btn-success btn-lg">
+                                            <i class="fas fa-user-plus mr-2"></i> Full Registration
+                                        </a>
+                                    </div>
+                                    <div class="col-md-2 col-6 mb-2">
+                                        <a href="{{ url_for('view_queue') }}" class="btn btn-block btn-warning btn-lg">
+                                            <i class="fas fa-list mr-2"></i> Front Office Queue
+                                        </a>
+                                    </div>
+                                    <div class="col-md-2 col-6 mb-2">
+                                        <a href="{{ url_for('emergency_visits_list') }}" class="btn btn-block btn-outline-danger btn-lg">
+                                            <i class="fas fa-ambulance mr-2"></i> Emergency Visits
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+
+{% endblock %}

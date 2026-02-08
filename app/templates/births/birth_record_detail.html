@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+    {% include "includes/sidebar_navbar.html" %}
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6"><h1><i class="fas fa-baby-carriage mr-2"></i> Birth Record</h1></div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('births_dashboard') }}">Maternity</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('births_list') }}">Birth Records</a></li>
+                            <li class="breadcrumb-item active">{{ record.birth_number or 'Record' }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <section class="content">
+            <div class="container-fluid">
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Birth #{{ record.birth_number or record.id }}</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-user text-info mr-1"></i> Mother</h5>
+                                        <p class="mb-1"><a href="{{ url_for('view_patient_records', patient_id=record.mother_patient_id) }}">{{ record.mother.first_name }} {{ record.mother.last_name if record.mother else 'N/A' }}</a></p>
+                                        <p class="text-muted small mb-3">{{ record.mother.patient_number if record.mother else 'N/A' }}</p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-calendar text-info mr-1"></i> Delivery</h5>
+                                        <p class="mb-1"><strong>Date:</strong> {{ record.birth_date.strftime('%Y-%m-%d') }}</p>
+                                        <p class="mb-1"><strong>Time:</strong> {{ record.birth_time.strftime('%H:%M') if record.birth_time else '–' }}</p>
+                                        <p class="mb-1"><strong>Type:</strong> <span class="badge badge-info">{{ record.delivery_type|title }}</span></p>
+                                        <p class="mb-1"><strong>Outcome:</strong> <span class="badge badge-{% if record.birth_outcome == 'live' %}success{% else %}warning{% endif %}">{{ record.birth_outcome|replace('_',' ')|title }}</span></p>
+                                    </div>
+                                </div>
+                                <hr>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-baby text-success mr-1"></i> Baby</h5>
+                                        <p class="mb-1"><strong>Gender:</strong> {{ record.gender|title if record.gender else '–' }}</p>
+                                        <p class="mb-1"><strong>Weight:</strong> {{ record.weight_kg or '–' }} kg</p>
+                                        <p class="mb-1"><strong>Length:</strong> {{ record.length_cm or '–' }} cm</p>
+                                        <p class="mb-1"><strong>Head circumference:</strong> {{ record.head_circumference_cm or '–' }} cm</p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h5><i class="fas fa-heartbeat text-danger mr-1"></i> Apgar Scores</h5>
+                                        <p class="mb-1"><strong>1 min:</strong> {{ record.apgar_1min or '–' }}</p>
+                                        <p class="mb-1"><strong>5 min:</strong> {{ record.apgar_5min or '–' }}</p>
+                                        <p class="mb-1"><strong>10 min:</strong> {{ record.apgar_10min or '–' }}</p>
+                                        <p class="mb-1"><strong>Gravida/Para:</strong> {{ record.gravida or '–' }}/{{ record.para or '–' }}</p>
+                                    </div>
+                                </div>
+                                {% if record.complications or record.notes %}
+                                <hr>
+                                <div class="row">
+                                    <div class="col-12">
+                                        {% if record.complications %}<p class="mb-1"><strong>Complications:</strong> {{ record.complications }}</p>{% endif %}
+                                        {% if record.notes %}<p class="mb-0"><strong>Notes:</strong> {{ record.notes }}</p>{% endif %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="card-footer">
+                                <small class="text-muted">Delivered {% if record.delivered_by %}by {{ record.delivered_by.full_name or record.delivered_by.username }}{% endif %} – Recorded {{ record.created_at.strftime('%Y-%m-%d %H:%M') if record.created_at else '' }}</small>
+                            </div>
+                        </div>
+
+                        {% if antenatal_visits %}
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title"><i class="fas fa-stethoscope mr-1"></i> Mother's Antenatal Visits</h3></div>
+                            <div class="card-body table-responsive p-0">
+                                <table class="table table-sm table-hover">
+                                    <thead><tr><th>Date</th><th>#</th><th>Gest (wks)</th><th>BP</th><th>Weight</th><th>Next</th><th></th></tr></thead>
+                                    <tbody>
+                                        {% for v in antenatal_visits %}
+                                        <tr>
+                                            <td>{{ v.visit_date.strftime('%Y-%m-%d') }}</td>
+                                            <td>{{ v.visit_number or '–' }}</td>
+                                            <td>{{ v.gestational_weeks or '–' }}</td>
+                                            <td>{% if v.blood_pressure_systolic and v.blood_pressure_diastolic %}{{ v.blood_pressure_systolic }}/{{ v.blood_pressure_diastolic }}{% else %}–{% endif %}</td>
+                                            <td>{{ v.weight_kg or '–' }}</td>
+                                            <td>{{ v.next_visit_date.strftime('%Y-%m-%d') if v.next_visit_date else '–' }}</td>
+                                            <td><a href="{{ url_for('midwife_antenatal_visit_detail', visit_id=v.id) }}" class="btn btn-xs btn-outline-info">View</a></td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card card-outline card-primary">
+                            <div class="card-header"><h3 class="card-title">Quick Actions</h3></div>
+                            <div class="card-body">
+                                <a href="{{ url_for('view_patient_records', patient_id=record.mother_patient_id) }}" class="btn btn-info btn-block mb-2"><i class="fas fa-folder-open"></i> Mother's Records</a>
+                                <a href="{{ url_for('birth_record_create_form', mother_id=record.mother_patient_id) }}" class="btn btn-success btn-block mb-2"><i class="fas fa-plus"></i> New Birth (same mother)</a>
+                                <a href="{{ url_for('births_list') }}" class="btn btn-secondary btn-block"><i class="fas fa-list"></i> All Birth Records</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

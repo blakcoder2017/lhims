@@ -7,7 +7,8 @@ from app.db.database import Base
 from app.models.patient_models import Patient, PaymentMechanism
 from app.models.user_models import User, Role
 from app.models.triage_models import TriageVitals
-from app.models.appointment_models import Appointment, AppointmentStatus, AppointmentType
+from app.models.appointment_models import OPDQueue, QueueStatus, VisitType
+from app.models.scheduled_appointment_models import ScheduledAppointment, ScheduledAppointmentStatus
 from app.models.encounter_models import (
     Encounter, EncounterStatus,
     LabOrder, RadiologyOrder, Prescription, OrderStatus
@@ -54,4 +55,7 @@ from app.models.department_models import Department
 from app.models.shift_type_models import ShiftType
 from app.models.bed_type_models import BedType
 from app.models.drug_administration_models import DrugAdministration
+from app.models.fluid_balance_models import FluidBalance
 from app.models.disease_models import Disease, EncounterDisease
+from app.models.antenatal_models import AntenatalVisit
+from app.models.birth_models import BirthRecord, DeliveryType, BirthOutcome

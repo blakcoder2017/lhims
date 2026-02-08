@@ -207,6 +207,12 @@ def create_admission(db: Session, admission: AdmissionCreate) -> Admission:
     
     db.commit()
     db.refresh(db_admission)
+    # Close any active OPD visits for this patient (now in IPD)
+    try:
+        from app.crud import opd_crud
+        opd_crud.complete_all_active_opd_visits_for_patient(db, db_admission.patient_id)
+    except Exception:
+        pass  # Don't fail admission if OPD close fails
     return db_admission
 
 

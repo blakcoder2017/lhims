@@ -86,7 +86,7 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
     from datetime import datetime, timedelta
     from decimal import Decimal
     from app.models.patient_models import Patient
-    from app.models.appointment_models import Appointment, AppointmentStatus
+    from app.models.scheduled_appointment_models import Appointment, AppointmentStatus
     from app.models.encounter_models import Encounter, EncounterStatus, LabOrder, RadiologyOrder, Prescription, OrderStatus
     from app.models.billing_models import Invoice, Payment, InvoiceStatus, PaymentStatus
     from app.models.inventory_models import StockItem, StockStatus
@@ -314,6 +314,7 @@ def get_patient_triage_page(
     from app.utils.payment_verification import (
         check_payment_required_and_paid,
         is_cash_patient,
+        is_patient_admitted,
         has_paid_for_service
     )
     from app.models.billing_models import ChargeType, InvoiceStatus
@@ -327,13 +328,46 @@ def get_patient_triage_page(
         # Redirect to dashboard if patient not found
         return RedirectResponse(url=request.url_for("dashboard"), status_code=status.HTTP_302_FOUND)
     
-    # Check if this is a new visit (returning patient)
+    # Ensure OPD visit exists when landing with appointment_id (e.g. emergency registration)
+    # so the visit appears on Emergency/OPD dashboards and has correct visit_type from appointment
+    appointment_id_param = request.query_params.get("appointment_id")
+    if appointment_id_param:
+        try:
+            aid = int(appointment_id_param)
+            from app.crud import opd_crud
+            from app.services.opd_validation import auto_link_opd_visit
+            if not opd_crud.get_active_opd_visit_by_patient(db, patient_id):
+                auto_link_opd_visit(db, patient_id, aid)
+        except (ValueError, TypeError):
+            pass
+    
+    # Check if this is a new visit (returning patient) vs appointment
     # Initialize is_new_visit from explicit parameter
     is_new_visit = new_visit and new_visit.lower() == 'true'
     
     # If accessing from patient list without appointment_id, check if it's a returning patient
     appointment_id = request.query_params.get("appointment_id")
     is_coming_from_list = not appointment_id and not is_new_visit
+    
+    # Front office check: Determine if this is a new visit or appointment
+    # If appointment_id exists, it's an appointment (not a new visit)
+    # If no appointment_id and patient has previous encounters, it's a new visit
+    is_appointment = bool(appointment_id)
+    if not is_appointment and not is_new_visit:
+        # Check if patient has previous encounters/appointments
+        from app.models.encounter_models import Encounter
+        from app.models.scheduled_appointment_models import Appointment
+        has_previous_encounters = db.query(Encounter).filter(
+            Encounter.patient_id == patient_id,
+            Encounter.is_active == True
+        ).count() > 0
+        has_previous_appointments = db.query(Appointment).filter(
+            Appointment.patient_id == patient_id,
+            Appointment.is_active == True
+        ).count() > 0
+        
+        if has_previous_encounters or has_previous_appointments:
+            is_new_visit = True
     
     # For returning cash patients accessing from patient list, automatically treat as new visit
     # This ensures each visit requires a new consultation fee payment, even on the same day
@@ -573,6 +607,11 @@ def get_patient_triage_page(
                     payment_paid = True  # Consider it "paid" since it goes to insurance
             except Exception as billing_error:
                 print(f"Warning: Unable to create consultation charge for insurance patient {patient_id}: {billing_error}")
+    
+    # Triage page: Do NOT require payment before recording vitals for any cash patient.
+    # OPD cash: pay later before check-in. IPD cash: vitals are for monitoring (same as from_admission in API).
+    if is_cash_patient(db, patient_id):
+        payment_required = False
         
     # Get doctors on duty for appointment assignment
     from app.crud import ipd_crud
@@ -602,7 +641,7 @@ def get_patient_triage_page(
         has_recent_vitals = time_diff < timedelta(hours=1)
     
     # Check if patient is already checked in (has appointment with checked_in status)
-    from app.models.appointment_models import Appointment, AppointmentStatus
+    from app.models.scheduled_appointment_models import Appointment, AppointmentStatus
     checked_in_appointment = db.query(Appointment).filter(
         Appointment.patient_id == patient_id,
         Appointment.status == AppointmentStatus.CHECKED_IN,
@@ -628,7 +667,8 @@ def get_patient_triage_page(
         "invoice": invoice,
         "has_recent_vitals": has_recent_vitals,
         "recent_vitals": recent_vitals,
-        "checked_in_appointment": checked_in_appointment
+        "checked_in_appointment": checked_in_appointment,
+        "from_admission": request.query_params.get("from_admission"),  # IPD: redirect back to admission after recording
     }
     return templates.TemplateResponse("front_office/triage_page.html", context)
 
@@ -653,7 +693,7 @@ def get_new_encounter_page(
         has_paid_for_service
     )
     from app.models.billing_models import ChargeType
-    from app.models.appointment_models import AppointmentStatus
+    from app.models.scheduled_appointment_models import AppointmentStatus
     
     # Fetch Patient Details
     patient_data = patient_crud.get_patient(db, patient_id=patient_id)
@@ -987,8 +1027,7 @@ def get_encounter_page(
     # Sort: primary first, then by name
     formatted_diagnoses.sort(key=lambda x: (not x["is_primary"], x["name"] or ""))
     
-    differential_data = encounter_crud.load_differential_data(encounter_data)
-    
+    from datetime import timedelta
     context = {
         "request": request,
         "title": f"Encounter #{encounter_id}",
@@ -1010,7 +1049,8 @@ def get_encounter_page(
         "current_admission": current_admission,
         "secondary_diagnoses": secondary_diagnoses,
         "encounter_diseases": formatted_diagnoses,
-        "differential_data": differential_data
+        "date": date,
+        "timedelta": timedelta
     }
     return templates.TemplateResponse("clinical/view_encounter.html", context)
 

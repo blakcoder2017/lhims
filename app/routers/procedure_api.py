@@ -21,6 +21,70 @@ router = APIRouter(prefix="/procedures", tags=["Procedures"])
 templates = Jinja2Templates(directory="app/templates")
 
 
+@router.get("/dashboard", name="procedure_dashboard")
+def procedure_dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Doctor", "Nurse", "Clinician"])),
+):
+    """Procedure dashboard with stats and recent procedures."""
+    from app.models.procedure_models import Procedure, ProcedureStatus
+    from sqlalchemy import func
+
+    today = date.today()
+    this_month_start = datetime(today.year, today.month, 1)
+
+    total_procedures = (
+        db.query(func.count(Procedure.id))
+        .filter(Procedure.is_active == True)
+        .scalar()
+        or 0
+    )
+    scheduled_today = (
+        db.query(func.count(Procedure.id))
+        .filter(
+            func.date(Procedure.scheduled_date) == today,
+            Procedure.is_active == True,
+        )
+        .scalar()
+        or 0
+    )
+    completed_today = (
+        db.query(func.count(Procedure.id))
+        .filter(
+            Procedure.status == ProcedureStatus.COMPLETED,
+            Procedure.is_active == True,
+            func.date(func.coalesce(Procedure.end_time, Procedure.updated_at, Procedure.created_at)) == today,
+        )
+        .scalar()
+        or 0
+    )
+    in_progress = (
+        db.query(func.count(Procedure.id))
+        .filter(
+            Procedure.status == ProcedureStatus.IN_PROGRESS,
+            Procedure.is_active == True,
+        )
+        .scalar()
+        or 0
+    )
+
+    recent_procedures, _ = procedure_crud.get_procedures(db, skip=0, limit=15)
+
+    context = {
+        "request": request,
+        "title": "Procedure Dashboard",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "total_procedures": total_procedures,
+        "scheduled_today": scheduled_today,
+        "completed_today": completed_today,
+        "in_progress": in_progress,
+        "recent_procedures": recent_procedures,
+    }
+    return templates.TemplateResponse("procedures/procedure_dashboard.html", context)
+
+
 @router.get("/", name="procedures_list")
 def procedures_list(
     request: Request,

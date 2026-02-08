@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db.database import SessionLocal, engine
 from app.models.patient_models import Patient
-from app.models.appointment_models import Appointment
+from app.models.scheduled_appointment_models import Appointment
 from app.models.triage_models import TriageVitals
 from app.models.encounter_models import Encounter, LabOrder, RadiologyOrder, Prescription
 from app.models.billing_models import Invoice, Charge, Payment

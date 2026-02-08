@@ -65,14 +65,21 @@ def requires_payment_before_service(
     
     # For admitted patients (IPD cash patients):
     if is_admitted:
-        # ONLY admission/bed charges are paid at discharge
-        # ALL other services (labs, imaging, procedures, pharmacy, etc.) are pay-as-you-go
+        # Admission/bed charges paid at discharge
         if service_type == ChargeType.ADMISSION:
-            return False  # Admission charges paid at discharge
-        # Everything else requires immediate payment (pay-as-you-go)
+            return False
+        # Triage/vitals for inpatients = monitoring; do not require consultation payment
+        if service_type == ChargeType.CONSULTATION:
+            return False
+        # All other services (labs, imaging, procedures, pharmacy) are pay-as-you-go
         return True
     
-    # For OPD cash patients: all services are pay-as-you-go
+    # OPD cash: consultation + labs paid AFTER doctor orders (not before triage/check-in/encounter).
+    # So do NOT require payment before consultation (triage/check-in/encounter).
+    if service_type == ChargeType.CONSULTATION:
+        return False
+    # For lab: payment is enforced via has_visit_invoice_been_paid before lab result entry (see ancillary).
+    # Radiology and pharmacy remain pay-before-service (separate flow).
     return True
 
 
@@ -380,6 +387,38 @@ def get_or_create_service_charge(
     return (charge, invoice)
 
 
+def has_visit_invoice_been_paid(
+    db: Session,
+    encounter_id: Optional[int] = None,
+    opd_visit_id: Optional[int] = None,
+    patient_id: Optional[int] = None,
+) -> bool:
+    """
+    Check if the visit invoice (consultation + lab for this encounter/OPD visit) has been paid.
+    Used for OPD cash flow: lab result entry allowed only when this returns True.
+
+    Returns True if: no invoice found (nothing to pay), or invoice balance <= 0 / status PAID.
+    Returns False if: invoice exists and has unpaid balance (payment required before lab result).
+    """
+    if not encounter_id and not opd_visit_id:
+        return True
+    q = db.query(Invoice).filter(Invoice.is_active == True)
+    if encounter_id:
+        q = q.filter(Invoice.encounter_id == encounter_id)
+    if opd_visit_id:
+        q = q.filter(Invoice.opd_visit_id == opd_visit_id)
+    if patient_id:
+        q = q.filter(Invoice.patient_id == patient_id)
+    invoice = q.first()
+    if not invoice:
+        return True
+    if invoice.balance is not None and invoice.balance <= Decimal("0"):
+        return True
+    if invoice.status == InvoiceStatus.PAID.value:
+        return True
+    return False
+
+
 def check_payment_required_and_paid(
     db: Session,
     patient_id: int,
@@ -464,7 +503,7 @@ def verify_encounter_workflow(
     
     # Step 2: Check if patient has been checked in
     if check_checkin:
-        appointment_record = appointment_crud.get_recent_checked_in_appointment(db, patient_id, within_hours=24)
+        appointment_record = appointment_crud.get_recent_checked_in_queue_entry(db, patient_id, within_hours=24)
         
         if not appointment_record:
             return (False, "checkin", vitals_record, None, None)

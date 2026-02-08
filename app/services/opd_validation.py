@@ -46,41 +46,36 @@ def validate_encounter_creation(
         if opd_visit.status != OPDVisitStatus.ACTIVE:
             return False, f"OPD visit {opd_visit.opd_number} is not active"
         
-        # Sync payment status before checking (fixes cases where payment was made but status wasn't updated)
+        # Sync payment status (fixes cases where payment was made but status wasn't updated)
         from app.crud import opd_crud
         synced_visit = opd_crud.sync_opd_visit_payment_status(db, opd_visit_id)
         if synced_visit:
-            opd_visit = synced_visit  # Use the synced version
+            opd_visit = synced_visit
         else:
-            db.refresh(opd_visit)  # Refresh if sync didn't return updated visit
+            db.refresh(opd_visit)
         
-        # Check payment for cash patients
+        # OPD cash flow: do NOT require payment before encounter creation.
+        # Payment is enforced later (e.g. before lab result entry, pharmacy dispense, radiology report).
+        # We still sync payment status above so OPD visit shows "paid" when they have paid.
         patient = db.query(Patient).filter(Patient.id == patient_id).first()
         if not patient:
             return False, f"Patient {patient_id} not found"
         
         if patient.payment_mechanism == PaymentMechanism.CASH:
-            # Double-check payment status by looking at invoices directly if status is still pending
+            # Optional: update OPD visit payment_status if we find paid invoices (no block)
             if opd_visit.payment_status not in ["paid", "waived", "emergency"]:
-                # Final check: verify payment status by checking invoices directly
                 from app.models.billing_models import Invoice, InvoiceStatus, Payment, PaymentStatus
                 from decimal import Decimal
+                from app.models.billing_models import Charge
                 
-                # Check if there are any paid invoices linked to this OPD visit
-                # Method 1: Direct link via invoice.opd_visit_id
                 invoices_direct = db.query(Invoice).filter(
                     Invoice.opd_visit_id == opd_visit_id,
                     Invoice.is_active == True
                 ).all()
-                
-                # Method 2: Link via charges (for invoices created before opd_visit_id was added to invoices)
-                from app.models.billing_models import Charge
                 invoices_via_charges = db.query(Invoice).join(Charge).filter(
                     Charge.opd_visit_id == opd_visit_id,
                     Invoice.is_active == True
                 ).distinct().all()
-                
-                # Combine both lists (remove duplicates by ID)
                 all_invoice_ids = set()
                 all_invoices = []
                 for inv in invoices_direct + invoices_via_charges:
@@ -88,27 +83,17 @@ def validate_encounter_creation(
                         all_invoice_ids.add(inv.id)
                         all_invoices.append(inv)
                 
-                payment_found = False
                 for invoice in all_invoices:
-                    # Check if invoice is paid (most reliable)
                     if invoice.status == InvoiceStatus.PAID:
-                        # Invoice is paid, update OPD visit status and allow
                         opd_visit.payment_status = "paid"
                         db.commit()
                         db.refresh(opd_visit)
-                        payment_found = True
                         break
-                    
-                    # Check balance
                     if invoice.balance is not None and invoice.balance <= Decimal('0.00'):
-                        # Invoice balance is zero or negative, update status
                         opd_visit.payment_status = "paid"
                         db.commit()
                         db.refresh(opd_visit)
-                        payment_found = True
                         break
-                    
-                    # Check payments directly (most comprehensive)
                     completed_payments = db.query(Payment).filter(
                         Payment.invoice_id == invoice.id,
                         Payment.status == PaymentStatus.COMPLETED,
@@ -117,16 +102,11 @@ def validate_encounter_creation(
                     if completed_payments:
                         total_paid = sum(p.amount for p in completed_payments)
                         if invoice.total_amount and total_paid >= invoice.total_amount:
-                            # Payments cover full amount, update status and allow
                             opd_visit.payment_status = "paid"
                             db.commit()
                             db.refresh(opd_visit)
-                            payment_found = True
                             break
-                
-                # Re-check after potential update
-                if not payment_found and opd_visit.payment_status not in ["paid", "waived", "emergency"]:
-                    return False, f"Payment required for OPD visit {opd_visit.opd_number}. Current status: {opd_visit.payment_status}"
+                # Do not block encounter: allow creation regardless of payment status for OPD cash
     
     # Rule 3: If IPD, verify admission status
     if admission_id:
@@ -170,7 +150,7 @@ def auto_link_opd_visit(
     
     # If no active visit and appointment_id is provided, check if appointment has an OPD visit
     if appointment_id:
-        from app.models.appointment_models import Appointment
+        from app.models.scheduled_appointment_models import Appointment
         appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
         if appointment:
             # Check if there's an OPD visit linked to this appointment
@@ -191,11 +171,24 @@ def auto_link_opd_visit(
         if not patient:
             return None
         
-        # Determine payment status based on patient's payment mechanism
-        payment_status = "pending"
+        # Determine visit_type and payment_status from appointment if provided
         visit_type = "walk_in"
+        payment_status = "pending"
+        if appointment_id:
+            from app.models.scheduled_appointment_models import ScheduledAppointment, AppointmentType
+            appointment = db.query(ScheduledAppointment).filter(
+                ScheduledAppointment.id == appointment_id,
+                ScheduledAppointment.is_active == True,
+            ).first()
+            if appointment:
+                if (
+                    getattr(appointment, "appointment_type", None) == AppointmentType.EMERGENCY
+                    or (getattr(appointment, "department", None) or "").strip().lower() == "emergency"
+                ):
+                    visit_type = "emergency"
+                    payment_status = "emergency"
         
-        if patient.payment_mechanism:
+        if visit_type != "emergency" and patient.payment_mechanism:
             if patient.payment_mechanism.value == "cash":
                 payment_status = "pending"
             elif patient.payment_mechanism.value in ["nhis", "private_insurance"]:

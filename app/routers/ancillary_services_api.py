@@ -73,8 +73,10 @@ def lab_dashboard(
     lab_orders = query.order_by(LabOrder.ordered_at.desc()).limit(100).all()
     
     # Check payment status for each lab order (for cash patients)
+    # OPD: pay before lab results. IPD (on admission): pay at discharge — do not require payment before results.
     from app.utils.payment_verification import is_cash_patient, check_payment_required_and_paid
     from app.models.billing_models import Charge, ChargeType, Invoice
+    from app.crud import ipd_crud
     lab_order_payment_status = {}
     
     for order in lab_orders:
@@ -85,7 +87,16 @@ def lab_dashboard(
             patient_id = order.patient_id
         
         if patient_id and is_cash_patient(db, patient_id):
-            # Check if there's a charge for this lab order
+            # Admitted (IPD) patients pay at discharge — allow lab results without prior payment
+            current_admission = ipd_crud.get_current_admission(db, patient_id)
+            if current_admission:
+                lab_order_payment_status[order.id] = {
+                    "payment_required": False,
+                    "payment_paid": True,
+                    "is_admitted": True
+                }
+                continue
+            # OPD cash: require payment before lab results
             charge = db.query(Charge).filter(
                 Charge.lab_order_id == order.id,
                 Charge.charge_type == ChargeType.LAB_TEST,
@@ -147,53 +158,50 @@ def view_lab_order(
     if not lab_order:
         raise HTTPException(status_code=404, detail="Lab order not found")
     
-    # Check payment status for cash patients
-    from app.utils.payment_verification import (
-        is_cash_patient,
-        check_payment_required_and_paid,
-        requires_payment_before_service
-    )
-    from app.models.billing_models import ChargeType
+    # Check payment status for cash patients.
+    # OPD: pay before lab results. IPD (on admission): pay at discharge — allow result entry without prior payment.
+    from app.utils.payment_verification import is_cash_patient, has_visit_invoice_been_paid
+    from app.models.billing_models import Invoice
+    from app.crud import ipd_crud
     
-    patient = lab_order.encounter.patient
+    patient = lab_order.encounter.patient if lab_order.encounter else (db.query(Patient).filter(Patient.id == lab_order.patient_id).first() if lab_order.patient_id else None)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found for this lab order")
     payment_required = False
     payment_paid = True
     payment_notice = None
     unpaid_invoice = None
     paid_invoice = None
+    is_admitted = False
     
     if is_cash_patient(db, patient.id):
-        # First, ensure charge exists for this lab order (if not already created)
-        # This allows us to always check payment status
-        from app.services import create_charge_for_lab_order
-        try:
-            create_charge_for_lab_order(db, lab_order, current_user.id, check_payment_required=False)
-        except Exception as e:
-            # Charge might already exist, continue
-            pass
-        
-        # Check payment requirement and status
-        payment_required = requires_payment_before_service(
-            db, patient.id, ChargeType.LAB_TEST
-        )
-        
-        if payment_required:
-            payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
-                db, patient.id, ChargeType.LAB_TEST,
-                encounter_id=lab_order.encounter_id,
-                lab_order_id=order_id
-            )
-            
+        # Admitted (IPD) patients pay at discharge — allow lab results without prior payment
+        current_admission = ipd_crud.get_current_admission(db, patient.id)
+        if current_admission:
+            is_admitted = True
+            payment_required = False
+            payment_paid = True
+            payment_notice = "Patient is on admission (IPD). Payment will be at discharge. You can enter results."
+        else:
+            # OPD: visit invoice (consultation + lab) must be paid before result entry
+            from app.services import create_charge_for_lab_order
+            try:
+                create_charge_for_lab_order(db, lab_order, current_user.id, check_payment_required=False)
+            except Exception:
+                pass
+            payment_paid = has_visit_invoice_been_paid(db, encounter_id=lab_order.encounter_id) if lab_order.encounter_id else False
+            payment_required = not payment_paid
+            invoice = db.query(Invoice).filter(
+                Invoice.encounter_id == lab_order.encounter_id,
+                Invoice.is_active == True
+            ).first() if lab_order.encounter_id else None
             if invoice:
                 if payment_paid:
                     paid_invoice = invoice
-                    payment_notice = f"Payment Status: Patient has paid for this lab order. Invoice #{invoice.invoice_number} - Amount: GHS {invoice.total_amount:.2f}"
+                    payment_notice = "Payment Status: Visit (consultation + lab) has been paid. You can enter results."
                 else:
                     unpaid_invoice = invoice
-                    payment_notice = f"Payment Required: Patient has not paid for this lab order. Outstanding balance: GHS {invoice.balance:.2f}"
-            else:
-                # Charge might not exist yet or still being created
-                payment_notice = "Payment Status: Checking payment status..."
+                    payment_notice = f"Payment Required: Patient must pay visit (consultation + lab) before lab result. Balance: GHS {invoice.balance:.2f}"
     
     # Get samples for this order
     samples = db.query(LabSample).filter(
@@ -207,13 +215,14 @@ def view_lab_order(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "lab_order": lab_order,
-        "patient": lab_order.encounter.patient,
+        "patient": patient,
         "samples": samples,
         "payment_required": payment_required,
         "payment_paid": payment_paid,
         "payment_notice": payment_notice,
         "unpaid_invoice": unpaid_invoice,
-        "paid_invoice": paid_invoice
+        "paid_invoice": paid_invoice,
+        "is_admitted": is_admitted,
     }
     return templates.TemplateResponse("ancillary/lab_order_detail.html", context)
 
@@ -229,38 +238,37 @@ def enter_lab_result(
 ):
     """
     Enter lab test results.
-    For cash patients: Checks if payment has been made before allowing result entry.
+    OPD cash patients: must pay before lab results. IPD (on admission): pay at discharge — allow result entry.
     """
     from app.utils.payment_verification import (
-        check_payment_required_and_paid,
-        is_cash_patient
+        is_cash_patient,
+        has_visit_invoice_been_paid
     )
-    from app.models.billing_models import ChargeType
+    from app.models.billing_models import Invoice
+    from app.crud import ipd_crud
     
-    lab_order = db.query(LabOrder).filter(LabOrder.id == order_id).first()
+    lab_order = db.query(LabOrder).options(
+        joinedload(LabOrder.encounter)
+    ).filter(LabOrder.id == order_id).first()
     if not lab_order:
         raise HTTPException(status_code=404, detail="Lab order not found")
     
-    # Get patient from encounter
     encounter = lab_order.encounter
-    patient_id = encounter.patient_id
+    patient_id = encounter.patient_id if encounter else lab_order.patient_id
+    if not patient_id:
+        raise HTTPException(status_code=400, detail="Patient not found for this lab order")
     
-    # Check payment requirement for cash patients (lab test fee)
-    # Payment must be made before saving results for cash patients
+    # OPD cash: pay before lab results. IPD (on admission): pay at discharge — allow result entry without prior payment.
     if is_cash_patient(db, patient_id):
-        payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
-            db, patient_id, ChargeType.LAB_TEST, 
-            encounter_id=encounter.id, lab_order_id=order_id
-        )
-        
-        if payment_required and not payment_paid:
-            # Block saving - redirect back with payment required error
-            invoice_id = invoice.id if invoice else None
-            invoice_balance = invoice.balance if invoice else None
-            return RedirectResponse(
-                url=f"/lab/orders/{order_id}?error=payment_required&invoice_id={invoice_id}&balance={invoice_balance}",
-                status_code=status.HTTP_302_FOUND
-            )
+        current_admission = ipd_crud.get_current_admission(db, patient_id)
+        if not current_admission:
+            # OPD: block result entry until visit invoice paid
+            if encounter and not has_visit_invoice_been_paid(db, encounter_id=encounter.id):
+                pay_url = request.url_for("pay_consultation", patient_id=patient_id)
+                return RedirectResponse(
+                    url=f"{pay_url}?encounter_id={encounter.id}&return_to=pay_visit&from_lab={order_id}",
+                    status_code=status.HTTP_302_FOUND
+                )
     
     # Update lab order with result
     update_data = {
@@ -270,6 +278,23 @@ def enter_lab_result(
         "status": OrderStatus.COMPLETED.value,
         "completed_at": datetime.now()
     }
+    
+    # Send SMS notification to patient when result is ready (only if valid phone)
+    try:
+        from app.services.sms_onlinegh_service import send_personalized_sms_notification, is_valid_phone
+        patient = encounter.patient if encounter else db.query(Patient).filter(Patient.id == patient_id).first()
+        if patient and patient.phone_number and is_valid_phone(patient.phone_number):
+            message_template = "Hello {$name}. Your lab test result for {$test_name} is ready. Please visit the hospital or contact your doctor. Thank you!"
+            destinations = [{
+                "number": patient.phone_number,
+                "values": [
+                    f"{patient.first_name} {patient.last_name}",
+                    lab_order.test_name
+                ]
+            }]
+            send_personalized_sms_notification(message_template, destinations)
+    except Exception as sms_error:
+        print(f"Warning: Unable to send lab result SMS: {sms_error}")
     
     # Validate result before saving
     validation_status = None
@@ -287,7 +312,7 @@ def enter_lab_result(
     
     # Handle file uploads if provided
     if files:
-        patient_id = encounter.patient_id
+        # patient_id already set above (encounter or lab_order.patient_id)
         
         # Create storage directory
         storage_base = "static/files/lab_results"
@@ -604,6 +629,23 @@ def enter_radiology_report(
     radiology_order_update = RadiologyOrderUpdate(**update_data)
     updated_radiology_order = encounter_crud.update_radiology_order(db, order_id, radiology_order_update)
     
+    # Send SMS notification to patient when radiology result is ready (only if valid phone)
+    try:
+        from app.services.sms_onlinegh_service import send_personalized_sms_notification, is_valid_phone
+        patient = encounter.patient
+        if patient and patient.phone_number and is_valid_phone(patient.phone_number):
+            message_template = "Hello {$name}. Your radiology result for {$study_type} is ready. Please visit the hospital or contact your doctor. Thank you!"
+            destinations = [{
+                "number": patient.phone_number,
+                "values": [
+                    f"{patient.first_name} {patient.last_name}",
+                    radiology_order.study_type
+                ]
+            }]
+            send_personalized_sms_notification(message_template, destinations)
+    except Exception as sms_error:
+        print(f"Warning: Unable to send radiology result SMS: {sms_error}")
+    
     # Automatically create charge when radiology order is completed
     if updated_radiology_order and updated_radiology_order.status == OrderStatus.COMPLETED.value:
         try:
@@ -694,14 +736,26 @@ def pharmacy_dashboard(
             
             if charge:
                 invoice = charge.invoice
-                payment_required, payment_paid, invoice_id, balance = check_payment_required_and_paid(
-                    db, invoice.id
-                )
-                if payment_required and not payment_paid:
+                try:
+                    payment_required, payment_paid, _charge, _invoice = check_payment_required_and_paid(
+                        db, patient_id, ChargeType.PHARMACY,
+                        encounter_id=prescription.encounter_id,
+                        prescription_id=prescription.id
+                    )
+                    if payment_required and not payment_paid:
+                        prescription_payment_status[prescription.id] = {
+                            "payment_required": True,
+                            "invoice_id": invoice.id if invoice else None,
+                            "balance": invoice.balance if invoice else None
+                        }
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    # Don't 500 the dashboard; leave this prescription without payment-required flag
                     prescription_payment_status[prescription.id] = {
-                        "payment_required": True,
-                        "invoice_id": invoice_id,
-                        "balance": balance
+                        "payment_required": False,
+                        "invoice_id": invoice.id if invoice else None,
+                        "balance": invoice.balance if invoice else None
                     }
     
     context = {

@@ -4,7 +4,7 @@ Handles all UI endpoints for IPD management including wards, beds, admissions, a
 """
 from fastapi import APIRouter, Request, Depends, status, Query, Form, HTTPException
 from typing import Optional, List
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 
 from app.core.deps import get_current_user, role_required
 from app.db.database import get_db
-from app.crud import ipd_crud, patient_crud, drug_administration_crud
+from app.crud import ipd_crud, patient_crud, drug_administration_crud, fluid_balance_crud
 from app.services.ipd_billing_service import calculate_ward_bed_charges, get_or_create_invoice_for_admission
 from app.models.ipd_models import WardStatus, BedStatus, AdmissionStatus
 from app.models.user_models import User
@@ -673,7 +673,7 @@ def create_admission_form(
         patient = patient_crud.get_patient(db, patient_id)
         
         # Check if patient has an active emergency appointment
-        from app.models.appointment_models import Appointment, AppointmentType, AppointmentStatus
+        from app.models.scheduled_appointment_models import Appointment, AppointmentType, AppointmentStatus
         emergency_appointment = db.query(Appointment).filter(
             Appointment.patient_id == patient_id,
             Appointment.appointment_type == AppointmentType.EMERGENCY,
@@ -749,6 +749,27 @@ def create_admission(
         )
         admission = ipd_crud.create_admission(db, admission_data)
         
+        # Send SMS notification to patient
+        try:
+            from app.services.sms_onlinegh_service import send_personalized_sms_notification
+            from app.models.patient_models import Patient
+            
+            patient = db.query(Patient).filter(Patient.id == patient_id).first()
+            if patient and patient.phone_number:
+                message_template = "Hello {$name}. You have been admitted to {$ward_name}, Bed {$bed_number}. Admission Number: {$admission_number}. For inquiries, contact the hospital."
+                destinations = [{
+                    "number": patient.phone_number,
+                    "values": [
+                        f"{patient.first_name} {patient.last_name}",
+                        admission.ward.name if admission.ward else "Hospital",
+                        admission.bed.bed_number if admission.bed else "N/A",
+                        admission.admission_number
+                    ]
+                }]
+                send_personalized_sms_notification(message_template, destinations)
+        except Exception as sms_error:
+            print(f"Warning: Unable to send admission SMS: {sms_error}")
+        
         # Immediately seed ward/bed charges so invoice reflects occupancy
         try:
             calculate_ward_bed_charges(db, admission, current_user.id)
@@ -757,7 +778,7 @@ def create_admission(
         
         # Remove patient from OPD queue (both appointment and doctor queue)
         # Update any active appointments to completed status
-        from app.models.appointment_models import Appointment, AppointmentStatus
+        from app.models.scheduled_appointment_models import Appointment, AppointmentStatus
         from app.crud import appointment_crud
         from app.schemas.appointment_schemas import AppointmentUpdate
         
@@ -802,7 +823,7 @@ def admission_detail(
 ):
     """Show admission details"""
     from app.crud import encounter_crud
-    from app.models.encounter_models import Prescription, OrderStatus, Encounter
+    from app.models.encounter_models import Prescription, OrderStatus, Encounter, LabOrder, RadiologyOrder
     from sqlalchemy.orm import joinedload
     from app.models.ipd_models import AdmissionNote
     
@@ -869,6 +890,35 @@ def admission_detail(
     # Sort by prescribed date (most recent first)
     prescriptions.sort(key=lambda p: p.prescribed_at if p.prescribed_at else datetime.min, reverse=True)
     
+    # Lab orders and radiology orders for this admission (encounters during admission period)
+    encounter_ids_for_orders = set()
+    if admission.encounter_id:
+        encounter_ids_for_orders.add(admission.encounter_id)
+    encounters_in_period = db.query(Encounter).filter(
+        Encounter.patient_id == admission.patient_id,
+        func.date(Encounter.encounter_date) >= admission_start_date,
+        func.date(Encounter.encounter_date) <= admission_end_date
+    ).all()
+    for enc in encounters_in_period:
+        encounter_ids_for_orders.add(enc.id)
+    
+    lab_orders = []
+    radiology_orders = []
+    if encounter_ids_for_orders:
+        lab_orders = db.query(LabOrder).options(
+            joinedload(LabOrder.ordered_by),
+            joinedload(LabOrder.result_entered_by)
+        ).filter(
+            LabOrder.encounter_id.in_(list(encounter_ids_for_orders))
+        ).order_by(LabOrder.ordered_at.desc()).all()
+        radiology_orders = db.query(RadiologyOrder).options(
+            joinedload(RadiologyOrder.ordered_by),
+            joinedload(RadiologyOrder.report_entered_by),
+            joinedload(RadiologyOrder.images)
+        ).filter(
+            RadiologyOrder.encounter_id.in_(list(encounter_ids_for_orders))
+        ).order_by(RadiologyOrder.ordered_at.desc()).all()
+    
     # Check stock availability for pending prescriptions to determine if they should show as "Dispensed"
     # If medication is available in pharmacy inventory, show as "Dispensed" instead of "Pending dispense"
     from app.crud import inventory_crud
@@ -914,13 +964,25 @@ def admission_detail(
     # Get admission notes (ordered by most recent first, with replies grouped)
     from app.models.ipd_models import AdmissionNote
     admission_notes = db.query(AdmissionNote).options(
-        joinedload(AdmissionNote.created_by),
-        joinedload(AdmissionNote.replies).joinedload(AdmissionNote.created_by)
+        joinedload(AdmissionNote.created_by).joinedload(User.role),
+        joinedload(AdmissionNote.replies).joinedload(AdmissionNote.created_by).joinedload(User.role)
     ).filter(
         AdmissionNote.admission_id == admission_id,
         AdmissionNote.is_active == True,
         AdmissionNote.parent_note_id.is_(None)  # Only get top-level notes, replies loaded via relationship
     ).order_by(AdmissionNote.created_at.desc()).all()
+
+    # Split notes for side-by-side layout: Doctor reviews (left), Nurse clinical reviews (right), latest on top
+    doctor_notes = [n for n in admission_notes if (n.note_type or "").lower() in ("doctor", "general")]
+    nurse_notes = [n for n in admission_notes if (n.note_type or "").lower() in ("nursing", "clinical_review", "vital_signs", "medication")]
+
+    # Recent vitals for this patient (for monitoring on admission page)
+    from app.models.triage_models import TriageVitals
+    recent_vitals = db.query(TriageVitals).options(
+        joinedload(TriageVitals.recorded_by)
+    ).filter(
+        TriageVitals.patient_id == admission.patient_id
+    ).order_by(TriageVitals.recorded_at.desc()).limit(15).all()
     
     # Get drug administrations for this admission, grouped by prescription
     from app.crud import drug_administration_crud
@@ -940,6 +1002,40 @@ def admission_detail(
     administrations_by_prescription = defaultdict(list)
     for admin in drug_administrations:
         administrations_by_prescription[admin.prescription_id].append(admin)
+    
+    # Medication chart: administrations per day (for bar chart below table)
+    medication_chart_daily = []
+    if drug_administrations:
+        from collections import Counter
+        dates = []
+        for admin in drug_administrations:
+            if admin.administration_time:
+                d = admin.administration_time.date() if hasattr(admin.administration_time, 'date') else admin.administration_time
+                dates.append(str(d))
+        day_counts = Counter(dates)
+        for day in sorted(day_counts.keys()):
+            medication_chart_daily.append({"date": day, "count": day_counts[day]})
+    
+    # Fluid balance entries and chart data
+    fluid_entries = fluid_balance_crud.get_fluid_entries_by_admission(db, admission_id)
+    fluids_chart_labels = []
+    fluids_chart_intake = []
+    fluids_chart_output = []
+    if fluid_entries:
+        from collections import defaultdict
+        by_date = defaultdict(lambda: {"intake": 0, "output": 0})
+        for e in fluid_entries:
+            if e.recorded_at:
+                d = e.recorded_at.date() if hasattr(e.recorded_at, "date") else e.recorded_at
+                key = str(d)
+                if e.entry_type == "intake":
+                    by_date[key]["intake"] += e.volume_ml
+                else:
+                    by_date[key]["output"] += e.volume_ml
+        for day in sorted(by_date.keys()):
+            fluids_chart_labels.append(day)
+            fluids_chart_intake.append(by_date[day]["intake"])
+            fluids_chart_output.append(by_date[day]["output"])
     
     # Check for ongoing encounters (IN_PROGRESS or DETAINED) for this patient during THIS admission only
     # This helps determine if there's an active encounter to add prescriptions to
@@ -968,11 +1064,13 @@ def admission_detail(
     try:
         clearance = discharge_crud.get_discharge_clearance(db, admission_id)
     except ProgrammingError as e:
-        # Table might not exist yet - migration not applied
+        # Table might not exist yet - migration not applied. Rollback so later queries succeed.
         if "does not exist" in str(e) or "relation" in str(e).lower():
+            db.rollback()
             print(f"Warning: discharge_clearances table does not exist yet. Please run migration 0fc735668649.")
             clearance = None
         else:
+            db.rollback()
             raise
     
     # Determine if discharge is ready (both clearances complete if required)
@@ -987,6 +1085,20 @@ def admission_detail(
                 discharge_ready = clearance.nursing_cleared
         # If clearance table doesn't exist, allow discharge anyway (backward compatibility)
     
+    # Lab and radiology services for inline order modals (no iframe)
+    lab_services = []
+    radiology_services = []
+    if current_encounter_id and current_user.role and current_user.role.name in ["Doctor", "Clinician", "Admin"]:
+        from app.crud import service_pricing_crud
+        lab_services = service_pricing_crud.get_service_pricing_by_charge_type(db, "lab_test") or []
+        radiology_services = service_pricing_crud.get_service_pricing_by_charge_type(db, "radiology") or []
+
+    # Prescription options for inline Record Administration modal (Nurse/Doctor/Admin)
+    prescription_options = []
+    default_admin_time = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    if current_user.role and current_user.role.name in ["Nurse", "Doctor", "Admin"]:
+        prescription_options = drug_administration_crud.get_dispensed_drugs_by_admission(db, admission.admission_number) or []
+
     context = {
         "request": request,
         "title": f"Admission: {admission.admission_number}",
@@ -1001,9 +1113,23 @@ def admission_detail(
         "prescription_stock_status": prescription_stock_status,
         "prescriptions": prescriptions,
         "admission_notes": admission_notes,
+        "doctor_notes": doctor_notes,
+        "nurse_notes": nurse_notes,
+        "recent_vitals": recent_vitals,
         "drug_administrations": drug_administrations,
         "administrations_by_prescription": dict(administrations_by_prescription),
-        "current_encounter_id": current_encounter_id  # Add current encounter ID for prescriptions
+        "current_encounter_id": current_encounter_id,
+        "lab_services": lab_services,
+        "radiology_services": radiology_services,
+        "lab_orders": lab_orders,
+        "radiology_orders": radiology_orders,
+        "medication_chart_daily": medication_chart_daily,
+        "fluid_entries": fluid_entries,
+        "fluids_chart_labels": fluids_chart_labels,
+        "fluids_chart_intake": fluids_chart_intake,
+        "fluids_chart_output": fluids_chart_output,
+        "prescription_options": prescription_options,
+        "default_admin_time": default_admin_time,
     }
     return templates.TemplateResponse("ipd/admission_detail.html", context)
 
@@ -1046,16 +1172,21 @@ def record_drug_administration(
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Nurse", "Doctor", "Admin"]))
 ):
-    """Handle submission of drug administration"""
+    """Handle submission of drug administration. Returns JSON for AJAX (X-Requested-With: XMLHttpRequest)."""
     admission = ipd_crud.get_admission(db, admission_id)
     if not admission:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JSONResponse(status_code=404, content={"success": False, "detail": "Admission not found"})
         raise HTTPException(status_code=404, detail="Admission not found")
 
     redirect_back = request.url_for("ipd_record_drug_administration_form", admission_id=admission_id)
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
     try:
         admin_datetime = datetime.strptime(administration_time, "%Y-%m-%dT%H:%M")
     except ValueError:
+        if is_ajax:
+            return JSONResponse(status_code=400, content={"success": False, "detail": "Invalid administration date/time."})
         url = f"{redirect_back}?error=Invalid+administration+date/time"
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -1071,11 +1202,72 @@ def record_drug_administration(
     )
 
     if not created:
+        if is_ajax:
+            return JSONResponse(status_code=400, content={"success": False, "detail": "Unable to record administration. Please verify the selected drug."})
         url = f"{redirect_back}?error=Unable+to+record+administration.+Please+verify+the+selected+drug."
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
+    if is_ajax:
+        return JSONResponse(status_code=200, content={"success": True, "message": "Medication administration recorded."})
     detail_url = request.url_for("ipd_admission_detail", admission_id=admission_id)
     detail_url = f"{detail_url}?medication_recorded=1"
+    return RedirectResponse(url=detail_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ipd/admissions/{admission_id}/fluids/record", name="ipd_record_fluid")
+def record_fluid(
+    request: Request,
+    admission_id: int,
+    entry_type: str = Form(...),
+    volume_ml: int = Form(...),
+    recorded_at: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Nurse", "Doctor", "Admin"])),
+):
+    """Record fluid intake or output. Returns JSON for AJAX (X-Requested-With: XMLHttpRequest)."""
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JSONResponse(status_code=404, content={"success": False, "detail": "Admission not found"})
+        raise HTTPException(status_code=404, detail="Admission not found")
+    if admission.status != AdmissionStatus.ADMITTED:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JSONResponse(status_code=400, content={"success": False, "detail": "Only admitted patients can have fluid entries recorded."})
+        raise HTTPException(status_code=400, detail="Only admitted patients can have fluid entries recorded.")
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    if entry_type not in ("intake", "output"):
+        if is_ajax:
+            return JSONResponse(status_code=400, content={"success": False, "detail": "Entry type must be intake or output."})
+        raise HTTPException(status_code=400, detail="Entry type must be intake or output.")
+    if volume_ml < 0:
+        if is_ajax:
+            return JSONResponse(status_code=400, content={"success": False, "detail": "Volume must be a positive number."})
+        raise HTTPException(status_code=400, detail="Volume must be a positive number.")
+    admin_datetime = datetime.now()
+    if recorded_at:
+        try:
+            admin_datetime = datetime.strptime(recorded_at, "%Y-%m-%dT%H:%M")
+        except ValueError:
+            if is_ajax:
+                return JSONResponse(status_code=400, content={"success": False, "detail": "Invalid date/time."})
+            raise HTTPException(status_code=400, detail="Invalid date/time.")
+    created = fluid_balance_crud.create_fluid_entry(
+        db=db,
+        admission_id=admission_id,
+        recorded_by_id=current_user.id,
+        entry_type=entry_type,
+        volume_ml=volume_ml,
+        recorded_at=admin_datetime,
+        notes=notes or None,
+    )
+    if not created:
+        if is_ajax:
+            return JSONResponse(status_code=400, content={"success": False, "detail": "Unable to record fluid entry."})
+        raise HTTPException(status_code=400, detail="Unable to record fluid entry.")
+    if is_ajax:
+        return JSONResponse(status_code=200, content={"success": True, "message": "Fluid entry recorded."})
+    detail_url = request.url_for("ipd_admission_detail", admission_id=admission_id)
     return RedirectResponse(url=detail_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1511,6 +1703,7 @@ def discharge_form(
         "user_role": current_user.role.name if (current_user and current_user.role) else "Guest",
         "admission": admission,
         "discharge_statuses": [s for s in DischargeStatus],
+        "preselect_death": request.query_params.get("death") in ("1", "true", "yes"),
         "encounter_diagnosis": encounter_diagnosis
     }
     return templates.TemplateResponse("ipd/discharge_form.html", context)
@@ -1531,40 +1724,45 @@ def discharge_admission(
         admission = ipd_crud.get_admission(db, admission_id)
         if not admission:
             raise HTTPException(status_code=404, detail="Admission not found")
-        
-        # Ensure discharge has been prepared recently
-        if not admission.ready_for_discharge_at:
-            return RedirectResponse(
-                url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + 
-                    "?error=Please prepare discharge before discharging the patient.",
-                status_code=status.HTTP_302_FOUND
-            )
-        
-        if admission.ready_for_discharge_at < datetime.now() - timedelta(hours=2):
-            admission.ready_for_discharge_at = None
-            db.commit()
-            return RedirectResponse(
-                url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + 
-                    "?error=Discharge preparation expired. Please prepare discharge again.",
-                status_code=status.HTTP_302_FOUND
-            )
-        
-        # Ensure an invoice exists for this admission
+
+        is_death = discharge_status and str(discharge_status).lower() == "death"
+
+        # For death: allow discharge without preparation and without payment clearance
+        if not is_death:
+            # Ensure discharge has been prepared recently
+            if not admission.ready_for_discharge_at:
+                return RedirectResponse(
+                    url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) +
+                        "?error=Please prepare discharge before discharging the patient.",
+                    status_code=status.HTTP_302_FOUND
+                )
+
+            if admission.ready_for_discharge_at < datetime.now() - timedelta(hours=2):
+                admission.ready_for_discharge_at = None
+                db.commit()
+                return RedirectResponse(
+                    url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) +
+                        "?error=Discharge preparation expired. Please prepare discharge again.",
+                    status_code=status.HTTP_302_FOUND
+                )
+
+        # Ensure an invoice exists for this admission (for death, create if missing for records)
         invoice = admission.invoice
         if not invoice:
             invoice = get_or_create_invoice_for_admission(db, admission, current_user.id)
             db.refresh(admission)
-        
-        # Check discharge clearance (payment and nursing clearance)
+
+        # Check discharge clearance (payment and nursing clearance) - skip for death
         from app.crud import discharge_crud
         from app.utils.payment_verification import is_cash_patient
         from app.crud import billing_crud
         from app.models.billing_models import InvoiceStatus
-        
+
         clearance = discharge_crud.get_discharge_clearance(db, admission_id)
-        
-        # For cash patients: Check payment clearance
-        if is_cash_patient(db, admission.patient_id):
+
+        # For death: skip payment and nursing clearance (record promptly; billing can be settled later)
+        # For cash patients (non-death): Check payment clearance
+        if not is_death and is_cash_patient(db, admission.patient_id):
             # Get all invoices for this admission
             patient_invoices = billing_crud.get_invoices_by_patient(db, admission.patient_id)
             admission_invoices = [inv for inv in patient_invoices 
@@ -1591,9 +1789,9 @@ def discharge_admission(
                         "?error=Payment clearance required before discharge. Please clear payment first.",
                     status_code=status.HTTP_302_FOUND
                 )
-        
-        # Check nursing clearance (required for all patients)
-        if not clearance or not clearance.nursing_cleared:
+
+        # Check nursing clearance (required for all patients; skip for death)
+        if not is_death and (not clearance or not clearance.nursing_cleared):
             return RedirectResponse(
                 url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + 
                     "?error=Nursing clearance required before discharge. Please get nursing clearance first.",
@@ -1706,6 +1904,20 @@ def discharge_admission(
         )
 
 
+def _note_type_allowed_for_role(note_type: str, role_name: Optional[str]) -> bool:
+    """Only allow note types that match the user's role. Nurse → nurse types; Doctor/Clinician/Admin → doctor types."""
+    nt = (note_type or "").strip().lower()
+    if not role_name:
+        return False
+    doctor_types = {"doctor", "general"}
+    nurse_types = {"clinical_review", "nursing", "vital_signs", "medication"}
+    if role_name == "Nurse":
+        return nt in nurse_types
+    if role_name in ("Doctor", "Clinician", "Admin"):
+        return nt in doctor_types
+    return False
+
+
 @router.post("/ipd/admissions/{admission_id}/notes", name="add_admission_note", status_code=status.HTTP_302_FOUND)
 def add_admission_note(
     request: Request,
@@ -1716,11 +1928,19 @@ def add_admission_note(
     note_type: Optional[str] = Form("general"),
     parent_note_id: Optional[int] = Form(None)  # For replies
 ):
-    """Add a note to an admission, or reply to an existing note"""
+    """Add a note to an admission, or reply to an existing note. Note type must match user role."""
     try:
         admission = ipd_crud.get_admission(db, admission_id)
         if not admission:
             raise HTTPException(status_code=404, detail="Admission not found")
+        role_name = current_user.role.name if current_user.role else None
+        effective_type = note_type or "general"
+        if not _note_type_allowed_for_role(effective_type, role_name):
+            return RedirectResponse(
+                url=str(request.url_for("ipd_admission_detail", admission_id=admission_id))
+                + "?error=You+can+only+add+notes+for+your+role+(e.g.+nurses+add+nurse+reviews,+doctors+add+doctor+reviews).",
+                status_code=status.HTTP_302_FOUND
+            )
         
         # If replying, verify parent note exists and belongs to this admission
         if parent_note_id:
@@ -1739,7 +1959,7 @@ def add_admission_note(
             admission_id=admission_id,
             created_by_id=current_user.id,
             note=note.strip(),
-            note_type=note_type or "general",
+            note_type=effective_type,
             parent_note_id=parent_note_id
         )
         
@@ -1751,6 +1971,8 @@ def add_admission_note(
             url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + "?status=note_added",
             status_code=status.HTTP_302_FOUND
         )
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         return RedirectResponse(
@@ -1769,7 +1991,7 @@ def api_add_admission_note(
     note_type: Optional[str] = Form("general"),
     parent_note_id: Optional[int] = Form(None)
 ):
-    """API endpoint to add a note (for AJAX requests)"""
+    """API endpoint to add a note (for AJAX requests). Note type must match user role."""
     from fastapi.responses import JSONResponse
     from app.models.ipd_models import AdmissionNote
     
@@ -1779,6 +2001,13 @@ def api_add_admission_note(
             return JSONResponse(
                 status_code=404,
                 content={"success": False, "error": "Admission not found"}
+            )
+        role_name = current_user.role.name if current_user.role else None
+        effective_type = note_type or "general"
+        if not _note_type_allowed_for_role(effective_type, role_name):
+            return JSONResponse(
+                status_code=403,
+                content={"success": False, "error": "You can only add notes for your role (nurses add nurse reviews, doctors add doctor reviews)."}
             )
         
         # If replying, verify parent note exists
@@ -1799,7 +2028,7 @@ def api_add_admission_note(
             admission_id=admission_id,
             created_by_id=current_user.id,
             note=note.strip(),
-            note_type=note_type or "general",
+            note_type=effective_type,
             parent_note_id=parent_note_id
         )
         

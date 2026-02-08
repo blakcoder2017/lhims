@@ -1,0 +1,36 @@
+"""add_queue_entry_id_to_opd_visits
+
+Revision ID: add_queue_entry_id_to_opd_visits
+Revises: restructure_appointments
+Create Date: 2026-01-10 00:25:00.000000
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = 'add_queue_entry_id_to_opd_visits'
+down_revision: Union[str, Sequence[str], None] = 'restructure_appointments'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Add queue_entry_id column to opd_visits table."""
+    # Add queue_entry_id column to opd_visits table
+    op.add_column('opd_visits', sa.Column('queue_entry_id', sa.Integer(), nullable=True))
+    
+    # Add foreign key constraint
+    op.create_foreign_key('fk_opd_visits_queue_entry', 'opd_visits', 'opd_queue', ['queue_entry_id'], ['id'])
+
+
+def downgrade() -> None:
+    """Remove queue_entry_id column from opd_visits table."""
+    # Drop foreign key constraint
+    op.drop_constraint('fk_opd_visits_queue_entry', 'opd_visits', type_='foreignkey')
+    
+    # Drop the column
+    op.drop_column('opd_visits', 'queue_entry_id')

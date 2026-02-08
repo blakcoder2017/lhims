@@ -180,7 +180,11 @@
                                             {% if admission.status.value == 'admitted' %}
                                                 <span class="badge badge-success">Admitted</span>
                                             {% elif admission.status.value == 'discharged' %}
+                                                {% if admission.discharge_status and admission.discharge_status.value == 'death' %}
+                                                <span class="badge badge-danger">Death</span>
+                                                {% else %}
                                                 <span class="badge badge-secondary">Discharged</span>
+                                                {% endif %}
                                             {% elif admission.status.value == 'transferred' %}
                                                 <span class="badge badge-info">Transferred</span>
                                             {% else %}

@@ -18,7 +18,7 @@ class TriageVitals(Base):
 
     # Vital Signs Data
     # Temperature measurement
-    temperature = Column(Float, nullable=False)  # in Celsius
+    temperature = Column(Float, nullable=True)  # in Celsius (optional)
     
     # Blood pressure (Systolic/Diastolic)
     systolic_bp = Column(Integer, nullable=True)  # Systolic BP in mmHg

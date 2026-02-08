@@ -118,8 +118,8 @@
                                 </thead>
                                 <tbody>
                                     {% for item in queue_items %}
-                                    {% set appointment = item.appointment %}
-                                    {% set patient = item.appointment.patient if item.appointment else item.encounter.patient %}
+                                    {% set queue_entry = item.queue_entry %}
+                                    {% set patient = queue_entry.patient if queue_entry and queue_entry.patient else (item.encounter.patient if item.encounter and item.encounter.patient else None) %}
                                     {% set triage_level = item.get('triage_level') %}
                                     {% set triage_category = item.get('triage_category') %}
                                     <tr class="{% if item.has_encounter %}table-info{% endif %} {% if item.type == 'encounter_only' %}table-warning{% endif %} {% if triage_level == 'P1' or triage_category == 'Critical' %}table-danger{% elif triage_level == 'P2' or triage_category == 'Urgent' %}table-warning{% endif %}">
@@ -145,17 +145,17 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            {% if appointment %}
-                                            <strong>{{ appointment.queue_number or 'N/A' }}</strong>
+                                            {% if queue_entry %}
+                                            <strong>{{ queue_entry.queue_number or 'N/A' }}</strong>
                                             {% else %}
                                             <span class="badge badge-warning">No Queue #</span>
                                             {% endif %}
                                         </td>
-                                        <td>{{ patient.first_name }} {{ patient.last_name }}</td>
-                                        <td><span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></td>
+                                        <td>{% if patient %}{{ patient.first_name }} {{ patient.last_name }}{% else %}Unknown{% endif %}</td>
+                                        <td><span class="badge badge-primary">{% if patient %}{{ patient.patient_number or 'N/A' }}{% else %}Unknown{% endif %}</span></td>
                                         <td>
-                                            {% if appointment %}
-                                                {{ appointment.department }}
+                                            {% if queue_entry %}
+                                                {{ queue_entry.department }}
                                             {% elif item.encounter %}
                                                 N/A
                                             {% else %}
@@ -163,17 +163,17 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            {% if appointment %}
-                                            <span class="badge badge-{% if appointment.department_type == 'ipd' %}danger{% elif appointment.department_type == 'opd' %}success{% else %}secondary{% endif %}">
-                                                {{ (appointment.department_type or 'opd').upper() }}
+                                            {% if queue_entry %}
+                                            <span class="badge badge-{% if queue_entry.department_type == 'ipd' %}danger{% elif queue_entry.department_type == 'opd' %}success{% else %}secondary{% endif %}">
+                                                {{ (queue_entry.department_type or 'opd').upper() }}
                                             </span>
                                             {% else %}
                                             <span class="badge badge-secondary">N/A</span>
                                             {% endif %}
                                         </td>
                                         <td>
-                                            {% if appointment %}
-                                                {{ appointment.scheduled_date.strftime('%H:%M') }}
+                                            {% if queue_entry %}
+                                                {{ queue_entry.created_at.strftime('%H:%M') }}
                                             {% elif item.encounter %}
                                                 {{ item.encounter.encounter_date.strftime('%H:%M') }}
                                             {% else %}
@@ -195,8 +195,8 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            {% if appointment %}
-                                                {{ appointment.chief_complaint or 'N/A' }}
+                                            {% if queue_entry %}
+                                                {{ queue_entry.chief_complaint or 'N/A' }}
                                             {% elif item.encounter %}
                                                 {{ item.encounter.chief_complaint or 'N/A' }}
                                             {% else %}
@@ -204,19 +204,19 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            {% if appointment %}
-                                            <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
-                                                {{ appointment.priority }}
+                                            {% if queue_entry %}
+                                            <span class="badge badge-{% if queue_entry.priority <= 3 %}danger{% elif queue_entry.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                {{ queue_entry.priority }}
                                             </span>
                                             {% else %}
                                             <span class="badge badge-info">N/A</span>
                                             {% endif %}
                                         </td>
                                         <td>
-                                            {% if appointment %}
-                                                {% if appointment.status.value == 'checked_in' %}
-                                                    <span class="badge badge-primary">Checked In</span>
-                                                {% elif appointment.status.value == 'in_progress' %}
+                                            {% if queue_entry %}
+                                                {% if queue_entry.status.value == 'waiting' %}
+                                                    <span class="badge badge-primary">Waiting</span>
+                                                {% elif queue_entry.status.value == 'in_progress' %}
                                                     <span class="badge badge-warning">In Progress</span>
                                                 {% endif %}
                                             {% elif item.encounter %}
@@ -236,8 +236,8 @@
                                             {% endif %}
                                         </td>
                                         <td>
-                                            <a href="{{ url_for('view_patient_records', patient_id=patient.id) }}" 
-                                               class="btn btn-sm btn-primary" title="Patient File">
+                                            <a href="{{ url_for('view_patient_records', patient_id=patient.id) if patient else '#' }}" 
+                                               class="btn btn-sm btn-primary" title="Patient File" {% if not patient %}onclick="return false;"{% endif %}>
                                                 <i class="fas fa-file-medical"></i> Patient File
                                             </a>
                                             {% if item.has_encounter %}
@@ -246,8 +246,8 @@
                                                 <i class="fas fa-notes-medical"></i> Continue
                                             </a>
                                             {% else %}
-                                            <a href="{{ url_for('new_encounter', patient_id=patient.id) }}{% if appointment %}?appointment_id={{ appointment.id }}{% endif %}" 
-                                               class="btn btn-sm btn-success" title="Start Encounter">
+                                            <a href="{{ url_for('new_encounter', patient_id=patient.id if patient else 0) }}{% if queue_entry %}?queue_entry_id={{ queue_entry.id }}{% endif %}" 
+                                               class="btn btn-sm btn-success" title="Start Encounter" {% if not patient %}onclick="return false;"{% endif %}>
                                                 <i class="fas fa-stethoscope"></i> Start
                                             </a>
                                             {% endif %}
@@ -300,13 +300,13 @@
                                 </thead>
                                 <tbody>
                                     {% for item in queue_previous %}
-                                    {% set appointment = item.appointment %}
+                                    {% set queue_entry = item.queue_entry %}
                                     <tr class="table-warning">
-                                        <td>{{ appointment.queue_number or 'N/A' }}</td>
-                                        <td>{{ appointment.patient.first_name }} {{ appointment.patient.last_name }}</td>
-                                        <td><span class="badge badge-primary">{{ appointment.patient.patient_number or 'N/A' }}</span></td>
-                                        <td>{{ appointment.department }}</td>
-                                        <td>{{ appointment.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>{{ queue_entry.queue_number or 'N/A' }}</td>
+                                        <td>{% if queue_entry.patient %}{{ queue_entry.patient.first_name }} {{ queue_entry.patient.last_name }}{% else %}Unknown{% endif %}</td>
+                                        <td><span class="badge badge-primary">{% if queue_entry.patient %}{{ queue_entry.patient.patient_number }}{% else %}N/A{% endif %}</span></td>
+                                        <td>{{ queue_entry.department }}</td>
+                                        <td>{{ queue_entry.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                         <td>
                                             {% if item.wait_time %}
                                                 {% set hours = (item.wait_time.total_seconds() // 3600) | int %}
@@ -321,25 +321,25 @@
                                                 <span class="badge badge-secondary">N/A</span>
                                             {% endif %}
                                         </td>
-                                        <td>{{ appointment.chief_complaint or 'N/A' }}</td>
+                                        <td>{{ queue_entry.chief_complaint or 'N/A' }}</td>
                                         <td>
-                                            {% if appointment.status.value == 'checked_in' %}
-                                                <span class="badge badge-primary">Checked In</span>
-                                            {% elif appointment.status.value == 'in_progress' %}
+                                            {% if queue_entry.status.value == 'waiting' %}
+                                                <span class="badge badge-primary">Waiting</span>
+                                            {% elif queue_entry.status.value == 'in_progress' %}
                                                 <span class="badge badge-warning">In Progress</span>
                                             {% endif %}
                                         </td>
                                         <td>
-                                            <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
-                                                {{ appointment.priority }}
+                                            <span class="badge badge-{% if queue_entry.priority <= 3 %}danger{% elif queue_entry.priority <= 6 %}warning{% else %}info{% endif %}">
+                                                {{ queue_entry.priority }}
                                             </span>
                                         </td>
                                         <td>
-                                            <a href="{{ url_for('view_patient_records', patient_id=appointment.patient_id) }}" 
+                                            <a href="{{ url_for('view_patient_records', patient_id=queue_entry.patient_id if queue_entry.patient_id else 0) }}" 
                                                class="btn btn-sm btn-primary" title="Patient File">
                                                 <i class="fas fa-file-medical"></i> Patient File
                                             </a>
-                                            <a href="{{ url_for('new_encounter', patient_id=appointment.patient_id) }}?appointment_id={{ appointment.id }}" 
+                                            <a href="{{ url_for('new_encounter', patient_id=queue_entry.patient_id if queue_entry.patient_id else 0) }}?queue_entry_id={{ queue_entry.id }}" 
                                                class="btn btn-sm btn-success" title="Start Encounter">
                                                 <i class="fas fa-stethoscope"></i> Start
                                             </a>

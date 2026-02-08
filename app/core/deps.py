@@ -47,12 +47,18 @@ def role_required(roles: Union[str, List[str]]):
         
     def role_checker(current_user: models.User = Depends(get_current_user)): 
         
+        # Ensure role is loaded - handle potential None
+        if not current_user.role:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User has no role assigned. Please contact administrator."
+            )
+        
         user_role_name = current_user.role.name 
         
         if user_role_name == "Admin": 
             return current_user
 
-      
         if user_role_name not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

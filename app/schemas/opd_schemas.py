@@ -9,6 +9,7 @@ from app.models.opd_models import OPDVisitStatus
 class OPDVisitBase(BaseModel):
     """Base schema for OPD visit data"""
     appointment_id: Optional[int] = None
+    queue_entry_id: Optional[int] = None
     visit_date: Optional[datetime] = None
     visit_type: Optional[str] = Field(None, max_length=50)  # "routine", "emergency", "follow_up", "walk_in"
     chief_complaint: Optional[str] = None

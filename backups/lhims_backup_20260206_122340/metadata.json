@@ -1,0 +1,10 @@
+{
+  "backup_date": "2026-02-06T12:23:40.339942",
+  "backup_type": "full",
+  "includes_data": true,
+  "tables_backed_up": [
+    "patients",
+    "invoices",
+    "payments"
+  ]
+}

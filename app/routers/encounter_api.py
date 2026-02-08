@@ -18,13 +18,14 @@ from app.schemas.encounter_schemas import (
 from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
 from app.models.encounter_models import EncounterStatus, OrderStatus, LabOrder as LabOrderModel, RadiologyOrder as RadiologyOrderModel
 from app.models.billing_models import InvoiceStatus, ChargeType
-from app.models.appointment_models import AppointmentType, AppointmentStatus
+from app.models.scheduled_appointment_models import AppointmentType, AppointmentStatus
 from app.schemas.billing_schemas import ChargeCreate
 
 from app.services import (
     create_charge_for_lab_order,
     create_charge_for_radiology_order,
-    create_charge_for_procedure
+    create_charge_for_procedure,
+    create_charge_for_consultation,
 )
 from app.services.gstg_differential import generate_differential_suggestions
 
@@ -152,6 +153,15 @@ def create_encounter_form(
                 url=f"{triage_url}?error={error_msg}",
                 status_code=status.HTTP_302_FOUND
             )
+        
+        # Ensure consultation charge exists for this encounter (cash pays after doctor + labs)
+        try:
+            create_charge_for_consultation(
+                db, new_encounter.patient_id, current_user.id,
+                encounter_id=new_encounter.id, opd_visit_id=opd_visit_id
+            )
+        except Exception as _:
+            pass  # Charge may already exist; lab orders will attach to same invoice
         
         # Link diseases to encounter
         from app.crud import disease_crud
@@ -420,6 +430,73 @@ def update_encounter_endpoint(
     return encounter
 
 
+@router.post("/{encounter_id}/create-appointment", name="create_appointment_from_encounter", status_code=status.HTTP_302_FOUND)
+def create_appointment_from_encounter(
+    request: Request,
+    encounter_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"])),
+    scheduled_date: str = Form(...),
+    scheduled_time: str = Form(...),
+    department: str = Form(...),
+    appointment_type: str = Form("follow_up"),
+    notes: Optional[str] = Form(None),
+):
+    """
+    Create a follow-up appointment from an encounter (for doctors).
+    This allows doctors to schedule return visits for patients.
+    """
+    from app.models.scheduled_appointment_models import AppointmentType
+    from app.services.sms_onlinegh_service import send_personalized_sms_notification
+    
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # Parse scheduled datetime
+    scheduled_datetime_str = f"{scheduled_date} {scheduled_time}"
+    scheduled_datetime = datetime.strptime(scheduled_datetime_str, "%Y-%m-%d %H:%M")
+    
+    # Create appointment
+    appointment_data = AppointmentCreate(
+        patient_id=encounter.patient_id,
+        department=department,
+        department_type="opd",
+        appointment_type=AppointmentType(appointment_type),
+        scheduled_date=scheduled_datetime,
+        chief_complaint=f"Follow-up appointment",
+        notes=notes or f"Follow-up appointment created by doctor from encounter {encounter_id}",
+        priority=5,
+        assigned_clinician_id=current_user.id,
+        created_by_id=current_user.id
+    )
+    
+    new_appointment = appointment_crud.create_appointment(db, appointment_data)
+    
+    # Send SMS notification to patient
+    try:
+        patient = encounter.patient
+        if patient and patient.phone_number:
+            scheduled_date_str = scheduled_datetime.strftime("%Y-%m-%d at %H:%M")
+            message_template = "Hello {$name}. Your follow-up appointment is scheduled for {$date} at {$department}. Please arrive on time. Thank you!"
+            destinations = [{
+                "number": patient.phone_number,
+                "values": [
+                    f"{patient.first_name} {patient.last_name}",
+                    scheduled_date_str,
+                    department
+                ]
+            }]
+            send_personalized_sms_notification(message_template, destinations)
+    except Exception as sms_error:
+        print(f"Warning: Unable to send appointment SMS: {sms_error}")
+    
+    return RedirectResponse(
+        url=f"/api/v1/encounters/{encounter_id}?appointment_created={new_appointment.id}",
+        status_code=status.HTTP_302_FOUND
+    )
+
+
 @router.delete("/{encounter_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_encounter_endpoint(
     encounter_id: int,
@@ -654,12 +731,24 @@ def create_lab_order_form(
         except Exception as billing_error:
             print(f"Warning: Unable to create lab charge for order {new_order.id}: {billing_error}")
         
-        # Redirect back to encounter page
+        # AJAX (e.g. from IPD admission modal): return JSON so page can reload instead of redirect
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JSONResponse(
+                status_code=201,
+                content={"success": True, "message": "Lab order added.", "order_id": new_order.id}
+            )
         return RedirectResponse(
             url=f"/encounters/{encounter_id}?status=lab_order_added",
             status_code=status.HTTP_302_FOUND
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": str(e)}
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Error creating lab order: {str(e)}"
@@ -780,12 +869,24 @@ def create_radiology_order_form(
         except Exception as billing_error:
             print(f"Warning: Unable to create radiology charge for order {new_order.id}: {billing_error}")
         
-        # Redirect back to encounter page
+        # AJAX (e.g. from IPD admission modal): return JSON so page can reload instead of redirect
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JSONResponse(
+                status_code=201,
+                content={"success": True, "message": "Radiology order added.", "order_id": new_order.id}
+            )
         return RedirectResponse(
             url=f"/encounters/{encounter_id}?status=radiology_order_added",
             status_code=status.HTTP_302_FOUND
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": str(e)}
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Error creating radiology order: {str(e)}"

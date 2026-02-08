@@ -150,7 +150,8 @@ def pay_consultation_page(
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Front Office", "Finance", "Admin"])),
     return_to: Optional[str] = Query(None),
-    new_visit: Optional[str] = Query(None)
+    new_visit: Optional[str] = Query(None),
+    from_lab: Optional[int] = Query(None),
 ):
     """Payment page for consultation fee."""
     from datetime import datetime
@@ -158,6 +159,9 @@ def pay_consultation_page(
     from app.models.billing_models import Charge, Invoice
     from sqlalchemy import func
     from datetime import date
+    
+    # Initialize opd_visit_id (not used for consultation charges from registration)
+    opd_visit_id = None
     
     patient = patient_crud.get_patient(db, patient_id)
     if not patient:
@@ -172,7 +176,41 @@ def pay_consultation_page(
         if new_visit:
             redirect_url += f"?new_visit={new_visit}"
         return RedirectResponse(url=redirect_url, status_code=302)
-    
+
+    # When encounter_id is set (e.g. from lab: pay visit = consultation + lab), use that invoice
+    if encounter_id:
+        invoice = db.query(Invoice).filter(
+            Invoice.patient_id == patient_id,
+            Invoice.encounter_id == encounter_id,
+            Invoice.is_active == True,
+        ).first()
+        if invoice:
+            if invoice.balance and invoice.balance <= Decimal("0"):
+                # Already paid, redirect back
+                if from_lab is not None:
+                    return RedirectResponse(url=f"/lab/orders/{from_lab}?status=payment_success", status_code=302)
+                return RedirectResponse(url=f"/patients/{patient_id}/encounters/new?status=payment_success", status_code=302)
+            # Use first charge for template (consultation or any); amount_due = full invoice balance
+            charge = db.query(Charge).filter(Charge.invoice_id == invoice.id).first()
+            if charge:
+                amount_due = float(invoice.balance)
+                context = {
+                    "request": request,
+                    "title": "Pay Visit (Consultation + Lab)",
+                    "current_user": current_user,
+                    "user_role": current_user.role.name,
+                    "patient": patient,
+                    "charge": charge,
+                    "invoice": invoice,
+                    "service_type": "consultation",
+                    "encounter_id": encounter_id,
+                    "return_to": return_to or "encounters/new",
+                    "new_visit": new_visit,
+                    "amount_due": amount_due,
+                    "from_lab": from_lab,
+                }
+                return templates.TemplateResponse("billing/pay_service.html", context)
+
     # Check if this is a new visit (explicit or detected)
     is_new_visit_flag = new_visit and new_visit.lower() == 'true'
     
@@ -248,9 +286,14 @@ def pay_consultation_page(
                 created_by_id=current_user.id
             )
     
+    # When encounter_id is set, pay full visit invoice (consultation + lab)
+    amount_due = None
+    if encounter_id and invoice and invoice.balance and invoice.balance > Decimal("0"):
+        amount_due = float(invoice.balance)
+
     context = {
         "request": request,
-        "title": "Pay Consultation Fee",
+        "title": "Pay Consultation Fee" if not encounter_id else "Pay Visit (Consultation + Lab)",
         "current_user": current_user,
         "user_role": current_user.role.name,
         "patient": patient,
@@ -259,9 +302,11 @@ def pay_consultation_page(
         "service_type": "consultation",
         "encounter_id": encounter_id,
         "return_to": return_to or "encounters/new",
-        "new_visit": new_visit  # Preserve new_visit parameter
+        "new_visit": new_visit,
+        "amount_due": amount_due,
+        "from_lab": from_lab,
     }
-    
+
     return templates.TemplateResponse("billing/pay_service.html", context)
 
 
@@ -275,30 +320,30 @@ def process_consultation_payment(
     invoice_id: int = Form(...),
     amount: str = Form(...),
     encounter_id: Optional[int] = Form(None),
-    new_visit: Optional[str] = Form(None)
+    new_visit: Optional[str] = Form(None),
+    from_lab: Optional[int] = Form(None),
 ):
-    """Process payment for consultation fee."""
+    """Process payment for consultation fee (or full visit = consultation + lab)."""
     from app.models.billing_models import Invoice
     from app.crud import opd_crud
-    
+
     amount_decimal = Decimal(amount)
-    
+
     # Validate invoice belongs to patient
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.patient_id != patient_id:
         raise HTTPException(status_code=400, detail="Invoice does not belong to this patient")
-    
+
     # If patient has an active OPD visit, ensure invoice is linked to it
     active_opd_visit = opd_crud.get_active_opd_visit_by_patient(db, patient_id)
     if active_opd_visit:
         if invoice.opd_visit_id != active_opd_visit.id:
-            # Invoice is not linked to the active OPD visit - link it now
             invoice.opd_visit_id = active_opd_visit.id
             db.commit()
             db.refresh(invoice)
-    
+
     # Create payment
     payment_data = PaymentCreate(
         invoice_id=invoice_id,
@@ -329,19 +374,16 @@ def process_consultation_payment(
         print(f"Error creating receipt for payment {payment.id}: {e}")
         receipt_number = payment.receipt_number or "N/A"
     
-    # Determine redirect based on return_to parameter
-    # If coming from registration, go to triage; otherwise go to encounter creation
-    # Preserve new_visit parameter if it exists
-    new_visit_param = ""
-    if new_visit:
-        new_visit_param = f"&new_visit={new_visit}"
-    
-    redirect_url = f"/patients/{patient_id}/encounters/new?status=payment_success&receipt={receipt_number}{new_visit_param}"
-    if return_to:
+    # Redirect: from_lab = back to lab order; else return_to / encounter_id / default
+    new_visit_param = f"&new_visit={new_visit}" if new_visit else ""
+    if from_lab is not None:
+        redirect_url = f"/lab/orders/{from_lab}?status=payment_success&receipt={receipt_number}"
+    elif return_to:
         redirect_url = f"/patients/{patient_id}/{return_to}?status=payment_success&receipt={receipt_number}{new_visit_param}"
-    if encounter_id:
+    elif encounter_id:
         redirect_url = f"/encounters/{encounter_id}?status=payment_success&receipt={receipt_number}{new_visit_param}"
-    
+    else:
+        redirect_url = f"/patients/{patient_id}/encounters/new?status=payment_success&receipt={receipt_number}{new_visit_param}"
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
