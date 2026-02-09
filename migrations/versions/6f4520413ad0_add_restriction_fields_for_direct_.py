@@ -1,19 +1,21 @@
 """add restriction fields for direct requests
 
 Revision ID: 6f4520413ad0
-Revises: 
+Revises: 4a83272e2da6
 Create Date: 2025-01-XX XX:XX:XX.XXXXXX
 
 """
+from typing import Sequence, Union
+
 from alembic import op
 import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '6f4520413ad0'
-down_revision = '4a83272e2da6'  # Add discharge status fields
-branch_labels = None
-depends_on = None
+revision: str = '6f4520413ad0'
+down_revision: Union[str, Sequence[str], None] = '4a83272e2da6'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:

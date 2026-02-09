@@ -5,15 +5,17 @@ Revises: 31350ee33b80
 Create Date: 2025-01-XX
 
 """
+from typing import Sequence, Union
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = 'be121fa1ffe8'
-down_revision = '31350ee33b80'
-branch_labels = None
-depends_on = None
+revision: str = 'be121fa1ffe8'
+down_revision: Union[str, Sequence[str], None] = '31350ee33b80'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:

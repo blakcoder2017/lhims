@@ -1,0 +1,23 @@
+id,first_name,last_name,gender,address,date_of_birth,national_id,phone_number,created_at,updated_at,is_active,payment_mechanism,nhis_number,insurance_provider,insurance_policy_number,patient_number,languages_spoken
+20,Abubakari,Sherifdeen,Male,61 Block A Napogbakole,1988-10-10,,0552537904,2025-11-17 22:52:04.292818,,True,CASH,,,,DGMS000001,
+21,Audu,Liman,Male,OFF 5TH AVENUE,2009-02-02,,08086661659,2025-11-18 00:48:10.063755,,True,PRIVATE_INSURANCE,,Glico Health Insurance,97e8erhjdfd,DGMS000002,
+22,Joshua,Adam,Male,,1994-09-12,,0203548414,2025-11-18 14:09:55.885744,,True,PRIVATE_INSURANCE,,Glico Health Insurance,GLI0039877585,DGMS000003,"English, Waali, Dagbani"
+23,Abubakari ,Musherifa,Female,"Tamale, Ghana",2003-12-12,,0552537904,2025-11-18 19:00:41.351684,,True,CASH,,,,DGMS000004,
+24,Abubakari,Sherifdeen,Male,Chief Palace,1988-10-10,,,2025-11-18 21:21:09.597703,,True,CASH,,,,DGMS000005,
+25,Osman,Abu,Male,,1988-10-10,,,2025-11-18 21:36:03.364772,,True,CASH,,,,DGMS000006,
+26,JOHN,DOE,Male,Kanvili-Kpawmo,1998-01-09,,0554348232,2025-11-19 10:49:33.150103,,True,CASH,,,,DGMS000007,"ENGLISH, FRENCH, TWI, EWE"
+27,JOHN JOhn,Sam DOE,Male,Kanvili-Kpawmo,1998-01-09,,0554348232,2025-11-19 10:50:09.141915,2025-11-20 14:05:07.228922,True,CASH,,,,DGMS000008,"ENGLISH, FRENCH, TWI, EWE"
+28,fsdfdsf,fdfd,Male,,1988-10-10,,,2026-01-07 13:12:30.975184,,True,CASH,,,,DGMS000009,
+29,sfdfdf,dfdfdfds,Male,,1089-12-12,,,2026-01-07 13:25:09.299036,,True,CASH,,,,DGMS000010,
+30,Abubakari,Sherifdeen,Male,61 Block A Napogbakole,1988-10-10,,0552537904,2026-01-29 22:34:53.518935,,True,CASH,,,,DGMS000011,
+31,Imtiaz,Suma,Male,61 Block A Napogbakole,2003-11-23,,0552537904,2026-01-29 22:46:12.958352,,True,CASH,,,,DGMS000012,
+32,test ,patient,Male,,1988-10-10,,0594836357,2026-01-29 22:48:07.222752,,True,CASH,,,,DGMS000013,
+33,lsdjlfj,lsfjlsdjfl,Male,,1988-10-10,,0552537904,2026-01-29 22:53:50.788539,,True,,,,,DGMS000014,
+34,Abubakari,Sherifdeen,Male,61 Block A Napogbakole,1988-10-10,,0552537904,2026-01-29 23:08:12.040027,,True,CASH,,,,DGMS000015,
+35,Mawuli,Axorlu,Male,,1988-10-10,,0554348232,2026-01-29 23:11:13.819947,,True,CASH,,,,DGMS000016,
+36,Emergency,Patient,Female,,1988-10-10,,,2026-01-30 12:51:09.436826,,True,CASH,,,,DGMS000017,
+37,Abubakari,Sherifdeen,Male,Kanvili-Kpawmo,1988-10-10,,0246891901,2026-01-30 13:24:17.671689,,True,CASH,,,,DGMS000018,
+38,Ama,Mensah,Female,"Accra, Ghana",1990-05-15,,0201234567,2026-02-08 10:21:36.315890,,True,NHIS,NHIS123456789,,,,
+39,Kofi,Asante,Male,"Kumasi, Ghana",1985-08-22,,0234567890,2026-02-08 10:21:36.315890,,True,CASH,,,,,
+40,Adwoa,Osei,Female,"Tema, Ghana",1995-03-10,,0245678901,2026-02-08 10:21:36.315890,,True,PRIVATE_INSURANCE,,Ghana Insurance Company,POL987654321,,
+41,John,Doe,Male,"Takoradi, Ghana",1978-12-05,,0278901234,2026-02-08 10:21:36.315890,,True,CASH,,,,,

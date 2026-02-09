@@ -1,10 +1,12 @@
 """restructure appointments: create queue and scheduled appointments tables
 
 Revision ID: restructure_appointments
-Revises: latest
+Revises: 31350ee33b80
 Create Date: 2026-01-07 13:45:00.000000
 
 """
+from typing import Sequence, Union
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
