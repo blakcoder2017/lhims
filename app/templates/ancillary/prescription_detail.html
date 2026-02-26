@@ -105,12 +105,18 @@
                             <div class="col-md-3"><strong>Patient:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
                             <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
                             <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
-                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }} (Age: {{ patient.date_of_birth | age }} years)</div>
                         </div>
                         <div class="row mt-2">
                             <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
                             {% if patient.phone_number %}
                             <div class="col-md-3"><strong>Phone:</strong> {{ patient.phone_number }}</div>
+                            {% endif %}
+                            <div class="col-md-3"><strong>Payment:</strong> 
+                                {% if patient.payment_mechanism %}{{ patient.payment_mechanism.value }}{% else %}CASH{% endif %}
+                            </div>
+                            {% if is_admitted %}
+                            <div class="col-md-3"><span class="badge badge-info">IPD Patient (Payment at Discharge)</span></div>
                             {% endif %}
                         </div>
                     </div>
@@ -297,7 +303,22 @@
                         <h3 class="card-title"><i class="fas fa-check-circle mr-1"></i> Dispense Medication</h3>
                     </div>
                     <div class="card-body">
-                        {% if medication and stock_check and stock_check.is_available %}
+                        {% if payment_required and not payment_paid %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-money-bill-wave mr-2"></i>
+                            <strong>Payment Required!</strong><br>
+                            Patient must pay at the Billing department before medication can be dispensed.
+                        </div>
+                        {% if unpaid_invoice %}
+                        <p><strong>Invoice #:</strong> {{ unpaid_invoice.invoice_number }}</p>
+                        <p><strong>Balance:</strong> GHS {{ unpaid_invoice.balance }}</p>
+                        {% endif %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            <strong>Please direct patient to Billing to make payment.</strong><br>
+                            <small>Pharmacy cannot process payments. Payment must be made at Billing counter.</small>
+                        </div>
+                        {% elif medication and stock_check and stock_check.is_available %}
                         <p>Select the stock batch to dispense from:</p>
                         <form method="POST" action="{{ url_for('dispense_prescription', prescription_id=prescription.id) }}">
                             {% if stock_items %}

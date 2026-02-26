@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, status, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.core.deps import role_required, get_current_user
@@ -21,7 +21,6 @@ from decimal import Decimal
 from datetime import datetime
 from app.services import create_charge_for_consultation
 
-templates = Jinja2Templates(directory="app/templates")
 
 router = APIRouter(
     prefix="/api/v1/triage",
@@ -34,9 +33,12 @@ def record_vitals_form(
     patient_id: int,
     db: Session = Depends(get_db),
     # Allow Front Office and Nurses to record vitals
-    current_user = Depends(role_required(["Front Office", "Nurse", "Admin"])),
+    current_user = Depends(role_required(["Front Office", "Nurse", "Doctor", "Clinician", "Admin"])),
     create_encounter: Optional[str] = Form(None),  # If "yes", create encounter after vitals
     from_admission: Optional[str] = Form(None),  # If set, redirect back to IPD admission page after recording
+    queue_entry_id: Optional[str] = Form(None),  # OPDQueue id when from triage queue - used for auto check-in
+    department: Optional[str] = Form("General Medicine"),  # For auto check-in when creating new queue
+    chief_complaint: Optional[str] = Form(None),  # For auto check-in
     
     # Vital signs (temperature optional)
     temperature: Optional[str] = Form(None),
@@ -58,6 +60,9 @@ def record_vitals_form(
     triage_level: Optional[str] = Form(None),  # P1, P2, P3 or Red, Yellow, Green
     triage_category: Optional[str] = Form(None),  # Critical, Urgent, Routine
     auto_calculate_triage: Optional[str] = Form(None),  # "yes" to auto-calculate from vitals
+    
+    # Nurse Notes
+    notes: Optional[str] = Form(None),  # Nurse observations
 ):
     """
     Handles HTML form submission for recording comprehensive patient vital signs (Triage) and saves to DB.
@@ -257,6 +262,7 @@ def record_vitals_form(
         pain_scale=pain_scale_int,
         triage_level=final_triage_level,
         triage_category=final_triage_category,
+        notes=notes,
     )
     
     # 2. Save to database (BMI will be calculated automatically in CRUD)
@@ -295,12 +301,69 @@ def record_vitals_form(
             status_code=status.HTTP_302_FOUND
         )
     
-    # Default redirect back to triage page to show check-in button
-    # Check if this was a new visit - preserve the new_visit parameter if it exists
-    new_visit_param = ""
-    if request.query_params.get('new_visit'):
-        new_visit_param = f"&new_visit={request.query_params.get('new_visit')}"
+    # 4. For NEW triage: add patient to doctor's queue. For UPDATE: only vitals were saved, no queue change.
+    from app.models.appointment_models import OPDQueue, QueueStatus, VisitType
+    from app.schemas.appointment_schemas import QueueCreate
+    from app.crud import appointment_crud
+    
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Check if patient is already in doctor's queue (has OPDQueue with checked_in_at today)
+    already_in_doctor_queue = db.query(OPDQueue).filter(
+        OPDQueue.patient_id == patient_id,
+        OPDQueue.is_active == True,
+        OPDQueue.created_at >= today_start,
+        OPDQueue.checked_in_at.isnot(None),
+        OPDQueue.status.in_([QueueStatus.WAITING.value, QueueStatus.IN_PROGRESS.value])
+    ).first()
+    
+    if not already_in_doctor_queue:
+        # New triage: add to doctor's queue after saving vitals
+        queue_entry = None
+        if queue_entry_id and queue_entry_id.strip():
+            try:
+                qid = int(queue_entry_id.strip())
+                queue_entry = appointment_crud.get_queue_entry(db, qid)
+                if queue_entry and queue_entry.patient_id != patient_id:
+                    queue_entry = None
+            except (ValueError, TypeError):
+                pass
+        
+        # If no queue_entry_id provided, try to find existing OPDQueue for patient today (from triage queue)
+        if not queue_entry:
+            queue_entry = db.query(OPDQueue).filter(
+                OPDQueue.patient_id == patient_id,
+                OPDQueue.is_active == True,
+                OPDQueue.created_at >= today_start,
+                OPDQueue.checked_in_at.is_(None),
+                OPDQueue.status.in_([QueueStatus.WAITING.value, QueueStatus.IN_PROGRESS.value])
+            ).order_by(OPDQueue.created_at.desc()).first()
+        
+        if queue_entry:
+            # Update existing OPDQueue: set checked_in_at so patient appears in doctor queue
+            queue_entry.checked_in_at = datetime.now()
+            queue_entry.notes = (queue_entry.notes or "") + " [Checked in after vitals]"
+            db.commit()
+        else:
+            # No queue entry: create new one (patient came from somewhere without queue)
+            dept = (department or "General Medicine").strip()
+            queue_data = QueueCreate(
+                patient_id=patient_id,
+                department=dept,
+                department_type="opd",
+                visit_type=VisitType.WALK_IN,
+                priority=5,
+                chief_complaint=chief_complaint,
+                notes="Check-in after vitals",
+                assigned_clinician_id=None,
+                created_by_id=current_user.id
+            )
+            new_entry = appointment_crud.create_queue_entry(db, queue_data)
+            new_entry.checked_in_at = datetime.now()
+            db.commit()
+    
+    # Redirect to triage queue so nurse can continue with next patient
     return RedirectResponse(
-        url=f"/patients/{patient_id}/triage?status=vitals_saved{new_visit_param}", 
+        url="/nurse/triage-queue?status=vitals_saved",
         status_code=status.HTTP_302_FOUND
     )

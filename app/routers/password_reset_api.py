@@ -3,7 +3,7 @@ Password Reset API Routes
 Handles forgot password and password reset functionality
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -22,7 +22,6 @@ from app.services.email_service import send_password_reset_email
 from app.services.sms_service import send_sms_otp
 
 router = APIRouter(tags=["Password Reset"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/forgot-password", name="forgot_password_page")

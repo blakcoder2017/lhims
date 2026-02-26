@@ -34,7 +34,7 @@
                             <div class="icon">
                                 <i class="fas fa-heartbeat"></i>
                             </div>
-                            <a href="{{ url_for('nurse_triage_queue') }}" class="small-box-footer">
+                            <a href="{{ url_for('triage_queue') }}" class="small-box-footer">
                                 View Vitals Queue <i class="fas fa-arrow-circle-right"></i>
                             </a>
                         </div>
@@ -50,7 +50,7 @@
                             <div class="icon">
                                 <i class="fas fa-check-circle"></i>
                             </div>
-                            <a href="{{ url_for('nurse_triage_queue') }}?status_filter=completed" class="small-box-footer">
+                            <a href="{{ url_for('triage_queue') }}?status_filter=completed" class="small-box-footer">
                                 View Completed <i class="fas fa-arrow-circle-right"></i>
                             </a>
                         </div>
@@ -82,7 +82,7 @@
                             <div class="icon">
                                 <i class="fas fa-tasks"></i>
                             </div>
-                            <a href="{{ url_for('nurse_triage_queue') }}" class="small-box-footer">
+                            <a href="{{ url_for('triage_queue') }}" class="small-box-footer">
                                 Start Vitals <i class="fas fa-arrow-circle-right"></i>
                             </a>
                         </div>
@@ -96,7 +96,7 @@
                             <div class="card-header">
                                 <h3 class="card-title"><i class="fas fa-list mr-1"></i> Vitals Queue - Patients Awaiting Vital Signs</h3>
                                 <div class="card-tools">
-                                    <a href="{{ url_for('nurse_triage_queue') }}" class="btn btn-sm btn-primary">
+                                    <a href="{{ url_for('triage_queue') }}" class="btn btn-sm btn-primary">
                                         <i class="fas fa-list"></i> View Full Queue
                                     </a>
                                 </div>
@@ -131,7 +131,7 @@
                                                         {{ (appointment.department_type or 'opd').upper() }}
                                                     </span>
                                                 </td>
-                                                <td>{{ appointment.scheduled_date.strftime('%H:%M') }}</td>
+                                                <td>{{ appointment.created_at.strftime('%H:%M') }}</td>
                                                 <td>{{ appointment.chief_complaint or 'N/A' }}</td>
                                                 <td>
                                                     <span class="badge badge-{% if appointment.priority <= 3 %}danger{% elif appointment.priority <= 6 %}warning{% else %}info{% endif %}">
@@ -139,10 +139,12 @@
                                                     </span>
                                                 </td>
                                                 <td>
-                                                    {% if appointment.status.value == 'scheduled' %}
-                                                        <span class="badge badge-secondary">Scheduled</span>
-                                                    {% elif appointment.status.value == 'checked_in' %}
-                                                        <span class="badge badge-primary">Checked In</span>
+                                                    {% if appointment.status.value == 'waiting' %}
+                                                        <span class="badge badge-warning">Waiting</span>
+                                                    {% elif appointment.status.value == 'in_progress' %}
+                                                        <span class="badge badge-primary">In Progress</span>
+                                                    {% elif appointment.status.value == 'completed' %}
+                                                        <span class="badge badge-success">Completed</span>
                                                     {% endif %}
                                                 </td>
                                                 <td>
@@ -158,7 +160,7 @@
                                 </div>
                                 {% if triage_queue|length > 10 %}
                                 <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i> Showing first 10 patients. <a href="{{ url_for('nurse_triage_queue') }}">View all {{ triage_queue_count }} patients</a>.
+                                    <i class="fas fa-info-circle"></i> Showing first 10 patients. <a href="{{ url_for('triage_queue') }}">View all {{ triage_queue_count }} patients</a>.
                                 </div>
                                 {% endif %}
                                 {% else %}

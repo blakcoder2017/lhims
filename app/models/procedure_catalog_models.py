@@ -25,6 +25,12 @@ class ProcedureCatalog(Base):
     procedure_category = Column(String(100), nullable=True)  # Category (e.g., Surgery, Diagnostic, Therapeutic)
     procedure_type = Column(String(100), nullable=True)  # Type (e.g., Surgical, Non-Surgical, Diagnostic, Therapeutic, Minor, Major)
     
+    # Charge Type Association (replaces department for billing)
+    charge_type = Column(String(50), nullable=True, index=True)  # Maps to ChargeType: consultation, lab_test, radiology, pharmacy, procedure, admission, antenatal, other
+    
+    # Department Association (kept for reference but charge_type is primary)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # Department this procedure belongs to
+    
     # Procedure Details
     description = Column(Text, nullable=True)  # Procedure description
     indication = Column(Text, nullable=True)  # Common indications
@@ -71,6 +77,7 @@ class ProcedureCatalog(Base):
     # Relationships
     created_by = relationship("User", foreign_keys=[created_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
+    department = relationship("Department", foreign_keys=[department_id])
     
     def __repr__(self):
         return f"<ProcedureCatalog(id={self.id}, procedure_name='{self.procedure_name}')>"

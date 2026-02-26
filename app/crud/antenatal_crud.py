@@ -1,4 +1,5 @@
 """Antenatal visit CRUD operations."""
+import logging
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc
 from typing import Optional, List, Tuple
@@ -6,13 +7,27 @@ from datetime import date, datetime
 
 from app.models.antenatal_models import AntenatalVisit
 
+logger = logging.getLogger(__name__)
+
 
 def create_antenatal_visit(db: Session, **kwargs) -> AntenatalVisit:
     """Create a new antenatal visit."""
+    print(f"[ANTENATAL_CRUD] Creating visit - patient_id={kwargs.get('patient_id')}, visit_date={kwargs.get('visit_date')}")
+    
+    # Validate required fields before creating
+    patient_id = kwargs.get('patient_id')
+    if patient_id is None or (isinstance(patient_id, str) and patient_id.strip() == ''):
+        raise ValueError("patient_id is required and cannot be empty")
+    
+    visit_date = kwargs.get('visit_date')
+    if visit_date is None:
+        raise ValueError("visit_date is required")
+    
     visit = AntenatalVisit(**kwargs)
     db.add(visit)
     db.commit()
     db.refresh(visit)
+    print(f"[ANTENATAL_CRUD] Created visit with ID: {visit.id}")
     return visit
 
 

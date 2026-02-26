@@ -5,7 +5,7 @@ Routes for procedure management including CRUD operations.
 """
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime, date
@@ -18,7 +18,19 @@ from app.models.procedure_models import ProcedureType, ProcedureStatus
 from app.services import create_charge_for_procedure
 
 router = APIRouter(prefix="/procedures", tags=["Procedures"])
-templates = Jinja2Templates(directory="app/templates")
+# Register the age filter
+from datetime import date
+def calculate_age(dob):
+    if not dob:
+        return None
+    if isinstance(dob, str):
+        dob = date.fromisoformat(dob)
+    today = date.today()
+    age = today.year - dob.year
+    if (today.month, today.day) < (dob.month, dob.day):
+        age -= 1
+    return age
+templates.env.filters["age"] = calculate_age
 
 
 @router.get("/dashboard", name="procedure_dashboard")
@@ -257,8 +269,10 @@ def create_procedure(
                 status_code=302
             )
     except Exception as e:
+        from starlette.datastructures import URL
+        url = URL(str(request.url_for("procedure_create_form"))).include_query_params(error=str(e))
         return RedirectResponse(
-            url=request.url_for("procedure_create_form") + f"?error={str(e)}",
+            url=str(url),
             status_code=302
         )
 
@@ -275,12 +289,37 @@ def procedure_detail(
     if not procedure:
         raise HTTPException(status_code=404, detail="Procedure not found")
     
+    # Check if cash patient has unpaid procedure bills - show warning
+    payment_warning = None
+    if procedure.status != ProcedureStatus.COMPLETED:
+        from app.utils.payment_verification import (
+            check_payment_required_and_paid,
+            is_cash_patient
+        )
+        from app.models.billing_models import ChargeType
+        
+        patient_id = procedure.patient_id
+        if patient_id and is_cash_patient(db, patient_id):
+            payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+                db, patient_id, ChargeType.PROCEDURE,
+                encounter_id=procedure.encounter_id,
+                procedure_id=procedure_id
+            )
+            
+            if payment_required and not payment_paid:
+                payment_warning = {
+                    "invoice_id": invoice.id if invoice else None,
+                    "balance": invoice.balance if invoice else None,
+                    "message": "Payment required before completing this procedure"
+                }
+    
     context = {
         "request": request,
         "title": f"Procedure: {procedure.procedure_number}",
         "current_user": current_user,
         "user_role": current_user.role.name,
-        "procedure": procedure
+        "procedure": procedure,
+        "payment_warning": payment_warning
     }
     return templates.TemplateResponse("procedures/procedure_detail.html", context)
 
@@ -296,6 +335,36 @@ def procedure_edit_form(
     procedure = procedure_crud.get_procedure(db, procedure_id)
     if not procedure:
         raise HTTPException(status_code=404, detail="Procedure not found")
+    
+    # Block access if cash patient has unpaid procedure bills
+    from app.utils.payment_verification import (
+        check_payment_required_and_paid,
+        is_cash_patient
+    )
+    from app.models.billing_models import ChargeType
+    
+    patient_id = procedure.patient_id
+    if patient_id and is_cash_patient(db, patient_id):
+        payment_required, payment_paid, charge, invoice = check_payment_required_and_paid(
+            db, patient_id, ChargeType.PROCEDURE,
+            encounter_id=procedure.encounter_id,
+            procedure_id=procedure_id
+        )
+        
+        if payment_required and not payment_paid:
+            # Redirect back to detail page with payment required error
+            from starlette.datastructures import URL
+            invoice_id = invoice.id if invoice else None
+            invoice_balance = invoice.balance if invoice else None
+            url = URL(str(request.url_for("procedure_detail", procedure_id=procedure_id))).include_query_params(
+                error="payment_required",
+                invoice_id=str(invoice_id) if invoice_id else "",
+                balance=str(invoice_balance) if invoice_balance else ""
+            )
+            return RedirectResponse(
+                url=str(url),
+                status_code=302
+            )
     
     # Get active procedure catalog items for dropdown
     from app.crud import procedure_catalog_crud
@@ -356,10 +425,16 @@ def update_procedure(
                     
                     if payment_required and not payment_paid:
                         # Block completion - redirect back with payment required error
+                        from starlette.datastructures import URL
                         invoice_id = invoice.id if invoice else None
                         invoice_balance = invoice.balance if invoice else None
+                        url = URL(str(request.url_for("procedure_detail", procedure_id=procedure_id))).include_query_params(
+                            error="payment_required",
+                            invoice_id=str(invoice_id) if invoice_id else "",
+                            balance=str(invoice_balance) if invoice_balance else ""
+                        )
                         return RedirectResponse(
-                            url=request.url_for("procedure_detail", procedure_id=procedure_id) + f"?error=payment_required&invoice_id={invoice_id}&balance={invoice_balance}",
+                            url=str(url),
                             status_code=302
                         )
         
@@ -399,8 +474,10 @@ def update_procedure(
             status_code=302
         )
     except Exception as e:
+        from starlette.datastructures import URL
+        url = URL(str(request.url_for("procedure_edit_form", procedure_id=procedure_id))).include_query_params(error=str(e))
         return RedirectResponse(
-            url=request.url_for("procedure_edit_form", procedure_id=procedure_id) + f"?error={str(e)}",
+            url=str(url),
             status_code=302
         )
 

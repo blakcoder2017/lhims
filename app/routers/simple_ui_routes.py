@@ -7,6 +7,7 @@ to improve user experience and make the application more intuitive.
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
+from app.core.templates import templates
 
 router = APIRouter()
 

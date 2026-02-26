@@ -10,7 +10,7 @@ anyio==4.11.0
 arabic-reshaper==3.0.0
 asn1crypto==1.5.1
 attrs==25.4.0
-bcrypt==4.3.0
+bcrypt>=4.0.1,<4.1  # passlib compatibility: bcrypt 4.1+ removed __about__
 billiard==4.2.2
 cachetools==6.2.2
 celery==5.3.4
@@ -39,6 +39,7 @@ google-api-core==2.28.1
 google-api-python-client==2.187.0
 google-auth==2.43.0
 google-auth-httplib2==0.2.1
+google-auth-oauthlib==1.2.1
 google-generativeai==0.8.5
 googleapis-common-protos==1.72.0
 greenlet==3.2.4
@@ -130,3 +131,4 @@ yarl==1.22.0
 # Additional dependencies for new features
 beautifulsoup4==4.12.3
 gunicorn==23.0.0
+pytest>=7.0.0

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Query, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from datetime import datetime
@@ -18,7 +18,6 @@ router = APIRouter(
     tags=["Appointments"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.post("/check-in/{patient_id}", name="check_in_patient")
@@ -126,7 +125,7 @@ def check_in_patient(
         
         appointment = appointment_crud.create_appointment(db, appointment_data)
     
-    # Check in the patient
+    # Check in the patient (ScheduledAppointment)
     appointment_update = AppointmentUpdate(
         status=AppointmentStatus.CHECKED_IN,
         checked_in_at=datetime.now()
@@ -136,6 +135,37 @@ def check_in_patient(
     
     if not updated_appointment:
         raise HTTPException(status_code=500, detail="Failed to check in patient")
+    
+    # Ensure patient appears in doctor queue: create OPDQueue entry if none exists today
+    from app.models.appointment_models import OPDQueue, QueueStatus
+    from app.schemas.appointment_schemas import QueueCreate
+    
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    existing_queue = db.query(OPDQueue).filter(
+        OPDQueue.patient_id == patient_id,
+        OPDQueue.is_active == True,
+        OPDQueue.created_at >= today_start,
+        OPDQueue.status.in_([QueueStatus.WAITING, QueueStatus.IN_PROGRESS])
+    ).first()
+    
+    if not existing_queue:
+        queue_data = QueueCreate(
+            patient_id=patient_id,
+            department=department,
+            department_type="opd",
+            visit_type=VisitType.WALK_IN,
+            priority=5,
+            chief_complaint=chief_complaint,
+            notes="Check-in after vitals",
+            assigned_clinician_id=None,
+            created_by_id=current_user.id
+        )
+        appointment_crud.create_queue_entry(db, queue_data)
+    else:
+        # Mark as checked in (vitals done) so patient appears in doctor queue
+        existing_queue.checked_in_at = datetime.now()
+        existing_queue.notes = (existing_queue.notes or "") + " [Checked in after vitals]"
+        db.commit()
     
     # Redirect back to triage page with success message
     return RedirectResponse(
@@ -211,8 +241,6 @@ def create_appointment_form(
     Workflow Step 2: Appointment/Queue
     Supports OPD and IPD appointments.
     """
-    import logging
-    logging.info(f"DEBUG: Creating appointment with data: patient_id={patient_id}, patient_name={patient_name}, department={department}, appointment_type={appointment_type}, scheduled_date={scheduled_date}, scheduled_time={scheduled_time}, assigned_doctor_id={assigned_doctor_id}")
     try:
         # Parse patient_id
         patient_id_int = None
@@ -234,9 +262,7 @@ def create_appointment_form(
         
         # Parse scheduled datetime
         scheduled_datetime_str = f"{scheduled_date} {scheduled_time}"
-        logging.info(f"DEBUG: Parsing datetime: {scheduled_datetime_str}")
         scheduled_datetime = datetime.strptime(scheduled_datetime_str, "%Y-%m-%d %H:%M")
-        logging.info(f"DEBUG: Parsed datetime: {scheduled_datetime}")
 
         # Validate required fields
         if not department or not department.strip():
@@ -246,7 +272,6 @@ def create_appointment_form(
         if not appointment_type or not appointment_type.strip():
             raise ValueError("Appointment type is required")
         appointment_type_enum = AppointmentType(appointment_type)
-        logging.info(f"DEBUG: Appointment type enum: {appointment_type_enum}")
 
         # Validate department_type
         if department_type not in ["opd", "ipd", "both"]:
@@ -292,13 +317,10 @@ def create_appointment_form(
             "notes": notes if notes else None,
             "priority": priority
         }
-        logging.info(f"DEBUG: Appointment data: {appointment_data}")
-
+        
         # Create scheduled appointment
         from app.crud import scheduled_appointment_crud
-        logging.info("DEBUG: Calling create_scheduled_appointment")
         new_appointment = scheduled_appointment_crud.create_scheduled_appointment(db, appointment_data, current_user.id)
-        logging.info(f"DEBUG: Created appointment: {new_appointment}")
         
         # Send SMS notification (Appointment approved) - only if valid phone
         try:
@@ -341,13 +363,11 @@ def create_appointment_form(
         
     except ValueError as e:
         # Handle validation errors
-        logging.error(f"DEBUG: ValueError in appointment creation: {str(e)}")
         error_url = "/appointments/create?error=appointment_validation"
         if patient_id_int:
             error_url += f"&patient_id={patient_id_int}"
         return RedirectResponse(url=error_url, status_code=status.HTTP_302_FOUND)
     except Exception as e:
-        logging.error(f"DEBUG: Exception in appointment creation: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create appointment: {str(e)}"
@@ -472,18 +492,28 @@ def view_queue_page(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Displays the OPD queue for today and unfulfilled queues from previous days.
-    Workflow Step 2: Queue Management
+    Displays the OPD queue for today, unfulfilled queues from previous days,
+    and scheduled/follow-up appointments.
+    
+    Queue Categories:
+    - Today's Queue: Walk-ins, emergencies, and follow-ups for today
+    - Scheduled Bookings: Future appointments created in advance for patients
+    - Follow-up Appointments: Appointments created after consultations for review
     """
+    # DEBUG: Log when this route is accessed
+    print(f"[DEBUG] view_queue_page accessed - path: {request.url.path}, query: {request.url.query}")
+    
     from app.models.appointment_models import OPDQueue, QueueStatus
     from app.models.triage_models import TriageVitals
     from app.services.triage_level_calculator import get_triage_level_priority
+    from app.models.scheduled_appointment_models import ScheduledAppointment, AppointmentType, AppointmentStatus
     from datetime import date, timedelta
     
-    # Get today's queue
+    # Get today's queue (exclude completed, cancelled, and no_show)
     query = db.query(OPDQueue).filter(
         OPDQueue.is_active == True,
-        func.date(OPDQueue.created_at) == date.today()
+        func.date(OPDQueue.created_at) == date.today(),
+        OPDQueue.status.in_([QueueStatus.WAITING, QueueStatus.IN_PROGRESS])  # Only active statuses
     )
     
     if department:
@@ -506,8 +536,26 @@ def view_queue_page(
         OPDQueue.created_at.asc()
     ).all()
     
-    # Get unfulfilled queues from previous days (last 7 days)
-    previous_date = date.today() - timedelta(days=7)
+    # Get unfulfilled queues from previous days (last 48 hours only, then mark as no_show)
+    from datetime import datetime, timedelta
+    two_days_ago = datetime.now() - timedelta(hours=48)
+    previous_date = two_days_ago.date()
+    
+    # Auto-mark queue entries older than 48 hours as no_show
+    old_entries = db.query(OPDQueue).filter(
+        OPDQueue.is_active == True,
+        OPDQueue.status.in_([QueueStatus.WAITING, QueueStatus.IN_PROGRESS]),
+        OPDQueue.created_at < two_days_ago
+    ).all()
+    
+    for entry in old_entries:
+        entry.status = QueueStatus.NO_SHOW
+        entry.notes = f"Auto-marked as no-show: No activity for 48 hours\n\n{entry.notes or ''}"
+    
+    if old_entries:
+        db.commit()
+    
+    # Now query only entries from last 48 hours
     query_previous = db.query(OPDQueue).filter(
         OPDQueue.is_active == True,
         OPDQueue.status.in_([QueueStatus.WAITING, QueueStatus.IN_PROGRESS]),
@@ -569,6 +617,77 @@ def view_queue_page(
             "wait_time_str": wait_time_str
         })
     
+    # =====================================================
+    # SCHEDULED APPOINTMENTS - Future appointments
+    # =====================================================
+    # Get today's scheduled appointments (for today or earlier that haven't been checked in)
+    scheduled_today_query = db.query(ScheduledAppointment).filter(
+        ScheduledAppointment.is_active == True,
+        func.date(ScheduledAppointment.scheduled_date) == date.today(),
+        ScheduledAppointment.status.in_([
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED
+        ])
+    )
+    
+    if department:
+        scheduled_today_query = scheduled_today_query.filter(ScheduledAppointment.department == department)
+    
+    scheduled_today = scheduled_today_query.order_by(
+        ScheduledAppointment.scheduled_date.asc()
+    ).all()
+    
+    # Get upcoming scheduled appointments (future dates)
+    upcoming_query = db.query(ScheduledAppointment).filter(
+        ScheduledAppointment.is_active == True,
+        func.date(ScheduledAppointment.scheduled_date) > date.today(),
+        ScheduledAppointment.status.in_([
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED
+        ])
+    )
+    
+    if department:
+        upcoming_query = upcoming_query.filter(ScheduledAppointment.department == department)
+    
+    scheduled_upcoming = upcoming_query.order_by(
+        ScheduledAppointment.scheduled_date.asc()
+    ).limit(50).all()  # Limit to next 50 appointments
+    
+    # Categorize: Follow-up appointments (created after consultations)
+    follow_up_query = db.query(ScheduledAppointment).filter(
+        ScheduledAppointment.is_active == True,
+        ScheduledAppointment.appointment_type == AppointmentType.FOLLOW_UP,
+        ScheduledAppointment.status.in_([
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED
+        ])
+    )
+    
+    if department:
+        follow_up_query = follow_up_query.filter(ScheduledAppointment.department == department)
+    
+    follow_up_appointments = follow_up_query.order_by(
+        ScheduledAppointment.scheduled_date.asc()
+    ).all()
+    
+    # Categorize: Scheduled bookings (consultations and other non-follow-up)
+    scheduled_bookings = db.query(ScheduledAppointment).filter(
+        ScheduledAppointment.is_active == True,
+        ScheduledAppointment.appointment_type != AppointmentType.FOLLOW_UP,
+        ScheduledAppointment.status.in_([
+            AppointmentStatus.SCHEDULED,
+            AppointmentStatus.CONFIRMED
+        ])
+    )
+    
+    if department:
+        scheduled_bookings = scheduled_bookings.filter(ScheduledAppointment.department == department)
+    
+    scheduled_only_bookings = scheduled_bookings.order_by(
+        ScheduledAppointment.scheduled_date.asc()
+    ).all()
+    
     # Get unique departments for filter
     departments = db.query(OPDQueue.department).distinct().all()
     departments = [d[0] for d in departments]
@@ -580,6 +699,11 @@ def view_queue_page(
         "user_role": current_user.role.name,
         "queue_today": queue_today_with_wait,
         "queue_previous": queue_previous_with_wait,
+        # Scheduled appointments section
+        "scheduled_today": scheduled_today,
+        "scheduled_upcoming": scheduled_upcoming,
+        "follow_up_appointments": follow_up_appointments,
+        "scheduled_bookings": scheduled_only_bookings,
         "departments": departments,
         "selected_department": department,
         "search_query": search or "",

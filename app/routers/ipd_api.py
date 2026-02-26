@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, status, HTTPException, Form, Request, Query
 from fastapi.responses import RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime
@@ -17,7 +17,6 @@ from app.schemas.ipd_schemas import (
 )
 
 router = APIRouter(tags=["IPD"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 # Ward Routes
@@ -172,6 +171,14 @@ def create_admission_endpoint(
     current_user = Depends(role_required(["Admin", "Front Office"]))
 ):
     """Create a new admission (JSON API)."""
+    # Check if patient is already admitted
+    current_admission = ipd_crud.get_current_admission(db, admission.patient_id)
+    if current_admission:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Patient is already admitted (Admission #: {current_admission.admission_number}). Please discharge the patient before creating a new admission."
+        )
+    
     # Check if bed is available
     bed = ipd_crud.get_bed(db, admission.bed_id)
     if not bed:

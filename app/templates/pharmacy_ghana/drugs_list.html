@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-capsules mr-2"></i>Drug Catalogue (Formulations)</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_ghana_dashboard') }}">Pharmacy Ghana</a></li>
+                            <li class="breadcrumb-item active">Drugs</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('status') == 'created' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Success</h5>
+                    Drug created successfully.
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('status') == 'updated' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Success</h5>
+                    Drug updated successfully.
+                </div>
+                {% endif %}
+
+                <div class="row mb-3">
+                    <div class="col-md-8">
+                        <form method="GET" action="{{ url_for('pharmacy_drugs') }}" class="mb-0">
+                            <div class="input-group">
+                                <input type="text" name="search" class="form-control" placeholder="Search generic name, brand, code..." value="{{ search or '' }}">
+                                <div class="input-group-append">
+                                    <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i></button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="col-md-4 text-right">
+                        <a href="{{ url_for('pharmacy_drug_new') }}" class="btn btn-success">
+                            <i class="fas fa-plus mr-1"></i> Add New Drug
+                        </a>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Code</th>
+                                    <th>Display Label</th>
+                                    <th>Brand</th>
+                                    <th>Controlled</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for d in drugs %}
+                                <tr>
+                                    <td>{{ d.item_code }}</td>
+                                    <td>
+                                        <strong>{{ d.generic_name }}</strong>
+                                        {% if d.strength_value %}
+                                            {{ d.strength_value }} {{ d.strength_unit or '' }}
+                                        {% elif d.concentration_value %}
+                                            {{ d.concentration_value }} {{ d.concentration_unit or '' }}
+                                        {% endif %}
+                                        {{ d.dosage_form.name if d.dosage_form else '' }}
+                                        {% if d.route %}
+                                            <span class="text-muted">({{ d.route }})</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ d.brand_name or '–' }}</td>
+                                    <td>{% if d.is_controlled %}<span class="badge badge-danger">Yes</span>{% else %}No{% endif %}</td>
+                                    <td>
+                                        <a href="{{ url_for('pharmacy_drug_edit', drug_id=d.id) }}" class="btn btn-xs btn-primary">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="5" class="text-center text-muted">No drugs found</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="text-muted small mt-2">
+                    Display format: "GenericName strength_unit DosageForm (Route)"
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

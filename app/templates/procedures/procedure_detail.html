@@ -23,13 +23,42 @@
 
         <section class="content">
             <div class="container-fluid">
+                
+                {# Payment warning from context #}
+                {% if payment_warning %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <h5><i class="icon fas fa-exclamation-triangle"></i> Payment Required</h5>
+                    This procedure cannot be completed until the invoice is paid.
+                    <br><strong>Invoice #{{ payment_warning.invoice_id }} - Balance: GHS {{ payment_warning.balance }}</strong>
+                    <br><a href="{{ url_for('view_invoice', invoice_id=payment_warning.invoice_id) }}" class="btn btn-sm btn-primary mt-2">
+                        <i class="fas fa-credit-card"></i> Pay Now
+                    </a>
+                </div>
+                {% endif %}
+                
+                {# Payment error from query parameters (redirected from edit form) #}
+                {% if request.query_params.get('error') == 'payment_required' %}
+                <div class="alert alert-danger alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <h5><i class="icon fas fa-exclamation-triangle"></i> Payment Required</h5>
+                    This procedure cannot be updated until the invoice is paid.
+                    {% if request.query_params.get('invoice_id') %}
+                    <br><strong>Invoice #{{ request.query_params.get('invoice_id') }} - Balance: GHS {{ request.query_params.get('balance') }}</strong>
+                    <br><a href="{{ url_for('view_invoice', invoice_id=request.query_params.get('invoice_id')) }}" class="btn btn-sm btn-primary mt-2">
+                        <i class="fas fa-credit-card"></i> Pay Now
+                    </a>
+                    {% endif %}
+                </div>
+                {% endif %}
+                
                 <div class="row">
                     <div class="col-md-8">
                         <div class="card card-primary card-outline">
                             <div class="card-header">
                                 <h3 class="card-title">Procedure Details</h3>
                                 <div class="card-tools">
-                                    {% if user_role in ['Admin', 'Doctor'] %}
+                                    {% if user_role in ['Admin', 'Doctor'] and not payment_warning %}
                                     <a href="{{ url_for('procedure_edit_form', procedure_id=procedure.id) }}" class="btn btn-warning btn-sm">
                                         <i class="fas fa-edit"></i> Edit
                                     </a>
@@ -59,7 +88,7 @@
                                     <tr>
                                         <th>Patient:</th>
                                         <td>
-                                            <a href="{{ url_for('patient_records', patient_id=procedure.patient_id) }}">
+                                            <a href="{{ url_for('view_patient_records', patient_id=procedure.patient_id) }}">
                                                 {{ procedure.patient.first_name }} {{ procedure.patient.last_name }} ({{ procedure.patient.patient_number }})
                                             </a>
                                         </td>
@@ -310,7 +339,7 @@
                                 <p><strong>Patient Number:</strong> {{ procedure.patient.patient_number or 'N/A' }}</p>
                                 <p><strong>Gender:</strong> {{ procedure.patient.gender }}</p>
                                 {% if procedure.patient.date_of_birth %}
-                                <p><strong>Date of Birth:</strong> {{ procedure.patient.date_of_birth }}</p>
+                                <p><strong>Date of Birth:</strong> {{ procedure.patient.date_of_birth }} (Age: {{ procedure.patient.date_of_birth | age }} years)</p>
                                 {% endif %}
                             </div>
                         </div>

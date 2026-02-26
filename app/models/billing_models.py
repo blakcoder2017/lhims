@@ -108,6 +108,8 @@ class Invoice(Base):
     created_by = relationship("User", foreign_keys=[created_by_id])
     charges = relationship("Charge", back_populates="invoice", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="invoice", cascade="all, delete-orphan")
+    pharmacy_dispenses = relationship("PharmacyDispense", back_populates="invoice")
+    refunds = relationship("Refund", back_populates="invoice", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Invoice(id={self.id}, invoice_number='{self.invoice_number}', total={self.total_amount}, balance={self.balance})>"
@@ -130,6 +132,8 @@ class Charge(Base):
     lab_order_id = Column(Integer, ForeignKey("lab_orders.id"), nullable=True)  # Optional link to lab order
     radiology_order_id = Column(Integer, ForeignKey("radiology_orders.id"), nullable=True)  # Optional link to radiology order
     prescription_id = Column(Integer, ForeignKey("prescriptions.id"), nullable=True)  # Optional link to prescription
+    procedure_catalog_id = Column(Integer, ForeignKey("procedure_catalog.id"), nullable=True)  # Link to procedure catalog for procedure charges
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # Department this charge belongs to
     
     # Charge Details
     charge_type = Column(postgresql.ENUM(ChargeType, values_callable=lambda x: [e.value for e in x], name='chargetype', create_type=False), nullable=False)
@@ -145,12 +149,17 @@ class Charge(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
     
+    # Soft deletion
+    is_active = Column(Boolean, default=True)
+    
     # Relationships
     invoice = relationship("Invoice", back_populates="charges")
     encounter = relationship("Encounter")
     lab_order = relationship("LabOrder")
     radiology_order = relationship("RadiologyOrder")
-    prescription = relationship("Prescription")
+    prescription = relationship("Prescription", back_populates="charges")
+    procedure_catalog = relationship("ProcedureCatalog")
+    department = relationship("Department")
     charge_payments = relationship("ChargePayment", back_populates="charge")
     
     def __repr__(self):
@@ -199,6 +208,7 @@ class Payment(Base):
     patient = relationship("Patient")
     received_by = relationship("User", foreign_keys=[received_by_id])
     charge_payments = relationship("ChargePayment", back_populates="payment")
+    refunds = relationship("Refund", back_populates="payment", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Payment(id={self.id}, payment_number='{self.payment_number}', amount={self.amount}, status={self.status.value})>"
@@ -243,6 +253,108 @@ class Receipt(Base):
         return f"<Receipt(id={self.id}, receipt_number='{self.receipt_number}', amount={self.amount})>"
 
 
+class RefundStatus(str, enum.Enum):
+    """Refund status enumeration"""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    PROCESSED = "processed"
+
+
+class RefundPolicy(Base):
+    """
+    SQLAlchemy Model for refund policy configuration.
+    Stores hospital-wide refund policy settings.
+    """
+    __tablename__ = "refund_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Policy Settings
+    name = Column(String(100), nullable=False)  # Policy name
+    description = Column(Text, nullable=True)  # Policy description
+    is_active = Column(Boolean, default=True)  # Whether this policy is active
+    
+    # Refund Rules
+    max_refund_amount = Column(Numeric(10, 2), nullable=True)  # Maximum refund amount allowed (null = unlimited)
+    refund_window_days = Column(Integer, nullable=True)  # Days after payment within which refund can be requested
+    auto_approve_threshold = Column(Numeric(10, 2), nullable=True)  # Amount below which refund auto-approves
+    
+    # Approval Requirements
+    requires_approval = Column(Boolean, default=True)  # Whether refunds require approval
+    approval_level = Column(Integer, default=1)  # 1 = single approval, 2 = dual approval
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+    def __repr__(self):
+        return f"<RefundPolicy(id={self.id}, name='{self.name}', is_active={self.is_active})>"
+
+
+class Refund(Base):
+    """
+    SQLAlchemy Model for refund requests.
+    Tracks all refund requests and their processing status.
+    """
+    __tablename__ = "refunds"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=False)  # Original payment being refunded
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
+    requested_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User who requested the refund
+    approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User who approved the refund
+    processed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User who processed the refund
+    policy_id = Column(Integer, ForeignKey("refund_policies.id"), nullable=True)  # Applied policy
+    
+    # Refund Details
+    refund_number = Column(String(50), unique=True, nullable=False, index=True)  # Unique refund number
+    amount = Column(Numeric(10, 2), nullable=False)  # Refund amount
+    reason = Column(Text, nullable=False)  # Reason for refund
+    status = Column(postgresql.ENUM(RefundStatus, values_callable=lambda x: [e.value for e in x], name='refundstatus', create_type=False), nullable=False, default=RefundStatus.PENDING)
+    
+    # Refund Processing
+    refund_method = Column(postgresql.ENUM(PaymentMethod, values_callable=lambda x: [e.value for e in x], name='paymentmethod', create_type=False), nullable=True)  # How refund will be issued
+    transaction_reference = Column(String(100), nullable=True)  # External refund transaction reference
+    rejection_reason = Column(Text, nullable=True)  # Reason if rejected
+    
+    # Notes
+    notes = Column(Text, nullable=True)  # Additional notes
+    
+    # Dates
+    request_date = Column(DateTime, nullable=False, server_default=func.now())
+    approval_date = Column(DateTime, nullable=True)
+    processed_date = Column(DateTime, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Soft deletion
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    invoice = relationship("Invoice", back_populates="refunds")
+    payment = relationship("Payment", back_populates="refunds")
+    patient = relationship("Patient")
+    requested_by = relationship("User", foreign_keys=[requested_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
+    processed_by = relationship("User", foreign_keys=[processed_by_id])
+    policy = relationship("RefundPolicy")
+    
+    def __repr__(self):
+        return f"<Refund(id={self.id}, refund_number='{self.refund_number}', amount={self.amount}, status={self.status.value})>"
+
+
 class ChargePayment(Base):
     """
     SQLAlchemy Model for tracking payment allocations to individual charges.
@@ -272,4 +384,60 @@ class ChargePayment(Base):
     
     def __repr__(self):
         return f"<ChargePayment(id={self.id}, payment_id={self.payment_id}, charge_id={self.charge_id}, amount={self.amount})>"
+
+
+class DiscountType(str, enum.Enum):
+    """Discount type enumeration"""
+    PERCENTAGE = "percentage"
+    FIXED = "fixed"
+
+
+class DiscountRule(Base):
+    """
+    SQLAlchemy Model for discount rules.
+    Allows structured discount management with configurable rules.
+    """
+    __tablename__ = "discount_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Rule Details
+    name = Column(String(100), nullable=False)  # Rule name
+    description = Column(Text, nullable=True)  # Rule description
+    is_active = Column(Boolean, default=True)  # Whether this rule is active
+    
+    # Discount Type and Value
+    discount_type = Column(postgresql.ENUM(DiscountType, values_callable=lambda x: [e.value for e in x], name='discounttype', create_type=False), nullable=False)
+    discount_value = Column(Numeric(10, 2), nullable=False)  # Percentage or fixed amount
+    
+    # Service Applicability (JSON - list of charge types this applies to)
+    applicable_services = Column(postgresql.JSON, nullable=True)  # e.g., ["consultation", "lab_test"]
+    
+    # Patient Category Applicability (JSON - list of patient categories)
+    # Categories: elderly, children, pregnant, nhis, staff, etc.
+    patient_categories = Column(postgresql.JSON, nullable=True)
+    
+    # Minimum and Maximum Amount
+    min_invoice_amount = Column(Numeric(10, 2), nullable=True)  # Minimum invoice amount to qualify
+    max_discount_amount = Column(Numeric(10, 2), nullable=True)  # Maximum discount amount allowed
+    
+    # Validity Period
+    valid_from = Column(DateTime, nullable=True)  # Start date
+    valid_to = Column(DateTime, nullable=True)  # End date
+    
+    # Priority (higher priority rules applied first)
+    priority = Column(Integer, default=0)
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    
+    def __repr__(self):
+        return f"<DiscountRule(id={self.id}, name='{self.name}', discount_type={self.discount_type.value}, discount_value={self.discount_value})>"
 

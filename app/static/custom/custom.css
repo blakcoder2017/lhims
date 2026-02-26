@@ -1,4 +1,99 @@
-/* --- LHIMS Custom Stylesheet --- */
+/* --- MedFlow Custom Stylesheet --- */
+/* Responsive across all screen sizes: 320px to 2560px+ */
+
+/* ========================================
+   Fluid Layout - Adapts to Any Screen Size
+   ======================================== */
+
+:root {
+    --lhims-content-max: 1920px;    /* Max width for ultra-wide (readability) */
+    --lhims-sidebar-width: 250px;
+    --lhims-spacing-xs: 0.25rem;
+    --lhims-spacing-sm: 0.5rem;
+    --lhims-spacing-md: 1rem;
+    --lhims-spacing-lg: 1.5rem;
+}
+
+/* Base: fluid box-sizing */
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+/* Prevent horizontal scroll on all viewports */
+html {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    overflow-x: hidden;
+    min-width: 280px; /* Support very small screens */
+}
+
+/* ---- Extra small (320px–575px) ---- */
+@media (max-width: 359.98px) {
+    .content-header h1 {
+        font-size: 1rem;
+    }
+    .container-fluid {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+    .small-box .inner h3 {
+        font-size: 1.25rem;
+    }
+    .btn {
+        font-size: 0.85rem;
+        padding: 0.4rem 0.75rem;
+    }
+}
+
+/* ---- Large screens: constrain content width for readability (1400px+) ---- */
+@media (min-width: 1400px) {
+    .content .container-fluid {
+        max-width: 1400px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
+/* ---- Ultra-wide (1920px+): slightly wider content band ---- */
+@media (min-width: 1920px) {
+    .content .container-fluid {
+        max-width: 1600px;
+    }
+}
+
+/* ---- Fluid typography (scale with viewport) ---- */
+@media (min-width: 1200px) {
+    .content-header h1 {
+        font-size: 1.5rem;
+    }
+}
+@media (min-width: 1600px) {
+    .content-header h1 {
+        font-size: 1.65rem;
+    }
+}
+
+/* ---- Fluid grid: ensure rows wrap at all breakpoints ---- */
+.row {
+    --bs-gutter-x: 1.5rem;
+    --bs-gutter-y: 1rem;
+}
+@media (max-width: 575.98px) {
+    .row {
+        --bs-gutter-x: 0.75rem;
+        --bs-gutter-y: 0.75rem;
+    }
+}
+
+/* ---- Images: always responsive ---- */
+img:not([width]):not([height]) {
+    max-width: 100%;
+    height: auto;
+}
 
 /* Matches the orange action buttons */
 .btn-action {
@@ -25,4 +120,523 @@
 .card-header.patient-header .card-title {
     color: #ffffff;
     font-weight: 600;
+}
+
+/* ========================================
+   Global Loading Overlay
+   ======================================== */
+.global-loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.global-loading-spinner {
+    background: #fff;
+    padding: 24px 36px;
+    border-radius: 8px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    color: #333;
+}
+.global-loading-spinner i {
+    color: #007bff;
+}
+
+/* ========================================
+   Sidebar Enhancements
+   ======================================== */
+
+/* Sidebar Search Input */
+.form-control-sidebar {
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+}
+
+.form-control-sidebar::placeholder {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.form-control-sidebar:focus {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #fff;
+    box-shadow: none;
+}
+
+/* Nav Header Styling */
+.nav-header {
+    color: #c2c7d0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 8px 15px 4px;
+    margin-top: 8px;
+}
+
+/* Quick Links Styling */
+.nav-sidebar .nav-link p {
+    display: inline-block;
+    margin: 0;
+    flex-grow: 1;
+}
+
+/* Search Highlight Animation */
+@keyframes highlightPulse {
+    0% { background-color: rgba(255, 193, 7, 0.3); }
+    100% { background-color: transparent; }
+}
+
+.nav-item.highlight {
+    animation: highlightPulse 1.5s ease-out;
+}
+
+/* Sidebar Menu Item Improvements */
+.sidebar .nav-sidebar .nav-link {
+    padding: 0.6rem 1rem;
+}
+
+.sidebar .nav-sidebar .nav-treeview .nav-link {
+    padding-left: 2.5rem;
+}
+
+/* Notification Badge on Sidebar */
+.nav-badge {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 8px;
+}
+
+.nav-badge-warning {
+    background-color: #ffc107;
+    color: #1f2d3d;
+}
+
+.nav-badge-danger {
+    background-color: #dc3545;
+    color: #fff;
+}
+
+.nav-badge-success {
+    background-color: #28a745;
+    color: #fff;
+}
+
+/* Hide treeview arrow for Quick Links */
+.sidebar .nav-sidebar > .nav-item:not(.has-treeview) > .nav-link > .right {
+    display: none;
+}
+
+/* Smooth transitions for sidebar items */
+.nav-sidebar .nav-item {
+    transition: background-color 0.2s ease;
+}
+
+.nav-sidebar .nav-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Mobile: touch-friendly dropdown parent links (WCAG 44px min) */
+@media (max-width: 991.98px) {
+    .nav-sidebar .nav-item.has-treeview > .nav-link {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        padding-top: 12px;
+        padding-bottom: 12px;
+    }
+}
+
+/* ========================================
+   Triage & Queue - Tablet/Touch Optimization
+   WCAG: Touch targets >= 44x44px
+   ======================================== */
+
+/* Triage page (vitals recording) - larger inputs and buttons */
+.triage-page .form-control,
+.triage-page select.form-control,
+.triage-page input[type="number"],
+.triage-page input[type="text"] {
+    min-height: 44px;
+    font-size: 1rem;
+    padding: 10px 14px;
+}
+
+.triage-page .btn,
+.triage-page button[type="submit"] {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 10px 20px;
+    font-size: 1rem;
+}
+
+.triage-page .form-group label {
+    font-size: 0.95rem;
+}
+
+/* Checkbox - larger touch target */
+.triage-page input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+/* Triage queue & Queue - larger action buttons */
+.triage-queue .btn-sm,
+.queue-page .btn-sm {
+    min-height: 44px;
+    padding: 10px 16px;
+    font-size: 0.95rem;
+}
+
+.triage-queue .table td,
+.queue-page .table td {
+    padding: 12px 8px;
+    vertical-align: middle;
+}
+
+/* Card layout for tablet - stack filter buttons with more spacing */
+@media (max-width: 992px) {
+    .triage-queue .card-body .row .col-md-2 .btn,
+    .queue-page .card-body .row .col-md-2 .btn {
+        margin-bottom: 8px;
+    }
+
+    .triage-page .col-md-3 .form-group {
+        margin-bottom: 1rem;
+    }
+}
+
+/* Touch-friendly filter section */
+@media (pointer: coarse) {
+    .triage-page .form-control:focus,
+    .triage-page select.form-control:focus {
+        outline: 2px solid #007bff;
+        outline-offset: 2px;
+    }
+
+    .triage-queue .btn,
+    .queue-page .btn {
+        -webkit-tap-highlight-color: rgba(0, 123, 255, 0.2);
+    }
+}
+
+/* ========================================
+   Accessibility: Focus states, keyboard, contrast
+   WCAG AA compatible
+   ======================================== */
+
+/* Visible focus for keyboard navigation */
+a:focus,
+button:focus,
+input:focus,
+select:focus,
+textarea:focus,
+.btn:focus,
+.form-control:focus,
+.nav-link:focus,
+[tabindex]:focus {
+    outline: 2px solid #0056b3;
+    outline-offset: 2px;
+}
+
+/* ========================================
+   Mobile Sidebar - Push menu touch fix
+   ======================================== */
+/* Ensure hamburger button has adequate touch target (WCAG 44px) */
+.main-header .navbar-nav [data-widget="pushmenu"] {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+/* Ensure sidebar overlay is tappable and has correct z-index on mobile */
+@media (max-width: 991.98px) {
+    #sidebar-overlay {
+        z-index: 1038;
+        cursor: pointer;
+    }
+    .main-sidebar {
+        z-index: 1040;
+    }
+}
+
+/* Skip link for keyboard users */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: #0056b3;
+    color: white;
+    padding: 8px 16px;
+    z-index: 10000;
+    transition: top 0.2s;
+}
+.skip-link:focus {
+    top: 0;
+    outline: 2px solid white;
+    outline-offset: 2px;
+}
+
+/* Improve contrast for disabled/faded elements */
+.btn:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+    opacity: 0.7;
+}
+
+/* ========================================
+   Mobile Responsive - MedFlow
+   Breakpoints: 576 (sm), 768 (md), 992 (lg), 1200 (xl)
+   ======================================== */
+
+/* ---- Base layout & spacing ---- */
+@media (max-width: 991.98px) {
+    .content-wrapper {
+        padding-top: 0;
+    }
+    .content-header {
+        padding: 0.75rem 1rem;
+    }
+    .content-header h1 {
+        font-size: 1.25rem;
+    }
+    .content {
+        padding: 0.75rem;
+    }
+    .container-fluid {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .content-header {
+        padding: 0.5rem 0.75rem;
+    }
+    .content-header h1 {
+        font-size: 1.1rem;
+    }
+    .content {
+        padding: 0.5rem;
+    }
+    .container-fluid {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+    .breadcrumb {
+        font-size: 0.8rem;
+    }
+}
+
+/* ---- Navbar (top bar) on mobile ---- */
+@media (max-width: 575.98px) {
+    .main-header .navbar {
+        padding: 0.25rem 0.5rem;
+    }
+    .main-header .nav-link {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.9rem;
+    }
+    .main-header .navbar-nav .btn {
+        padding: 0.4rem 0.6rem;
+        font-size: 0.85rem;
+    }
+}
+
+/* ---- Cards ---- */
+@media (max-width: 575.98px) {
+    .card {
+        margin-bottom: 1rem;
+        border-radius: 0.5rem;
+    }
+    .card-header {
+        padding: 0.75rem 1rem;
+        font-size: 0.95rem;
+    }
+    .card-body {
+        padding: 1rem;
+    }
+}
+
+/* ---- Small boxes (dashboard stats) ---- */
+@media (max-width: 575.98px) {
+    .small-box {
+        margin-bottom: 1rem;
+    }
+    .small-box .inner h3 {
+        font-size: 1.5rem;
+    }
+    .small-box .inner p {
+        font-size: 0.9rem;
+    }
+    .small-box-footer {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+/* ---- Forms - touch-friendly ---- */
+@media (max-width: 991.98px) {
+    .form-control:not(textarea),
+    .form-select,
+    select.form-control,
+    input.form-control:not([type="checkbox"]):not([type="radio"]) {
+        min-height: 44px;
+        font-size: 16px; /* Prevents iOS zoom on focus */
+    }
+    textarea.form-control {
+        font-size: 16px;
+        min-height: 80px;
+    }
+    .form-group label,
+    .form-group .col-form-label {
+        font-size: 0.95rem;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .form-row > [class*="col-"] {
+        margin-bottom: 0.75rem;
+    }
+}
+
+/* ---- Buttons - WCAG 44px touch target ---- */
+@media (max-width: 991.98px) {
+    .btn:not(.btn-sm):not(.btn-xs) {
+        min-height: 44px;
+        padding: 0.5rem 1rem;
+    }
+    .btn-sm {
+        min-height: 36px;
+        padding: 0.35rem 0.75rem;
+    }
+    .btn-group .btn {
+        min-height: 44px;
+    }
+}
+
+/* ---- Tables ---- */
+@media (max-width: 991.98px) {
+    .table-responsive {
+        -webkit-overflow-scrolling: touch;
+        border-radius: 0.25rem;
+    }
+    .table {
+        font-size: 0.9rem;
+    }
+    .table th,
+    .table td {
+        padding: 0.6rem 0.5rem;
+        white-space: nowrap;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .table th,
+    .table td {
+        padding: 0.5rem 0.4rem;
+        font-size: 0.85rem;
+    }
+    .dataTables_wrapper .dataTables_length,
+    .dataTables_wrapper .dataTables_filter {
+        margin-bottom: 0.75rem;
+        font-size: 0.9rem;
+    }
+    .dataTables_wrapper .dataTables_length select,
+    .dataTables_wrapper .dataTables_filter input {
+        min-height: 38px;
+    }
+}
+
+/* ---- Modals ---- */
+@media (max-width: 575.98px) {
+    .modal-dialog {
+        margin: 0.5rem;
+        max-width: calc(100% - 1rem);
+    }
+    .modal-content {
+        border-radius: 0.5rem;
+    }
+    .modal-header,
+    .modal-body,
+    .modal-footer {
+        padding: 1rem;
+    }
+}
+
+/* ---- Alerts ---- */
+@media (max-width: 575.98px) {
+    .alert {
+        padding: 0.75rem 1rem;
+        font-size: 0.95rem;
+    }
+}
+
+/* ---- Pagination ---- */
+@media (max-width: 575.98px) {
+    .pagination {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+    .pagination .page-link {
+        min-width: 38px;
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+/* ---- Dropdowns ---- */
+@media (max-width: 991.98px) {
+    .dropdown-menu {
+        max-height: 70vh;
+        overflow-y: auto;
+    }
+}
+
+/* ---- Input groups ---- */
+@media (max-width: 575.98px) {
+    .input-group {
+        flex-wrap: wrap;
+    }
+    .input-group .form-control,
+    .input-group .btn {
+        min-height: 44px;
+    }
+}
+
+/* ---- Tablet (768–991px): balanced spacing ---- */
+@media (min-width: 768px) and (max-width: 991.98px) {
+    .content {
+        padding: 1rem;
+    }
+    .card-body {
+        padding: 1.25rem;
+    }
+}
+
+/* ---- Safe area for notched devices (iPhone X+, etc.) ---- */
+@supports (padding: env(safe-area-inset-left)) {
+    .main-header .navbar {
+        padding-left: max(0.5rem, env(safe-area-inset-left));
+    }
 }

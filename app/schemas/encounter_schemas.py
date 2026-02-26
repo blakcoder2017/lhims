@@ -8,6 +8,7 @@ from app.models.encounter_models import EncounterStatus, OrderStatus
 class EncounterBase(BaseModel):
     """Base schema for encounter data"""
     patient_id: int
+    queue_entry_id: Optional[int] = None  # Link to OPD queue entry
     appointment_id: Optional[int] = None
     opd_visit_id: Optional[int] = None  # Link to OPD visit (for OPD encounters)
     admission_id: Optional[int] = None  # Link to IPD admission (for IPD encounters)
@@ -19,7 +20,9 @@ class EncounterBase(BaseModel):
     physical_examination: Optional[str] = None
     assessment: Optional[str] = None
     plan: Optional[str] = None
+    addendum: Optional[str] = None  # Follow-up addendum notes added after encounter completion
     primary_diagnosis_code: Optional[str] = Field(None, max_length=20)
+    primary_diagnosis_description: Optional[str] = Field(None, max_length=500)
     primary_diagnosis_description: Optional[str] = Field(None, max_length=500)
     secondary_diagnosis_codes: Optional[str] = None  # JSON string of secondary diagnoses
     differential_diagnosis_data: Optional[str] = None  # JSON blob string
@@ -29,6 +32,23 @@ class EncounterCreate(EncounterBase):
     """Schema for creating a new encounter"""
     clinician_id: int
     status: EncounterStatus = EncounterStatus.IN_PROGRESS
+    diagnoses: Optional[List[int]] = None  # Disease IDs from multi-select
+
+
+class EncounterAutoSave(BaseModel):
+    """Schema for auto-saving clinical notes without full validation"""
+    chief_complaint: Optional[str] = None
+    history_of_present_illness: Optional[str] = None
+    past_medical_history: Optional[str] = None
+    allergies: Optional[str] = None
+    medications: Optional[str] = None
+    physical_examination: Optional[str] = None
+    assessment: Optional[str] = None
+    plan: Optional[str] = None
+    addendum: Optional[str] = None
+    primary_diagnosis_code: Optional[str] = None
+    primary_diagnosis_description: Optional[str] = None
+    secondary_diagnosis_codes: Optional[str] = None
 
 
 class EncounterUpdate(BaseModel):
@@ -42,11 +62,13 @@ class EncounterUpdate(BaseModel):
     physical_examination: Optional[str] = None
     assessment: Optional[str] = None
     plan: Optional[str] = None
+    addendum: Optional[str] = None
     primary_diagnosis_code: Optional[str] = None
     primary_diagnosis_description: Optional[str] = None
     secondary_diagnosis_codes: Optional[str] = None
     differential_diagnosis_data: Optional[str] = None
     completed_at: Optional[datetime] = None
+    diagnoses: Optional[List[int]] = None  # Disease IDs from multi-select
 
 
 class Encounter(EncounterBase):
@@ -61,7 +83,9 @@ class Encounter(EncounterBase):
     updated_at: Optional[datetime] = None
     is_active: bool
     differential_diagnosis_data: Optional[str] = None
-
+    addendum_by_id: Optional[int] = None
+    addendum_at: Optional[datetime] = None
+    
     class Config:
         from_attributes = True
 
@@ -71,6 +95,7 @@ class LabOrderBase(BaseModel):
     """Base schema for lab order data"""
     test_name: str = Field(..., max_length=200)
     test_code: Optional[str] = Field(None, max_length=50)
+    lab_test_id: Optional[int] = Field(None, description="Link to Lab Test Catalog")
     instructions: Optional[str] = None
     priority: str = "routine"
 
@@ -109,6 +134,7 @@ class LabOrder(LabOrderBase):
     result_entered_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    lab_test_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -167,9 +193,19 @@ class RadiologyOrder(RadiologyOrderBase):
 # Prescription Schemas
 class PrescriptionBase(BaseModel):
     """Base schema for prescription data"""
-    medication_id: Optional[int] = None  # Link to inventory medication (optional)
+    medication_id: Optional[int] = None  # Link to inventory medication (legacy, optional)
+    pharmacy_drug_id: Optional[str] = None  # Ghana: exact formulation (REQUIRED for new prescriptions)
     medication_name: str = Field(..., max_length=200)
     medication_code: Optional[str] = Field(None, max_length=50)
+    
+    # Snapshot fields from pharmacy_drug (optional - for display when drug deleted)
+    dosage_form_name: Optional[str] = Field(None, max_length=100)
+    strength_value: Optional[float] = None
+    strength_unit: Optional[str] = Field(None, max_length=50)
+    route: Optional[str] = Field(None, max_length=50)
+    concentration_value: Optional[float] = None
+    concentration_unit: Optional[str] = Field(None, max_length=100)
+    
     dosage: str = Field(..., max_length=100)
     frequency: str = Field(..., max_length=100)
     duration: str = Field(..., max_length=100)
@@ -212,12 +248,36 @@ class Prescription(PrescriptionBase):
         from_attributes = True
 
 
+# Addendum Schemas
+class AddendumBase(BaseModel):
+    """Base schema for addendum data"""
+    content: str
+
+
+class AddendumCreate(AddendumBase):
+    """Schema for creating a new addendum"""
+    pass
+
+
+class Addendum(AddendumBase):
+    """Schema for reading addendum data"""
+    id: int
+    encounter_id: int
+    added_by_id: int
+    created_at: datetime
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
 # Combined schemas for encounter with orders
 class EncounterWithOrders(Encounter):
     """Schema for encounter with all related orders"""
     lab_orders: List[LabOrder] = []
     radiology_orders: List[RadiologyOrder] = []
     prescriptions: List[Prescription] = []
+    addendums: List[Addendum] = []
 
     class Config:
         from_attributes = True

@@ -84,17 +84,25 @@
 </head>
 <body>
     <div class="receipt-container">
-        <!-- Hospital Header -->
+        <!-- Hospital Header (name, logo, contact details) -->
         <div class="text-center section">
             {% if hospital_settings and hospital_settings.logo_url %}
-            <img src="{{ hospital_settings.logo_url }}" alt="Logo" style="max-height: 30px; margin-bottom: 3px;">
+            <img src="{{ hospital_settings.logo_url|normalize_logo_url }}" alt="Logo" style="max-height: 32px; margin-bottom: 4px;">
             {% endif %}
-            <p class="bold" style="font-size: 13px;">{{ hospital_settings.hospital_name if hospital_settings else 'LHIMS' }}</p>
-            {% if hospital_settings and hospital_settings.hospital_address %}
+            <p class="bold" style="font-size: 14px;">{{ hospital_settings.hospital_name if hospital_settings else 'MedFlow' }}</p>
+            {% if hospital_settings %}
+            {% if hospital_settings.hospital_address %}
             <p style="font-size: 9px;">{{ hospital_settings.hospital_address }}</p>
             {% endif %}
-            {% if hospital_settings and hospital_settings.hospital_phone %}
+            {% if hospital_settings.hospital_phone %}
             <p style="font-size: 9px;">Tel: {{ hospital_settings.hospital_phone }}</p>
+            {% endif %}
+            {% if hospital_settings.hospital_email %}
+            <p style="font-size: 9px;">{{ hospital_settings.hospital_email }}</p>
+            {% endif %}
+            {% if hospital_settings.hospital_website %}
+            <p style="font-size: 9px;">{{ hospital_settings.hospital_website }}</p>
+            {% endif %}
             {% endif %}
             <div class="divider"></div>
             <p class="bold" style="font-size: 12px;">PAYMENT RECEIPT</p>
@@ -203,11 +211,29 @@
     <!-- Print Controls (hidden when printing) -->
     <div class="no-print" style="text-align: center; margin-top: 20px; padding: 20px;">
         <button onclick="window.print()" style="padding: 10px 20px; font-size: 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">
-            🖨️ Print Receipt
+            🖨️ Print Receipt (80mm)
         </button>
+        {% if show_post_payment_buttons %}
+        <a href="{{ patients_list_url }}" style="padding: 10px 20px; font-size: 16px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; display: inline-block; margin-right: 10px;">
+            Patients List
+        </a>
+        <a href="{{ dashboard_url }}" style="padding: 10px 20px; font-size: 16px; background: #17a2b8; color: white; text-decoration: none; border-radius: 4px; display: inline-block; margin-right: 10px;">
+            Return to Dashboard
+        </a>
+        <p class="text-muted" style="margin-top: 10px; font-size: 12px;">Patient added to vitals queue. Print receipt, then click above.</p>
+        {% endif %}
         <a href="{{ url_for('view_invoice', invoice_id=invoice.id) }}" style="padding: 10px 20px; font-size: 16px; background: #6c757d; color: white; text-decoration: none; border-radius: 4px; display: inline-block;">
             ← Back to Invoice
         </a>
     </div>
+    {% if show_post_payment_buttons %}
+    <script>
+    (function(){
+        if (!sessionStorage.getItem('receipt_printed_{{ payment.id }}')) {
+            setTimeout(function(){ window.print(); sessionStorage.setItem('receipt_printed_{{ payment.id }}', '1'); }, 600);
+        }
+    })();
+    </script>
+    {% endif %}
 </body>
 </html>

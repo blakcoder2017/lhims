@@ -1,0 +1,325 @@
+{
+  "description": "Ghana Hospital Approved Test Menu - Sample Merged Templates",
+  "version": "1.0",
+  "disciplines": ["HEMATOLOGY", "BIOCHEMISTRY", "HORMONAL", "MICROBIOLOGY", "VIROLOGY"],
+  "tests": [
+    {
+      "test_name": "Full Blood Count (FBC)",
+      "test_code": "FBC",
+      "test_category": "Haematology",
+      "discipline": "HEMATOLOGY",
+      "specimen_type": "EDTA Blood",
+      "template_schema": {
+        "meta": {
+          "name": "Full Blood Count (FBC)",
+          "discipline": "HEMATOLOGY",
+          "version": 1,
+          "description": "Complete blood count with differential"
+        },
+        "layout": {
+          "sections": [
+            {"id": "sec_rbc", "title": "Red Blood Cells", "rows": [
+              {"columns": [{"items": ["hb"], "width": 3}, {"items": ["hct"], "width": 3}, {"items": ["rbc_count"], "width": 3}, {"items": ["mcv"], "width": 3}]}
+            ]},
+            {"id": "sec_wbc", "title": "White Blood Cells", "rows": [
+              {"columns": [{"items": ["wbc_count"], "width": 12}]}
+            ]},
+            {"id": "sec_diff", "title": "Differential Count", "rows": [
+              {"columns": [{"items": ["neutrophils"], "width": 4}, {"items": ["lymphocytes"], "width": 4}, {"items": ["monocytes"], "width": 4}]},
+              {"columns": [{"items": ["eosinophils"], "width": 4}, {"items": ["basophils"], "width": 4}]}
+            ]},
+            {"id": "sec_plt", "title": "Platelets", "rows": [
+              {"columns": [{"items": ["platelet_count"], "width": 12}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "hb": {"code": "hb", "type": "numeric", "label": "Hemoglobin (Hb)", "unit": "g/dL", "decimals": 1, "critical": {"low": 7.0, "high": 20.0}},
+          "hct": {"code": "hct", "type": "numeric", "label": "Hematocrit (Hct)", "unit": "%", "decimals": 1, "critical": {"low": 20.0, "high": 60.0}},
+          "rbc_count": {"code": "rbc_count", "type": "numeric", "label": "RBC Count", "unit": "x10^12/L", "decimals": 2},
+          "mcv": {"code": "mcv", "type": "numeric", "label": "MCV", "unit": "fL", "decimals": 1},
+          "wbc_count": {"code": "wbc_count", "type": "numeric", "label": "WBC Count", "unit": "x10^9/L", "decimals": 2, "critical": {"low": 2.0, "high": 30.0}},
+          "neutrophils": {"code": "neutrophils", "type": "numeric", "label": "Neutrophils", "unit": "%", "decimals": 1},
+          "lymphocytes": {"code": "lymphocytes", "type": "numeric", "label": "Lymphocytes", "unit": "%", "decimals": 1},
+          "monocytes": {"code": "monocytes", "type": "numeric", "label": "Monocytes", "unit": "%", "decimals": 1},
+          "eosinophils": {"code": "eosinophils", "type": "numeric", "label": "Eosinophils", "unit": "%", "decimals": 1},
+          "basophils": {"code": "basophils", "type": "numeric", "label": "Basophils", "unit": "%", "decimals": 1},
+          "platelet_count": {"code": "platelet_count", "type": "numeric", "label": "Platelet Count", "unit": "x10^9/L", "decimals": 0, "critical": {"low": 20.0, "high": 1000.0}}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "hb", "sex": "M", "age_min_days": 6570, "low": 12.5, "high": 17.5, "critical_low": 7.0, "critical_high": 20.0, "unit": "g/dL"},
+        {"field_code": "hb", "sex": "F", "age_min_days": 6570, "low": 11.5, "high": 15.5, "critical_low": 7.0, "critical_high": 20.0, "unit": "g/dL"},
+        {"field_code": "hb", "sex": "ANY", "age_min_days": 0, "age_max_days": 28, "low": 14.5, "high": 22.5, "critical_low": 10.0, "critical_high": 25.0, "unit": "g/dL"},
+        {"field_code": "hct", "sex": "M", "age_min_days": 6570, "low": 36, "high": 50, "unit": "%"},
+        {"field_code": "hct", "sex": "F", "age_min_days": 6570, "low": 34, "high": 46, "unit": "%"},
+        {"field_code": "rbc_count", "sex": "M", "age_min_days": 6570, "low": 4.5, "high": 6.5, "unit": "x10^12/L"},
+        {"field_code": "rbc_count", "sex": "F", "age_min_days": 6570, "low": 3.8, "high": 5.8, "unit": "x10^12/L"},
+        {"field_code": "wbc_count", "sex": "ANY", "age_min_days": 0, "low": 4.0, "high": 11.0, "critical_low": 2.0, "critical_high": 30.0, "unit": "x10^9/L"},
+        {"field_code": "platelet_count", "sex": "ANY", "age_min_days": 0, "low": 150, "high": 400, "critical_low": 20, "critical_high": 1000, "unit": "x10^9/L"}
+      ]
+    },
+    {
+      "test_name": "Liver Function Test (LFT)",
+      "test_code": "LFT",
+      "test_category": "Biochemistry",
+      "discipline": "BIOCHEMISTRY",
+      "specimen_type": "Serum",
+      "template_schema": {
+        "meta": {"name": "Liver Function Test", "discipline": "BIOCHEMISTRY", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_enzymes", "title": "Liver Enzymes", "rows": [
+              {"columns": [{"items": ["alt"], "width": 4}, {"items": ["ast"], "width": 4}, {"items": ["alp"], "width": 4}]},
+              {"columns": [{"items": ["ggt"], "width": 4}, {"items": ["total_bilirubin"], "width": 4}, {"items": ["direct_bilirubin"], "width": 4}]}
+            ]},
+            {"id": "sec_proteins", "title": "Proteins", "rows": [
+              {"columns": [{"items": ["total_protein"], "width": 6}, {"items": ["albumin"], "width": 6}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "alt": {"code": "alt", "type": "numeric", "label": "ALT", "unit": "U/L", "decimals": 0, "critical": {"high": 500}},
+          "ast": {"code": "ast", "type": "numeric", "label": "AST", "unit": "U/L", "decimals": 0, "critical": {"high": 500}},
+          "alp": {"code": "alp", "type": "numeric", "label": "ALP", "unit": "U/L", "decimals": 0},
+          "ggt": {"code": "ggt", "type": "numeric", "label": "GGT", "unit": "U/L", "decimals": 0},
+          "total_bilirubin": {"code": "total_bilirubin", "type": "numeric", "label": "Total Bilirubin", "unit": "mg/dL", "decimals": 2, "critical": {"high": 10.0}},
+          "direct_bilirubin": {"code": "direct_bilirubin", "type": "numeric", "label": "Direct Bilirubin", "unit": "mg/dL", "decimals": 2},
+          "total_protein": {"code": "total_protein", "type": "numeric", "label": "Total Protein", "unit": "g/dL", "decimals": 1},
+          "albumin": {"code": "albumin", "type": "numeric", "label": "Albumin", "unit": "g/dL", "decimals": 1}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "alt", "sex": "M", "age_min_days": 6570, "low": 0, "high": 40, "critical_high": 500, "unit": "U/L"},
+        {"field_code": "alt", "sex": "F", "age_min_days": 6570, "low": 0, "high": 32, "critical_high": 500, "unit": "U/L"},
+        {"field_code": "ast", "sex": "M", "age_min_days": 6570, "low": 0, "high": 37, "critical_high": 500, "unit": "U/L"},
+        {"field_code": "ast", "sex": "F", "age_min_days": 6570, "low": 0, "high": 31, "critical_high": 500, "unit": "U/L"},
+        {"field_code": "alp", "sex": "ANY", "age_min_days": 6570, "low": 20, "high": 140, "critical_high": 500, "unit": "U/L"},
+        {"field_code": "total_bilirubin", "sex": "ANY", "age_min_days": 6570, "low": 0.2, "high": 1.2, "critical_high": 10.0, "unit": "mg/dL"},
+        {"field_code": "total_protein", "sex": "ANY", "age_min_days": 0, "low": 6.0, "high": 8.3, "unit": "g/dL"},
+        {"field_code": "albumin", "sex": "ANY", "age_min_days": 0, "low": 3.5, "high": 5.5, "unit": "g/dL"}
+      ]
+    },
+    {
+      "test_name": "Renal Function Test (RFT)",
+      "test_code": "RFT",
+      "test_category": "Biochemistry",
+      "discipline": "BIOCHEMISTRY",
+      "specimen_type": "Serum",
+      "template_schema": {
+        "meta": {"name": "Renal Function Test", "discipline": "BIOCHEMISTRY", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_kidney", "title": "Kidney Function", "rows": [
+              {"columns": [{"items": ["creatinine"], "width": 4}, {"items": ["bun"], "width": 4}, {"items": ["egfr"], "width": 4}]}
+            ]},
+            {"id": "sec_electrolytes", "title": "Electrolytes", "rows": [
+              {"columns": [{"items": ["sodium"], "width": 3}, {"items": ["potassium"], "width": 3}, {"items": ["chloride"], "width": 3}, {"items": ["bicarbonate"], "width": 3}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "creatinine": {"code": "creatinine", "type": "numeric", "label": "Creatinine", "unit": "mg/dL", "decimals": 2, "critical": {"high": 6.0}},
+          "bun": {"code": "bun", "type": "numeric", "label": "BUN", "unit": "mg/dL", "decimals": 1, "critical": {"high": 60}},
+          "egfr": {"code": "egfr", "type": "numeric", "label": "eGFR", "unit": "mL/min/1.73m²", "decimals": 0},
+          "sodium": {"code": "sodium", "type": "numeric", "label": "Sodium (Na)", "unit": "mEq/L", "decimals": 0, "critical": {"low": 120, "high": 160}},
+          "potassium": {"code": "potassium", "type": "numeric", "label": "Potassium (K)", "unit": "mEq/L", "decimals": 1, "critical": {"low": 2.5, "high": 6.5}},
+          "chloride": {"code": "chloride", "type": "numeric", "label": "Chloride (Cl)", "unit": "mEq/L", "decimals": 0},
+          "bicarbonate": {"code": "bicarbonate", "type": "numeric", "label": "Bicarbonate (HCO3)", "unit": "mEq/L", "decimals": 0}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "creatinine", "sex": "M", "age_min_days": 6570, "low": 0.7, "high": 1.3, "critical_high": 6.0, "unit": "mg/dL"},
+        {"field_code": "creatinine", "sex": "F", "age_min_days": 6570, "low": 0.6, "high": 1.1, "critical_high": 6.0, "unit": "mg/dL"},
+        {"field_code": "bun", "sex": "ANY", "age_min_days": 0, "low": 7, "high": 20, "critical_high": 60, "unit": "mg/dL"},
+        {"field_code": "egfr", "sex": "ANY", "age_min_days": 6570, "low": 90, "high": 120, "unit": "mL/min/1.73m²"},
+        {"field_code": "sodium", "sex": "ANY", "age_min_days": 0, "low": 136, "high": 145, "critical_low": 120, "critical_high": 160, "unit": "mEq/L"},
+        {"field_code": "potassium", "sex": "ANY", "age_min_days": 0, "low": 3.5, "high": 5.0, "critical_low": 2.5, "critical_high": 6.5, "unit": "mEq/L"}
+      ]
+    },
+    {
+      "test_name": "Thyroid Profile",
+      "test_code": "THYROID",
+      "test_category": "Hormonal",
+      "discipline": "HORMONAL",
+      "specimen_type": "Serum",
+      "template_schema": {
+        "meta": {"name": "Thyroid Profile", "discipline": "HORMONAL", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_thyroid", "title": "Thyroid Function Tests", "rows": [
+              {"columns": [{"items": ["tsh"], "width": 4}, {"items": ["ft4"], "width": 4}, {"items": ["ft3"], "width": 4}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "tsh": {"code": "tsh", "type": "numeric", "label": "TSH", "unit": "mIU/L", "decimals": 2, "critical": {"low": 0.1, "high": 10.0}},
+          "ft4": {"code": "ft4", "type": "numeric", "label": "Free T4", "unit": "ng/dL", "decimals": 2, "critical": {"low": 0.1, "high": 4.0}},
+          "ft3": {"code": "ft3", "type": "numeric", "label": "Free T3", "unit": "pg/mL", "decimals": 2, "critical": {"low": 1.0, "high": 6.0}}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "tsh", "sex": "ANY", "age_min_days": 6570, "low": 0.4, "high": 4.0, "critical_low": 0.1, "critical_high": 10.0, "unit": "mIU/L"},
+        {"field_code": "ft4", "sex": "ANY", "age_min_days": 6570, "low": 0.8, "high": 1.8, "critical_low": 0.1, "critical_high": 4.0, "unit": "ng/dL"},
+        {"field_code": "ft3", "sex": "ANY", "age_min_days": 6570, "low": 2.3, "high": 4.2, "critical_low": 1.0, "critical_high": 6.0, "unit": "pg/mL"}
+      ]
+    },
+    {
+      "test_name": "HIV 1 & 2 Screening",
+      "test_code": "HIV",
+      "test_category": "Virology",
+      "discipline": "VIROLOGY",
+      "specimen_type": "Serum",
+      "template_schema": {
+        "meta": {"name": "HIV 1 & 2 Screening", "discipline": "VIROLOGY", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_hiv", "title": "HIV Screening", "rows": [
+              {"columns": [{"items": ["hiv_1_2"], "width": 12}]},
+              {"columns": [{"items": ["hiv_notes"], "width": 12}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "hiv_1_2": {"code": "hiv_1_2", "type": "choice", "label": "HIV 1 & 2", "options": ["Negative", "Positive", "Indeterminate"], "required": true},
+          "hiv_notes": {"code": "hiv_notes", "type": "text", "label": "Notes", "multiline": true}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "hiv_1_2", "sex": "ANY", "age_min_days": 0, "text_range": "Negative,Positive,Indeterminate"}
+      ]
+    },
+    {
+      "test_name": "Hepatitis B Surface Antigen (HBsAg)",
+      "test_code": "HBSAG",
+      "test_category": "Virology",
+      "discipline": "VIROLOGY",
+      "specimen_type": "Serum",
+      "template_schema": {
+        "meta": {"name": "Hepatitis B Surface Antigen", "discipline": "VIROLOGY", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_hbv", "title": "Hepatitis B Screening", "rows": [
+              {"columns": [{"items": ["hbsag"], "width": 12}]},
+              {"columns": [{"items": ["hbv_notes"], "width": 12}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "hbsag": {"code": "hbsag", "type": "choice", "label": "HBsAg", "options": ["Negative", "Positive"], "required": true},
+          "hbv_notes": {"code": "hbv_notes", "type": "text", "label": "Notes", "multiline": true}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "hbsag", "sex": "ANY", "age_min_days": 0, "text_range": "Negative,Positive"}
+      ]
+    },
+    {
+      "test_name": "Lipid Profile",
+      "test_code": "LIPID",
+      "test_category": "Biochemistry",
+      "discipline": "BIOCHEMISTRY",
+      "specimen_type": "Serum (Fasting)",
+      "template_schema": {
+        "meta": {"name": "Lipid Profile", "discipline": "BIOCHEMISTRY", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_lipids", "title": "Lipid Parameters", "rows": [
+              {"columns": [{"items": ["cholesterol_total"], "width": 6}, {"items": ["triglycerides"], "width": 6}]},
+              {"columns": [{"items": ["ldl_cholesterol"], "width": 6}, {"items": ["hdl_cholesterol"], "width": 6}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "cholesterol_total": {"code": "cholesterol_total", "type": "numeric", "label": "Total Cholesterol", "unit": "mg/dL", "decimals": 0, "critical": {"high": 300}},
+          "triglycerides": {"code": "triglycerides", "type": "numeric", "label": "Triglycerides", "unit": "mg/dL", "decimals": 0, "critical": {"high": 500}},
+          "ldl_cholesterol": {"code": "ldl_cholesterol", "type": "numeric", "label": "LDL Cholesterol", "unit": "mg/dL", "decimals": 0, "critical": {"high": 190}},
+          "hdl_cholesterol": {"code": "hdl_cholesterol", "type": "numeric", "label": "HDL Cholesterol", "unit": "mg/dL", "decimals": 0}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "cholesterol_total", "sex": "ANY", "age_min_days": 0, "low": 0, "high": 200, "critical_high": 300, "unit": "mg/dL"},
+        {"field_code": "triglycerides", "sex": "ANY", "age_min_days": 0, "low": 0, "high": 150, "critical_high": 500, "unit": "mg/dL"},
+        {"field_code": "ldl_cholesterol", "sex": "ANY", "age_min_days": 0, "low": 0, "high": 100, "critical_high": 190, "unit": "mg/dL"},
+        {"field_code": "hdl_cholesterol", "sex": "M", "age_min_days": 0, "low": 40, "high": 60, "unit": "mg/dL"},
+        {"field_code": "hdl_cholesterol", "sex": "F", "age_min_days": 0, "low": 50, "high": 70, "unit": "mg/dL"}
+      ]
+    },
+    {
+      "test_name": "Fasting Blood Sugar (FBS)",
+      "test_code": "FBS",
+      "test_category": "Biochemistry",
+      "discipline": "BIOCHEMISTRY",
+      "specimen_type": "Plasma (Fasting)",
+      "template_schema": {
+        "meta": {"name": "Fasting Blood Sugar", "discipline": "BIOCHEMISTRY", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_glucose", "title": "Glucose", "rows": [
+              {"columns": [{"items": ["glucose_fasting"], "width": 12}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "glucose_fasting": {"code": "glucose_fasting", "type": "numeric", "label": "Fasting Blood Sugar", "unit": "mg/dL", "decimals": 0, "critical": {"low": 40, "high": 400}}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "glucose_fasting", "sex": "ANY", "age_min_days": 0, "low": 70, "high": 100, "critical_low": 40, "critical_high": 400, "unit": "mg/dL"}
+      ]
+    },
+    {
+      "test_name": "Female Infertility Profile",
+      "test_code": "FERT_F",
+      "test_category": "Hormonal",
+      "discipline": "HORMONAL",
+      "specimen_type": "Serum",
+      "template_schema": {
+        "meta": {"name": "Female Infertility Profile", "discipline": "HORMONAL", "version": 1},
+        "layout": {
+          "sections": [
+            {"id": "sec_reproductive", "title": "Reproductive Hormones", "rows": [
+              {"columns": [{"items": ["fsh"], "width": 4}, {"items": ["lh"], "width": 4}, {"items": ["estradiol"], "width": 4}]},
+              {"columns": [{"items": ["prolactin"], "width": 4}, {"items": ["progesterone"], "width": 4}, {"items": ["testosterone"], "width": 4}]}
+            ]}
+          ]
+        },
+        "fields": {
+          "fsh": {"code": "fsh", "type": "numeric", "label": "FSH", "unit": "mIU/mL", "decimals": 2},
+          "lh": {"code": "lh", "type": "numeric", "label": "LH", "unit": "mIU/mL", "decimals": 2},
+          "estradiol": {"code": "estradiol", "type": "numeric", "label": "Estradiol (E2)", "unit": "pg/mL", "decimals": 1},
+          "prolactin": {"code": "prolactin", "type": "numeric", "label": "Prolactin", "unit": "ng/mL", "decimals": 2, "critical": {"high": 25}},
+          "progesterone": {"code": "progesterone", "type": "numeric", "label": "Progesterone", "unit": "ng/mL", "decimals": 2},
+          "testosterone": {"code": "testosterone", "type": "numeric", "label": "Testosterone", "unit": "ng/dL", "decimals": 1}
+        },
+        "rules": {"visibility": [], "requiredIf": []},
+        "calculated": []
+      },
+      "reference_ranges": [
+        {"field_code": "fsh", "sex": "F", "age_min_days": 6570, "age_max_days": 12775, "low": 3.5, "high": 12.5, "unit": "mIU/mL"},
+        {"field_code": "fsh", "sex": "F", "age_min_days": 12775, "low": 25.8, "high": 134.8, "unit": "mIU/mL"},
+        {"field_code": "lh", "sex": "F", "age_min_days": 6570, "age_max_days": 12775, "low": 2.0, "high": 12.0, "unit": "mIU/mL"},
+        {"field_code": "estradiol", "sex": "F", "age_min_days": 6570, "age_max_days": 12775, "low": 30, "high": 400, "unit": "pg/mL"},
+        {"field_code": "estradiol", "sex": "F", "age_min_days": 12775, "low": 10, "high": 30, "unit": "pg/mL"},
+        {"field_code": "prolactin", "sex": "F", "age_min_days": 6570, "age_max_days": 12775, "low": 4.0, "high": 23.0, "critical_high": 25.0, "unit": "ng/mL"},
+        {"field_code": "testosterone", "sex": "F", "age_min_days": 6570, "low": 15, "high": 70, "unit": "ng/dL"}
+      ]
+    }
+  ]
+}

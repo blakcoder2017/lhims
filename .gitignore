@@ -21,6 +21,9 @@ wheels/
 *.egg
 MANIFEST
 
+# Migrations cache
+migrations/__pycache__/
+
 # Virtual Environment
 venv/
 env/
@@ -64,3 +67,16 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+
+# Database dumps
+lhims_dump
+*.dump
+
+# Cookies/credentials
+cookies.txt
+
+# Uploads
+uploads/
+
+# Backups directory
+backups/

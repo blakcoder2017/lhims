@@ -32,6 +32,7 @@ class Patient(Base):
     # Financial Screening (Workflow Step 3: Financial Screening)
     payment_mechanism = Column(Enum(PaymentMechanism), nullable=True)  # Cash, NHIS, Private Insurance
     nhis_number = Column(String, index=True, nullable=True)  # NHIS membership number if applicable
+    nhis_expiry_date = Column(Date, nullable=True)  # NHIS card expiry - for validity display
     insurance_provider = Column(String, nullable=True)  # Private insurance provider name
     insurance_policy_number = Column(String, nullable=True)  # Insurance policy number
     

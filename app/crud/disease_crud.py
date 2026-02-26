@@ -40,6 +40,9 @@ def create_disease(
     name: str,
     code: Optional[str] = None,
     description: Optional[str] = None,
+    category: str = "other",
+    dhis2_data_element_uid: Optional[str] = None,
+    dhis2_category_option_combo_uid: Optional[str] = None,
     created_by_id: Optional[int] = None
 ) -> Disease:
     """Create a new disease"""
@@ -52,6 +55,9 @@ def create_disease(
         name=name,
         code=code,
         description=description,
+        category=category,
+        dhis2_data_element_uid=dhis2_data_element_uid,
+        dhis2_category_option_combo_uid=dhis2_category_option_combo_uid,
         is_system=False,  # User-created
         is_active=True,
         created_by_id=created_by_id
@@ -68,7 +74,10 @@ def update_disease(
     disease_id: int,
     name: Optional[str] = None,
     code: Optional[str] = None,
-    description: Optional[str] = None
+    description: Optional[str] = None,
+    category: Optional[str] = None,
+    dhis2_data_element_uid: Optional[str] = None,
+    dhis2_category_option_combo_uid: Optional[str] = None
 ) -> Optional[Disease]:
     """Update a disease"""
     disease = get_disease(db, disease_id)
@@ -86,6 +95,12 @@ def update_disease(
         disease.code = code
     if description is not None:
         disease.description = description
+    if category is not None:
+        disease.category = category
+    if dhis2_data_element_uid is not None:
+        disease.dhis2_data_element_uid = dhis2_data_element_uid
+    if dhis2_category_option_combo_uid is not None:
+        disease.dhis2_category_option_combo_uid = dhis2_category_option_combo_uid
     
     db.commit()
     db.refresh(disease)
@@ -153,9 +168,10 @@ def get_disease_encounter_stats(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     search: Optional[str] = None,
+    category: Optional[str] = None,
     limit: int = 100
 ) -> List[dict]:
-    """Aggregate encounter counts per disease within optional date range."""
+    """Aggregate encounter counts per disease within optional date range and category."""
     encounter_count = func.count(EncounterDisease.id)
     primary_count = func.sum(
         case(
@@ -170,6 +186,7 @@ def get_disease_encounter_stats(
             Disease.id.label("disease_id"),
             Disease.name,
             Disease.code,
+            Disease.category,
             encounter_count.label("encounter_count"),
             unique_encounters.label("unique_encounters"),
             primary_count.label("primary_count"),
@@ -190,9 +207,11 @@ def get_disease_encounter_stats(
         query = query.filter(Encounter.encounter_date <= end_date)
     if search:
         query = query.filter(Disease.name.ilike(f"%{search.strip()}%"))
+    if category:
+        query = query.filter(Disease.category == category)
     
     results = (
-        query.group_by(Disease.id, Disease.name, Disease.code)
+        query.group_by(Disease.id, Disease.name, Disease.code, Disease.category)
         .order_by(encounter_count.desc())
         .limit(limit)
         .all()
@@ -205,6 +224,7 @@ def get_disease_encounter_stats(
                 "disease_id": row.disease_id,
                 "name": row.name,
                 "code": row.code,
+                "category": row.category.value if hasattr(row.category, 'value') else row.category,
                 "encounter_count": int(row.encounter_count or 0),
                 "unique_encounters": int(row.unique_encounters or 0),
                 "primary_count": int(row.primary_count or 0),
@@ -213,4 +233,20 @@ def get_disease_encounter_stats(
             }
         )
     return stats
+
+
+def get_diseases_with_dhims2_mappings(db: Session) -> List[Disease]:
+    """Get all diseases that have DHIMS2 data element mappings"""
+    return db.query(Disease).filter(
+        Disease.is_active == True,
+        Disease.dhis2_data_element_uid.isnot(None)
+    ).order_by(Disease.category, Disease.name).all()
+
+
+def get_diseases_by_category(db: Session, category: str) -> List[Disease]:
+    """Get all active diseases in a specific category"""
+    return db.query(Disease).filter(
+        Disease.is_active == True,
+        Disease.category == category
+    ).order_by(Disease.name).all()
 

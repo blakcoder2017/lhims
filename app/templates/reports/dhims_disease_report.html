@@ -1,0 +1,462 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-virus mr-2"></i>DHIMS2 Disease Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">DHIMS2 Disease</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Report Period</h3>
+                        <div class="card-tools">
+                            <div class="btn-group mr-2">
+                                <a href="{{ url_for('dhims_disease_report') }}?start_date={{ start_date }}&end_date={{ end_date }}&period={{ period }}&format=pdf" class="btn btn-sm btn-danger">
+                                    <i class="fas fa-file-pdf"></i> PDF
+                                </a>
+                                <a href="{{ url_for('dhims_disease_report') }}?start_date={{ start_date }}&end_date={{ end_date }}&period={{ period }}&format=excel" class="btn btn-sm btn-success">
+                                    <i class="fas fa-file-excel"></i> Excel
+                                </a>
+                            </div>
+                            <button onclick="window.print()" class="btn btn-sm btn-info">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('dhims_disease_report') }}">
+                            <div class="row">
+                                <div class="col-md-12 mb-3">
+                                    <label>Quick Filters</label>
+                                    <div class="btn-group w-100">
+                                        <a href="{{ url_for('dhims_disease_report') }}?period=this_month" class="btn {{ 'btn-primary' if period == 'this_month' else 'btn-outline-primary' }}">This Month</a>
+                                        <a href="{{ url_for('dhims_disease_report') }}?period=last_month" class="btn {{ 'btn-primary' if period == 'last_month' else 'btn-outline-primary' }}">Last Month</a>
+                                        <a href="{{ url_for('dhims_disease_report') }}?period=this_quarter" class="btn {{ 'btn-primary' if period == 'this_quarter' else 'btn-outline-primary' }}">This Quarter</a>
+                                        <a href="{{ url_for('dhims_disease_report') }}?period=this_year" class="btn {{ 'btn-primary' if period == 'this_year' else 'btn-outline-primary' }}">This Year</a>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search mr-1"></i> Generate Report
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- DHIMS2 Header -->
+                <div class="card card-dark">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-file-medical-alt mr-2"></i>
+                            GHANA HEALTH SERVICE - DHIMS2 DISEASE MORBIDITY REPORT
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <p><strong>Facility:</strong> {{ hospital_settings.name if hospital_settings else 'N/A' }}</p>
+                            </div>
+                            <div class="col-md-4">
+                                <p><strong>Period:</strong> {{ start_date }} to {{ end_date }}</p>
+                            </div>
+                            <div class="col-md-4">
+                                <p><strong>Report Date:</strong> {{ report_date.strftime('%Y-%m-%d') if report_date else 'N/A' }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Cards -->
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ opd_total_cases }}</h3>
+                                <p>OPD Cases</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-user-md"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ ipd_total_cases }}</h3>
+                                <p>IPD Cases</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-procedures"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ opd_unique_diseases + ipd_unique_diseases }}</h3>
+                                <p>Unique Diseases</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-disease"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ total_disease_cases }}</h3>
+                                <p>Total Cases</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-chart-bar"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OPD Disease Morbidity -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-stethoscope mr-2"></i>
+                            OPD Disease Morbidity
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- OPD Summary by Gender and Age -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card card-secondary">
+                                    <div class="card-header">
+                                        <h3 class="card-title">OPD - Gender Distribution</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="progress-group">
+                                            Male
+                                            <span class="float-right"><b>{{ opd_male_cases }}</b> ({{ '%.1f'|format((opd_male_cases / opd_total_cases * 100) if opd_total_cases > 0 else 0) }}%)</span>
+                                            <div class="progress progress-sm">
+                                                <div class="progress-bar bg-primary" style="width: {{ (opd_male_cases / opd_total_cases * 100) if opd_total_cases > 0 else 0 }}%"></div>
+                                            </div>
+                                        </div>
+                                        <div class="progress-group">
+                                            Female
+                                            <span class="float-right"><b>{{ opd_female_cases }}</b> ({{ '%.1f'|format((opd_female_cases / opd_total_cases * 100) if opd_total_cases > 0 else 0) }}%)</span>
+                                            <div class="progress progress-sm">
+                                                <div class="progress-bar bg-pink" style="width: {{ (opd_female_cases / opd_total_cases * 100) if opd_total_cases > 0 else 0 }}%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card card-secondary">
+                                    <div class="card-header">
+                                        <h3 class="card-title">OPD - Age Group Distribution</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <table class="table table-sm">
+                                            <tr>
+                                                <td>Under 5</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('under_5', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>5-14</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('5_14', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>15-24</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('15_24', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>25-34</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('25_34', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>35-44</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('35_44', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>45-54</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('45_54', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>55-64</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('55_64', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>65+</td>
+                                                <td class="text-right"><b>{{ opd_age_summary.get('65_plus', 0) }}</b></td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- OPD Diseases Table -->
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped table-sm" id="opdDiseasesTable">
+                                <thead>
+                                    <tr class="bg-primary">
+                                        <th rowspan="2" class="align-middle">#</th>
+                                        <th rowspan="2" class="align-middle">Disease</th>
+                                        <th rowspan="2" class="align-middle">Code</th>
+                                        <th rowspan="2" class="align-middle text-center">Total</th>
+                                        <th colspan="2" class="text-center">Gender</th>
+                                        <th colspan="8" class="text-center">Age Groups</th>
+                                    </tr>
+                                    <tr class="bg-primary">
+                                        <th class="text-center">Male</th>
+                                        <th class="text-center">Female</th>
+                                        <th class="text-center"><5</th>
+                                        <th class="text-center">5-14</th>
+                                        <th class="text-center">15-24</th>
+                                        <th class="text-center">25-34</th>
+                                        <th class="text-center">35-44</th>
+                                        <th class="text-center">45-54</th>
+                                        <th class="text-center">55-64</th>
+                                        <th class="text-center">65+</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for disease in opd_diseases %}
+                                    <tr>
+                                        <td>{{ loop.index }}</td>
+                                        <td>{{ disease.name }}</td>
+                                        <td>{{ disease.code or '-' }}</td>
+                                        <td class="text-center"><strong>{{ disease.total }}</strong></td>
+                                        <td class="text-center">{{ disease.male }}</td>
+                                        <td class="text-center">{{ disease.female }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('under_5', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('5_14', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('15_24', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('25_34', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('35_44', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('45_54', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('55_64', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('65_plus', 0) }}</td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="15" class="text-center">No OPD disease data found for this period</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IPD Disease Morbidity -->
+                <div class="card card-success">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-procedures mr-2"></i>
+                            IPD Disease Morbidity
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- IPD Summary by Gender and Age -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card card-secondary">
+                                    <div class="card-header">
+                                        <h3 class="card-title">IPD - Gender Distribution</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="progress-group">
+                                            Male
+                                            <span class="float-right"><b>{{ ipd_male_cases }}</b> ({{ '%.1f'|format((ipd_male_cases / ipd_total_cases * 100) if ipd_total_cases > 0 else 0) }}%)</span>
+                                            <div class="progress progress-sm">
+                                                <div class="progress-bar bg-primary" style="width: {{ (ipd_male_cases / ipd_total_cases * 100) if ipd_total_cases > 0 else 0 }}%"></div>
+                                            </div>
+                                        </div>
+                                        <div class="progress-group">
+                                            Female
+                                            <span class="float-right"><b>{{ ipd_female_cases }}</b> ({{ '%.1f'|format((ipd_female_cases / ipd_total_cases * 100) if ipd_total_cases > 0 else 0) }}%)</span>
+                                            <div class="progress progress-sm">
+                                                <div class="progress-bar bg-pink" style="width: {{ (ipd_female_cases / ipd_total_cases * 100) if ipd_total_cases > 0 else 0 }}%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card card-secondary">
+                                    <div class="card-header">
+                                        <h3 class="card-title">IPD - Age Group Distribution</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <table class="table table-sm">
+                                            <tr>
+                                                <td>Under 5</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('under_5', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>5-14</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('5_14', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>15-24</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('15_24', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>25-34</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('25_34', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>35-44</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('35_44', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>45-54</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('45_54', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>55-64</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('55_64', 0) }}</b></td>
+                                            </tr>
+                                            <tr>
+                                                <td>65+</td>
+                                                <td class="text-right"><b>{{ ipd_age_summary.get('65_plus', 0) }}</b></td>
+                                            </tr>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- IPD Diseases Table -->
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped table-sm" id="ipdDiseasesTable">
+                                <thead>
+                                    <tr class="bg-success">
+                                        <th rowspan="2" class="align-middle">#</th>
+                                        <th rowspan="2" class="align-middle">Disease</th>
+                                        <th rowspan="2" class="align-middle">Code</th>
+                                        <th rowspan="2" class="align-middle text-center">Total</th>
+                                        <th colspan="2" class="text-center">Gender</th>
+                                        <th colspan="8" class="text-center">Age Groups</th>
+                                    </tr>
+                                    <tr class="bg-success">
+                                        <th class="text-center">Male</th>
+                                        <th class="text-center">Female</th>
+                                        <th class="text-center"><5</th>
+                                        <th class="text-center">5-14</th>
+                                        <th class="text-center">15-24</th>
+                                        <th class="text-center">25-34</th>
+                                        <th class="text-center">35-44</th>
+                                        <th class="text-center">45-54</th>
+                                        <th class="text-center">55-64</th>
+                                        <th class="text-center">65+</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for disease in ipd_diseases %}
+                                    <tr>
+                                        <td>{{ loop.index }}</td>
+                                        <td>{{ disease.name }}</td>
+                                        <td>{{ disease.code or '-' }}</td>
+                                        <td class="text-center"><strong>{{ disease.total }}</strong></td>
+                                        <td class="text-center">{{ disease.male }}</td>
+                                        <td class="text-center">{{ disease.female }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('under_5', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('5_14', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('15_24', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('25_34', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('35_44', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('45_54', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('55_64', 0) }}</td>
+                                        <td class="text-center">{{ disease.age_groups.get('65_plus', 0) }}</td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="15" class="text-center">No IPD disease data found for this period</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top Diseases Combined -->
+                <div class="card card-warning">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-chart-pie mr-2"></i>
+                            Top Diseases (OPD + IPD Combined)
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped">
+                                <thead>
+                                    <tr class="bg-warning">
+                                        <th>#</th>
+                                        <th>Disease</th>
+                                        <th class="text-center">OPD Cases</th>
+                                        <th class="text-center">IPD Cases</th>
+                                        <th class="text-center">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for disease in top_diseases %}
+                                    <tr>
+                                        <td>{{ loop.index }}</td>
+                                        <td><strong>{{ disease.name }}</strong></td>
+                                        <td class="text-center">{{ disease.opd }}</td>
+                                        <td class="text-center">{{ disease.ipd }}</td>
+                                        <td class="text-center"><strong>{{ disease.total }}</strong></td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="5" class="text-center">No disease data found</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </div>
+
+{% endblock %}

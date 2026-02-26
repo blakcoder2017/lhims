@@ -5,7 +5,7 @@ Handles all UI endpoints for IPD management including wards, beds, admissions, a
 from fastapi import APIRouter, Request, Depends, status, Query, Form, HTTPException
 from typing import Optional, List
 from fastapi.responses import RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 from datetime import datetime, timedelta, date
@@ -21,7 +21,6 @@ from app.models.patient_models import Patient
 from app.schemas.ipd_schemas import WardCreate, WardUpdate, BedCreate, BedUpdate, AdmissionCreate, DoctorDutyCreate
 
 # Initialize Jinja2Templates
-templates = Jinja2Templates(directory="app/templates")
 router = APIRouter()
 
 
@@ -669,6 +668,7 @@ def create_admission_form(
     """Show create admission form"""
     patient = None
     is_emergency = False
+    current_admission_warning = None
     if patient_id:
         patient = patient_crud.get_patient(db, patient_id)
         
@@ -683,6 +683,17 @@ def create_admission_form(
         
         if emergency_appointment:
             is_emergency = True
+        
+        # Check if patient is already admitted and show warning
+        current_admission = ipd_crud.get_current_admission(db, patient_id)
+        if current_admission:
+            current_admission_warning = {
+                "admission_id": current_admission.id,
+                "admission_number": current_admission.admission_number,
+                "ward_name": current_admission.ward.name if current_admission.ward else "N/A",
+                "bed_number": current_admission.bed.bed_number if current_admission.bed else "N/A",
+                "admission_date": current_admission.admission_date.strftime("%Y-%m-%d %H:%M") if current_admission.admission_date else "N/A"
+            }
     
     # Get available beds
     available_beds = ipd_crud.get_available_beds(db)
@@ -702,7 +713,8 @@ def create_admission_form(
         "available_beds": available_beds,
         "wards": wards,
         "doctors_on_duty": doctors_on_duty,
-        "is_emergency": is_emergency
+        "is_emergency": is_emergency,
+        "current_admission_warning": current_admission_warning
     }
     return templates.TemplateResponse("ipd/admission_form.html", context)
 
@@ -720,8 +732,25 @@ def create_admission(
     diagnosis: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
     expected_discharge_date: Optional[str] = Form(None),
+    # New fields
+    allergies: Optional[str] = Form(None),
+    guardian_name: Optional[str] = Form(None),
+    guardian_phone: Optional[str] = Form(None),
+    guardian_relationship: Optional[str] = Form(None),
+    guardian_address: Optional[str] = Form(None),
 ):
     """Create a new admission"""
+    # Check if patient is already admitted
+    current_admission = ipd_crud.get_current_admission(db, patient_id)
+    if current_admission:
+        # Redirect back with warning message instead of raising error
+        from fastapi.responses import RedirectResponse
+        warning_msg = f"Patient is already admitted (Admission #: {current_admission.admission_number}). Please discharge the patient before creating a new admission."
+        return RedirectResponse(
+            url=f"{request.url_for('ipd_admission_create_form')}?patient_id={patient_id}&warning={warning_msg}&admission_id={current_admission.id}",
+            status_code=status.HTTP_302_FOUND
+        )
+    
     try:
         # Parse encounter_id - handle empty strings and convert to int or None
         encounter_id_int = None
@@ -745,9 +774,49 @@ def create_admission(
             admission_reason=admission_reason,
             diagnosis=diagnosis,
             notes=notes,
-            expected_discharge_date=expected_discharge
+            expected_discharge_date=expected_discharge,
+            # New fields
+            allergies=allergies,
+            guardian_name=guardian_name,
+            guardian_phone=guardian_phone,
+            guardian_relationship=guardian_relationship,
+            guardian_address=guardian_address
         )
         admission = ipd_crud.create_admission(db, admission_data)
+        
+        # If diagnosis was provided and there's an encounter, create EncounterDisease record
+        if diagnosis and diagnosis.strip() and encounter_id_int:
+            from app.models.encounter_models import Encounter
+            from app.models.disease_models import EncounterDisease, Disease
+            from sqlalchemy import func
+            
+            # Get the encounter
+            encounter = db.query(Encounter).filter(Encounter.id == encounter_id_int).first()
+            if encounter:
+                # Try to match the diagnosis to an existing Disease
+                clean_diagnosis = diagnosis.strip()
+                
+                # Try exact match first (case-insensitive)
+                disease = db.query(Disease).filter(
+                    func.lower(Disease.name) == clean_diagnosis.lower()
+                ).first()
+                
+                if not disease:
+                    # Try partial match
+                    disease = db.query(Disease).filter(
+                        Disease.name.ilike(f"%{clean_diagnosis}%")
+                    ).first()
+                
+                # Create EncounterDisease record
+                encounter_disease = EncounterDisease(
+                    encounter_id=encounter.id,
+                    disease_id=disease.id if disease else None,
+                    disease=disease,
+                    is_primary=True,
+                    custom_name=None if disease else clean_diagnosis  # Use custom name if no disease match
+                )
+                db.add(encounter_disease)
+                db.commit()
         
         # Send SMS notification to patient
         try:
@@ -849,7 +918,7 @@ def admission_detail(
     prescriptions = []
     
     # Determine admission period (from admission_date to discharge_date or now if still admitted)
-    from datetime import date
+    from datetime import datetime, date
     admission_start_date = admission.admission_date.date() if isinstance(admission.admission_date, datetime) else admission.admission_date
     admission_end_date = None
     if admission.discharge_date:
@@ -905,12 +974,35 @@ def admission_detail(
     lab_orders = []
     radiology_orders = []
     if encounter_ids_for_orders:
-        lab_orders = db.query(LabOrder).options(
+        # First get orders with basic relationships
+        lab_orders_query = db.query(LabOrder).options(
             joinedload(LabOrder.ordered_by),
-            joinedload(LabOrder.result_entered_by)
+            joinedload(LabOrder.result_entered_by),
+            joinedload(LabOrder.verified_by),
+            joinedload(LabOrder.authorized_by),
+            joinedload(LabOrder.lab_test)
         ).filter(
             LabOrder.encounter_id.in_(list(encounter_ids_for_orders))
-        ).order_by(LabOrder.ordered_at.desc()).all()
+        ).order_by(LabOrder.ordered_at.desc())
+        
+        lab_orders = lab_orders_query.all()
+        
+        # Load schema_json for each order with template
+        from app.models.lab_template_models import LabTemplateVersion
+        for order in lab_orders:
+            if order.template_id and order.template_version_used:
+                version = db.query(LabTemplateVersion).filter(
+                    LabTemplateVersion.template_id == order.template_id,
+                    LabTemplateVersion.version == order.template_version_used,
+                    LabTemplateVersion.status == 'PUBLISHED'
+                ).first()
+                if version:
+                    order._schema_json = version.schema_json
+                else:
+                    order._schema_json = None
+            else:
+                order._schema_json = None
+        
         radiology_orders = db.query(RadiologyOrder).options(
             joinedload(RadiologyOrder.ordered_by),
             joinedload(RadiologyOrder.report_entered_by),
@@ -984,6 +1076,87 @@ def admission_detail(
         TriageVitals.patient_id == admission.patient_id
     ).order_by(TriageVitals.recorded_at.desc()).limit(15).all()
     
+    # Process vitals for chart (reverse to get chronological order)
+    vitals_chart_data = {
+        "labels": [],
+        "labels_full": [],
+        "temperature": [],
+        "temperature_critical": [],
+        "systolic_bp": [],
+        "diastolic_bp": [],
+        "bp_critical": [],
+        "map": [],
+        "pulse_rate": [],
+        "pulse_critical": [],
+        "oxygen_saturation": [],
+        "spo2_critical": [],
+        "respiratory_rate": [],
+        "resp_critical": [],
+        "weight": [],
+        "weight_critical": [],
+        "bmi": [],
+        "bmi_critical": [],
+        "pain_scale": [],
+        "pain_critical": []
+    }
+    for v in reversed(recent_vitals):
+        if v.recorded_at:
+            # Full datetime for tooltip
+            if isinstance(v.recorded_at, datetime):
+                label = v.recorded_at.strftime("%H:%M")
+                label_full = v.recorded_at.strftime("%d/%m %H:%M")
+            else:
+                label = str(v.recorded_at)
+                label_full = str(v.recorded_at)
+            vitals_chart_data["labels"].append(label)
+            vitals_chart_data["labels_full"].append(label_full)
+            
+            # Temperature with critical flag (normal: 36-38°C)
+            temp = float(v.temperature) if v.temperature else 0
+            vitals_chart_data["temperature"].append(temp)
+            vitals_chart_data["temperature_critical"].append(temp > 38.5 or temp < 35.5)
+            
+            # BP with critical flag (normal: 90-140/60-90)
+            sys = float(v.systolic_bp) if v.systolic_bp else 0
+            dia = float(v.diastolic_bp) if v.diastolic_bp else 0
+            vitals_chart_data["systolic_bp"].append(sys)
+            vitals_chart_data["diastolic_bp"].append(dia)
+            vitals_chart_data["bp_critical"].append(sys > 180 or sys < 90 or dia > 120 or dia < 60)
+            
+            # Mean Arterial Pressure (MAP)
+            map_val = round((sys + 2 * dia) / 3, 1) if sys > 0 and dia > 0 else 0
+            vitals_chart_data["map"].append(map_val)
+            
+            # Pulse with critical flag (normal: 60-100)
+            pulse = float(v.pulse_rate) if v.pulse_rate else 0
+            vitals_chart_data["pulse_rate"].append(pulse)
+            vitals_chart_data["pulse_critical"].append(pulse > 120 or pulse < 50)
+            
+            # SpO2 with critical flag (normal: 95-100%)
+            spo2 = float(v.oxygen_saturation) if v.oxygen_saturation else 0
+            vitals_chart_data["oxygen_saturation"].append(spo2)
+            vitals_chart_data["spo2_critical"].append(spo2 < 92)
+            
+            # Respiratory rate with critical flag (normal: 12-20)
+            resp = float(v.respiratory_rate) if v.respiratory_rate else 0
+            vitals_chart_data["respiratory_rate"].append(resp)
+            vitals_chart_data["resp_critical"].append(resp > 24 or resp < 10)
+            
+            # Weight (critical if extreme)
+            weight = float(v.weight) if v.weight else 0
+            vitals_chart_data["weight"].append(weight)
+            vitals_chart_data["weight_critical"].append(weight > 200 or weight < 20)
+            
+            # BMI
+            bmi = float(v.bmi) if v.bmi else 0
+            vitals_chart_data["bmi"].append(bmi)
+            vitals_chart_data["bmi_critical"].append(bmi > 40 or bmi < 15)
+            
+            # Pain scale (0-10)
+            pain = float(v.pain_scale) if v.pain_scale else 0
+            vitals_chart_data["pain_scale"].append(pain)
+            vitals_chart_data["pain_critical"].append(pain >= 8)
+    
     # Get drug administrations for this admission, grouped by prescription
     from app.crud import drug_administration_crud
     from app.models.drug_administration_models import DrugAdministration
@@ -1021,10 +1194,16 @@ def admission_detail(
     fluids_chart_labels = []
     fluids_chart_intake = []
     fluids_chart_output = []
+    total_intake = 0
+    total_output = 0
     if fluid_entries:
         from collections import defaultdict
         by_date = defaultdict(lambda: {"intake": 0, "output": 0})
         for e in fluid_entries:
+            if e.entry_type == "intake":
+                total_intake += e.volume_ml
+            else:
+                total_output += e.volume_ml
             if e.recorded_at:
                 d = e.recorded_at.date() if hasattr(e.recorded_at, "date") else e.recorded_at
                 key = str(d)
@@ -1073,31 +1252,97 @@ def admission_detail(
             db.rollback()
             raise
     
+    # Get birth records for female patients (as mother)
+    birth_records = []
+    antenatal_records = []
+    diagnoses = []
+    if admission.patient.gender and admission.patient.gender.lower() == 'female':
+        from app.models.birth_models import BirthRecord
+        birth_records = db.query(BirthRecord).filter(
+            BirthRecord.mother_patient_id == admission.patient_id
+        ).order_by(BirthRecord.birth_date.desc()).all()
+        
+        # Get antenatal records
+        from app.models.antenatal_models import AntenatalVisit
+        antenatal_records = db.query(AntenatalVisit).filter(
+            AntenatalVisit.patient_id == admission.patient_id
+        ).order_by(AntenatalVisit.visit_date.desc()).all()
+    
+    # Get diagnoses for this admission
+    from app.models.ipd_models import AdmissionDiagnosis
+    diagnoses = db.query(AdmissionDiagnosis).options(
+        joinedload(AdmissionDiagnosis.diagnosed_by)
+    ).filter(
+        AdmissionDiagnosis.admission_id == admission_id,
+        AdmissionDiagnosis.is_active == True
+    ).order_by(AdmissionDiagnosis.diagnosed_at.desc()).all()
+    
+    # Get all diseases for the diagnosis multi-select picker
+    from app.crud import disease_crud
+    all_diseases = disease_crud.get_diseases(db, skip=0, limit=10000)
+    diseases = all_diseases if all_diseases else []
+    
     # Determine if discharge is ready (both clearances complete if required)
+    # Default to False - must explicitly verify clearances are done
     discharge_ready = False
-    if admission.ready_for_discharge_at:
-        if clearance:
-            if is_cash_patient(db, admission.patient_id):
-                # Cash patient: need both payment and nursing clearance
-                discharge_ready = clearance.payment_cleared and clearance.nursing_cleared
-            else:
-                # Insurance patient: only need nursing clearance
-                discharge_ready = clearance.nursing_cleared
-        # If clearance table doesn't exist, allow discharge anyway (backward compatibility)
+    if admission.ready_for_discharge_at and clearance:
+        if is_cash_patient(db, admission.patient_id):
+            # Cash patient: need BOTH payment AND nursing clearance
+            discharge_ready = bool(clearance.payment_cleared and clearance.nursing_cleared)
+        else:
+            # Insurance patient: only need nursing clearance
+            discharge_ready = bool(clearance.nursing_cleared)
+    # If no clearance record exists or discharge not prepared, discharge is NOT ready
     
     # Lab and radiology services for inline order modals (no iframe)
     lab_services = []
     radiology_services = []
+    lab_tests = []  # Lab Test Catalog for order selection
     if current_encounter_id and current_user.role and current_user.role.name in ["Doctor", "Clinician", "Admin"]:
         from app.crud import service_pricing_crud
         lab_services = service_pricing_crud.get_service_pricing_by_charge_type(db, "lab_test") or []
         radiology_services = service_pricing_crud.get_service_pricing_by_charge_type(db, "radiology") or []
+        
+        # Get Lab Test Catalog
+        from app.models.lab_catalog_models import LabTest
+        lab_tests = db.query(LabTest).filter(LabTest.is_active == True).order_by(LabTest.test_name).all() or []
 
     # Prescription options for inline Record Administration modal (Nurse/Doctor/Admin)
     prescription_options = []
     default_admin_time = datetime.now().strftime("%Y-%m-%dT%H:%M")
     if current_user.role and current_user.role.name in ["Nurse", "Doctor", "Admin"]:
         prescription_options = drug_administration_crud.get_dispensed_drugs_by_admission(db, admission.admission_number) or []
+
+    # Calculate patient age from date of birth
+    patient_age = None
+    if admission.patient.date_of_birth:
+        today = date.today()
+        dob = admission.patient.date_of_birth
+        patient_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+    # Get encounter data for allergies, past medical history, and current medications
+    # Use the admission's initial encounter first, or fall back to the most recent encounter during admission
+    encounter_allergies = None
+    encounter_past_medical_history = None
+    encounter_current_medications = None
+    
+    # Get the primary encounter (admission.encounter_id points to the initial encounter)
+    primary_encounter = None
+    if admission.encounter_id:
+        from app.models.encounter_models import Encounter
+        primary_encounter = db.query(Encounter).filter(Encounter.id == admission.encounter_id).first()
+    
+    if primary_encounter:
+        encounter_allergies = primary_encounter.allergies
+        encounter_past_medical_history = primary_encounter.past_medical_history
+        encounter_current_medications = primary_encounter.medications
+    else:
+        # Fall back to any encounter during this admission period
+        if encounters_in_period:
+            latest_encounter = encounters_in_period[0]  # Already sorted by date desc
+            encounter_allergies = latest_encounter.allergies
+            encounter_past_medical_history = latest_encounter.past_medical_history
+            encounter_current_medications = latest_encounter.medications
 
     context = {
         "request": request,
@@ -1120,6 +1365,7 @@ def admission_detail(
         "administrations_by_prescription": dict(administrations_by_prescription),
         "current_encounter_id": current_encounter_id,
         "lab_services": lab_services,
+        "lab_tests": lab_tests,  # Lab Test Catalog for order selection
         "radiology_services": radiology_services,
         "lab_orders": lab_orders,
         "radiology_orders": radiology_orders,
@@ -1128,8 +1374,22 @@ def admission_detail(
         "fluids_chart_labels": fluids_chart_labels,
         "fluids_chart_intake": fluids_chart_intake,
         "fluids_chart_output": fluids_chart_output,
+        "total_intake": total_intake,
+        "total_output": total_output,
         "prescription_options": prescription_options,
         "default_admin_time": default_admin_time,
+        "birth_records": birth_records,
+        "antenatal_records": antenatal_records,
+        "diagnoses": diagnoses,
+        "diseases": diseases,
+        "vitals_chart_data": vitals_chart_data,
+        "current_date": date.today(),
+        "week_ago": datetime.now() - timedelta(days=7),
+        # Patient demographics and clinical info
+        "patient_age": patient_age,
+        "encounter_allergies": encounter_allergies,
+        "encounter_past_medical_history": encounter_past_medical_history,
+        "encounter_current_medications": encounter_current_medications,
     }
     return templates.TemplateResponse("ipd/admission_detail.html", context)
 
@@ -1222,6 +1482,7 @@ def record_fluid(
     volume_ml: int = Form(...),
     recorded_at: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
+    color: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Nurse", "Doctor", "Admin"])),
 ):
@@ -1260,6 +1521,7 @@ def record_fluid(
         volume_ml=volume_ml,
         recorded_at=admin_datetime,
         notes=notes or None,
+        color=color or None,
     )
     if not created:
         if is_ajax:
@@ -1587,7 +1849,7 @@ def prepare_admission_discharge(
     request: Request,
     admission_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor"]))
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor", "Nurse"]))
 ):
     """Prepare discharge by syncing ward/bed charges and linking invoice."""
     try:
@@ -1595,12 +1857,58 @@ def prepare_admission_discharge(
         if not admission:
             raise HTTPException(status_code=404, detail="Admission not found")
         
+        # Check if cash patient has unpaid bills - deny preparation if bills not settled
+        from app.utils.payment_verification import is_cash_patient
+        from sqlalchemy import or_, and_
+        
+        if is_cash_patient(db, admission.patient_id):
+            # Check for any unpaid invoices related to this admission
+            from app.models.billing_models import Invoice
+            
+            admission_invoices = db.query(Invoice).filter(
+                Invoice.is_active == True,
+                Invoice.patient_id == admission.patient_id,
+                or_(
+                    Invoice.admission_id == admission_id,
+                    Invoice.encounter_id == admission.encounter_id,
+                    and_(
+                        Invoice.opd_visit_id == None,
+                        Invoice.admission_id == None,
+                        Invoice.encounter_id == None,
+                        Invoice.invoice_date >= admission.admission_date
+                    )
+                )
+            ).all()
+            
+            # Also check for invoices created during admission period
+            period_invoices = db.query(Invoice).filter(
+                Invoice.is_active == True,
+                Invoice.patient_id == admission.patient_id,
+                Invoice.admission_id == None,
+                Invoice.encounter_id == None,
+                Invoice.opd_visit_id == None,
+                Invoice.invoice_date >= admission.admission_date
+            ).all()
+            
+            all_relevant_invoices = list(admission_invoices) + [inv for inv in period_invoices if inv not in admission_invoices]
+            
+            # Check for any unpaid invoices - includes PENDING, PARTIALLY_PAID, or any invoice with balance > 0
+            unpaid_invoices = [inv for inv in all_relevant_invoices 
+                             if inv.balance > 0]
+            
+            if unpaid_invoices:
+                total_unpaid = sum([inv.balance for inv in unpaid_invoices])
+                return RedirectResponse(
+                    url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) + 
+                        f"?error=Cannot prepare discharge. Outstanding bills of GHS {total_unpaid:.2f} must be settled first. Please process payment before preparing discharge.",
+                    status_code=status.HTTP_302_FOUND
+                )
+        
         # Sync ward/bed charges and ensure invoice is linked
         calculate_ward_bed_charges(db, admission, current_user.id)
         invoice = get_or_create_invoice_for_admission(db, admission, current_user.id)
         
         # Auto-clear payment if invoice is paid (for cash patients)
-        from app.utils.payment_verification import is_cash_patient
         from app.crud import discharge_crud
         
         if is_cash_patient(db, admission.patient_id):
@@ -1679,7 +1987,7 @@ def discharge_form(
     request: Request,
     admission_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor"]))
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor", "Nurse"]))
 ):
     """Show discharge form with discharge status, diagnosis, and notes"""
     admission = ipd_crud.get_admission(db, admission_id)
@@ -1690,11 +1998,34 @@ def discharge_form(
     
     # Get encounter diagnosis if available
     encounter_diagnosis = None
+    encounter_diseases = []
+    encounter_diseases_str = []  # String version for Jinja2 template comparison
     if admission.encounter_id:
         from app.crud import encounter_crud
+        from app.models.encounter_models import EncounterDisease
         encounter = encounter_crud.get_encounter(db, admission.encounter_id)
         if encounter:
-            encounter_diagnosis = encounter.diagnosis
+            encounter_diagnosis = encounter.primary_diagnosis_description
+            # Get encounter diseases
+            encounter_diseases_list = db.query(EncounterDisease).filter(
+                EncounterDisease.encounter_id == admission.encounter_id
+            ).all()
+            encounter_diseases = [ed.disease_id for ed in encounter_diseases_list if ed.disease_id]
+            encounter_diseases_str = [str(ed.disease_id) for ed in encounter_diseases_list if ed.disease_id]
+    
+    # Get diseases for the multi-select dropdown
+    try:
+        from app.crud import disease_crud
+        all_diseases = disease_crud.get_diseases(db, skip=0, limit=10000)
+        if all_diseases is None:
+            all_diseases = []
+        diseases = [
+            d for d in all_diseases
+            if d and d.id and d.name and d.name.strip()
+        ]
+    except Exception as e:
+        print(f"Error loading diseases: {e}")
+        diseases = []
     
     context = {
         "request": request,
@@ -1704,8 +2035,17 @@ def discharge_form(
         "admission": admission,
         "discharge_statuses": [s for s in DischargeStatus],
         "preselect_death": request.query_params.get("death") in ("1", "true", "yes"),
-        "encounter_diagnosis": encounter_diagnosis
+        "encounter_diagnosis": encounter_diagnosis,
+        "encounter_diseases": encounter_diseases_str,
+        "diseases": diseases
     }
+    
+    # If there are pre-selected encounter diseases, convert to JSON for the template
+    import json
+    if encounter_diseases_str:
+        context["encounter_diseases_json"] = json.dumps(encounter_diseases_str)
+    else:
+        context["encounter_diseases_json"] = "[]"
     return templates.TemplateResponse("ipd/discharge_form.html", context)
 
 
@@ -1714,9 +2054,10 @@ def discharge_admission(
     request: Request,
     admission_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor"])),
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Doctor", "Nurse"])),
     discharge_status: Optional[str] = Form(None),
     discharge_diagnosis: Optional[str] = Form(None),
+    diagnoses: Optional[str] = Form(None),  # New: JSON string of selected diagnosis IDs
     discharge_notes: Optional[str] = Form(None)
 ):
     """Discharge a patient and process billing"""
@@ -1756,23 +2097,60 @@ def discharge_admission(
         from app.crud import discharge_crud
         from app.utils.payment_verification import is_cash_patient
         from app.crud import billing_crud
-        from app.models.billing_models import InvoiceStatus
+        from sqlalchemy.exc import ProgrammingError
+        from sqlalchemy import or_, and_
 
-        clearance = discharge_crud.get_discharge_clearance(db, admission_id)
+        clearance = None
+        try:
+            clearance = discharge_crud.get_discharge_clearance(db, admission_id)
+        except ProgrammingError as e:
+            if "does not exist" in str(e) or "relation" in str(e).lower():
+                db.rollback()
+                print(f"Warning: discharge_clearances table does not exist yet. Please run migration 0fc735668649.")
+                clearance = None
+            else:
+                raise
 
         # For death: skip payment and nursing clearance (record promptly; billing can be settled later)
         # For cash patients (non-death): Check payment clearance
         if not is_death and is_cash_patient(db, admission.patient_id):
-            # Get all invoices for this admission
-            patient_invoices = billing_crud.get_invoices_by_patient(db, admission.patient_id)
-            admission_invoices = [inv for inv in patient_invoices 
-                                if inv.encounter_id == admission.encounter_id or 
-                                (hasattr(inv, 'invoice_date') and inv.invoice_date and inv.invoice_date >= admission.admission_date)]
+            # Get all invoices for this admission - check both admission_id and encounter_id
+            # Also include any invoices from the patient's billing history that may relate to this admission
+            from app.models.billing_models import Invoice
             
-            # Check for unpaid or partially paid invoices
-            unpaid_invoices = [inv for inv in admission_invoices 
-                             if inv.status in [InvoiceStatus.PENDING, InvoiceStatus.PARTIALLY_PAID] 
-                             and inv.balance > 0]
+            # Query invoices linked to this admission via admission_id OR encounter_id
+            admission_invoices = db.query(Invoice).filter(
+                Invoice.is_active == True,
+                Invoice.patient_id == admission.patient_id,
+                or_(
+                    Invoice.admission_id == admission_id,
+                    Invoice.encounter_id == admission.encounter_id,
+                    and_(
+                        Invoice.opd_visit_id == None,
+                        Invoice.admission_id == None,
+                        Invoice.encounter_id == None,
+                        Invoice.invoice_date >= admission.admission_date
+                    )
+                )
+            ).all()
+            
+            # Also get any pending invoices that may have been created during this admission period
+            # Check for invoices with admission_id = None but created during admission
+            period_invoices = db.query(Invoice).filter(
+                Invoice.is_active == True,
+                Invoice.patient_id == admission.patient_id,
+                Invoice.admission_id == None,
+                Invoice.encounter_id == None,
+                Invoice.opd_visit_id == None,
+                Invoice.invoice_date >= admission.admission_date
+            ).all()
+            
+            # Combine all relevant invoices
+            all_relevant_invoices = list(admission_invoices) + [inv for inv in period_invoices if inv not in admission_invoices]
+            
+            # Check for unpaid invoices (any invoice with balance > 0)
+            unpaid_invoices = [inv for inv in all_relevant_invoices 
+                             if inv.balance > 0]
             
             if unpaid_invoices:
                 total_unpaid = sum([inv.balance for inv in unpaid_invoices])
@@ -1810,15 +2188,124 @@ def discharge_admission(
             except ValueError:
                 pass  # Invalid status, will be ignored
         
+        # Process diagnoses from multi-select dropdown
+        final_diagnosis_text = ""
+        selected_diseases_list = []  # Store for creating EncounterDisease records
+        has_diagnoses = False  # Track if we have any diagnoses
+        
+        if diagnoses:
+            try:
+                import json
+                # Handle multiple cases: JSON string, list, or single integer
+                if isinstance(diagnoses, list):
+                    # Already a list from Form parsing
+                    diagnosis_ids = diagnoses
+                else:
+                    # Try to parse as JSON string
+                    parsed = json.loads(diagnoses)
+                    if isinstance(parsed, list):
+                        diagnosis_ids = parsed
+                    elif isinstance(parsed, int):
+                        # Single integer value like "123" - wrap in list
+                        diagnosis_ids = [parsed]
+                    else:
+                        diagnosis_ids = []
+                
+                if diagnosis_ids and len(diagnosis_ids) > 0:
+                    # Convert string IDs to integers
+                    diagnosis_ids_int = [int(did) for did in diagnosis_ids]
+                    from app.models.disease_models import Disease
+                    selected_diseases = db.query(Disease).filter(Disease.id.in_(diagnosis_ids_int)).all()
+                    selected_diseases_list = selected_diseases  # Store for later
+                    disease_names = [d.name for d in selected_diseases if d.name]
+                    if disease_names:
+                        final_diagnosis_text = ", ".join(disease_names)
+                        has_diagnoses = True
+            except (json.JSONDecodeError, TypeError, AttributeError, ValueError) as e:
+                print(f"Error parsing diagnoses: {e}")
+                final_diagnosis_text = ""
+        
+        # REQUIRE at least one disease - either from multi-select OR from existing encounter
+        if not has_diagnoses:
+            # Check if there are existing encounter diseases from the original encounter
+            if admission.encounter_id:
+                from app.models.disease_models import EncounterDisease
+                existing_encounter_diseases = db.query(EncounterDisease).filter(
+                    EncounterDisease.encounter_id == admission.encounter_id
+                ).all()
+                if existing_encounter_diseases:
+                    disease_ids = [ed.disease_id for ed in existing_encounter_diseases if ed.disease_id]
+                    if disease_ids:
+                        from app.models.disease_models import Disease
+                        existing_diseases = db.query(Disease).filter(Disease.id.in_(disease_ids)).all()
+                        existing_disease_names = [d.name for d in existing_diseases if d.name]
+                        if existing_disease_names:
+                            final_diagnosis_text = ", ".join(existing_disease_names)
+                            has_diagnoses = True
+            
+            # If still no diagnoses, reject the discharge
+            if not has_diagnoses:
+                return RedirectResponse(
+                    url=str(request.url_for("ipd_admission_detail", admission_id=admission_id)) +
+                        "?error=Please+select+at+least+one+diagnosis+disease+before+discharging+the+patient.",
+                    status_code=status.HTTP_302_FOUND
+                )
+        
         # Update admission with discharge information
         admission_update = AdmissionUpdate(
             discharge_status=discharge_status_enum,
-            discharge_diagnosis=discharge_diagnosis.strip() if discharge_diagnosis else None,
+            discharge_diagnosis=final_diagnosis_text if final_diagnosis_text else None,
             discharge_notes=discharge_notes.strip() if discharge_notes else None,
             discharged_by_id=current_user.id,
             discharge_date=datetime.now()
         )
         admission = ipd_crud.update_admission(db, admission_id, admission_update)
+        
+        # Save diagnoses as EncounterDisease records for DHIMS2 reporting
+        if selected_diseases_list:
+            from app.models.disease_models import EncounterDisease
+            from app.models.encounter_models import Encounter
+            # Find or create an encounter to link diseases to
+            encounter = db.query(Encounter).filter(
+                Encounter.admission_id == admission_id,
+                Encounter.is_active == True
+            ).first()
+            
+            # If no encounter exists, create one for the discharge
+            if not encounter:
+                # Get department_id from ward
+                from app.models.encounter_models import EncounterStatus
+                
+                encounter = Encounter(
+                    patient_id=admission.patient_id,
+                    admission_id=admission_id,
+                    clinician_id=current_user.id,
+                    encounter_date=datetime.now(),
+                    status=EncounterStatus.COMPLETED,
+                    is_active=True
+                )
+                db.add(encounter)
+                db.flush()  # Get the encounter ID
+            
+            # Add diseases to the encounter
+            for disease in selected_diseases_list:
+                # Check if this disease already exists for this encounter
+                existing = db.query(EncounterDisease).filter(
+                    EncounterDisease.encounter_id == encounter.id,
+                    EncounterDisease.disease_id == disease.id
+                ).first()
+                
+                if not existing:
+                    # Create new EncounterDisease record
+                    encounter_disease = EncounterDisease(
+                        encounter_id=encounter.id,
+                        disease_id=disease.id,
+                        is_primary=True
+                    )
+                    db.add(encounter_disease)
+            
+            db.commit()
+            print(f"✓ Saved {len(selected_diseases_list)} diseases to encounter {encounter.id} for DHIMS2 reporting")
         
         # Now actually discharge (change status)
         admission = ipd_crud.discharge_patient(db, admission_id, current_user.id)
@@ -2263,4 +2750,139 @@ def ipd_dashboard(
         "occupancy_rate": (occupied_beds / total_beds * 100) if total_beds > 0 else 0
     }
     return templates.TemplateResponse("ipd/dashboard.html", context)
+
+
+# API Endpoints for Diagnoses
+from app.models.ipd_models import DiagnosisType
+
+@router.post("/api/v1/ipd/admissions/{admission_id}/diagnoses", name="api_add_diagnosis")
+def api_add_diagnosis(
+    request: Request,
+    admission_id: int,
+    diagnosis: Optional[str] = Form(None),
+    diagnosis_type: str = Form(...),
+    icd_code: Optional[str] = Form(None),
+    disease_id: Optional[str] = Form(None),  # Single disease ID (also accepts comma-separated)
+    disease_ids: Optional[str] = Form(None),  # Comma-separated list of disease IDs (for compatibility)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """API endpoint to add diagnosis(es) to an admission"""
+    # Validate diagnosis type
+    try:
+        diag_type = DiagnosisType(diagnosis_type)
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": f"Invalid diagnosis type: {diagnosis_type}"}
+        )
+    
+    # Check admission exists
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        return JSONResponse(
+            status_code=404,
+            content={"success": False, "error": "Admission not found"}
+        )
+    
+    created_count = 0
+    errors = []
+    
+    # Parse disease_ids if provided (support both singular and plural)
+    disease_id_list = []
+    
+    # Use disease_ids if provided, otherwise fall back to disease_id
+    disease_ids_param = disease_ids if disease_ids else disease_id
+    
+    if disease_ids_param:
+        try:
+            disease_id_list = [int(x.strip()) for x in disease_ids_param.split(',') if x.strip()]
+        except ValueError:
+            errors.append("Invalid disease IDs format")
+    
+    # If disease IDs are provided, create a diagnosis for each
+    if disease_id_list:
+        from app.models.disease_models import Disease
+        for disease_id in disease_id_list:
+            try:
+                disease = db.query(Disease).filter(Disease.id == disease_id).first()
+                if disease:
+                    new_diagnosis = ipd_crud.create_diagnosis(
+                        db=db,
+                        admission_id=admission_id,
+                        diagnosis=disease.name,
+                        diagnosis_type=diag_type,
+                        diagnosed_by_id=current_user.id,
+                        icd_code=disease.code if disease.code else icd_code
+                    )
+                    created_count += 1
+                else:
+                    errors.append(f"Disease with ID {disease_id} not found")
+            except Exception as e:
+                errors.append(f"Error creating diagnosis for disease {disease_id}: {str(e)}")
+    
+    # If custom diagnosis is provided, create that as well
+    if diagnosis and diagnosis.strip():
+        try:
+            new_diagnosis = ipd_crud.create_diagnosis(
+                db=db,
+                admission_id=admission_id,
+                diagnosis=diagnosis.strip(),
+                diagnosis_type=diag_type,
+                diagnosed_by_id=current_user.id,
+                icd_code=icd_code
+            )
+            created_count += 1
+        except Exception as e:
+            errors.append(f"Error creating custom diagnosis: {str(e)}")
+    
+    # Check if at least one diagnosis was created
+    if created_count == 0:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "Please select diseases from database or enter a custom diagnosis"}
+        )
+    
+    if errors and created_count == 0:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "; ".join(errors)}
+        )
+    
+    return JSONResponse(
+        status_code=201,
+        content={
+            "success": True,
+            "message": f"Added {created_count} diagnosis(es) successfully",
+            "created_count": created_count
+        }
+    )
+
+
+@router.delete("/api/v1/ipd/admissions/{admission_id}/diagnoses/{diagnosis_id}", name="api_delete_diagnosis")
+def api_delete_diagnosis(
+    request: Request,
+    admission_id: int,
+    diagnosis_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """API endpoint to delete a diagnosis"""
+    success = ipd_crud.delete_diagnosis(db, diagnosis_id)
+    if not success:
+        return JSONResponse(
+            status_code=404,
+            content={"success": False, "error": "Diagnosis not found"}
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"success": True, "message": "Diagnosis deleted successfully"}
+    )
+
+
+
+    return JSONResponse(
+        status_code=200,
+        content={"success": True, "message": "Wound care record deleted successfully"}
+    )
 

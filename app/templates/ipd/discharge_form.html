@@ -89,9 +89,117 @@
                                     </div>
 
                                     <div class="form-group">
-                                        <label for="discharge_diagnosis">Final Diagnosis *</label>
-                                        <textarea class="form-control" id="discharge_diagnosis" name="discharge_diagnosis" rows="4" placeholder="Enter final diagnosis at discharge...">{% if encounter_diagnosis %}{{ encounter_diagnosis }}{% endif %}</textarea>
-                                        <small class="form-text text-muted">Final diagnosis at discharge (auto-filled from encounter if available)</small>
+                                        <label for="diagnosis-select-container">Final Diagnosis *</label>
+                                        
+                                        <!-- START: Multi-Select Dropdown for Diagnoses (matching encounter form) -->
+                                        <div class="custom-multi-select-container" id="diagnosis-select-container" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-owns="diagnosis-options-list">
+                                            
+                                            <!-- Unified Input: Shows tags and allows search -->
+                                            <div class="custom-multi-select-input-wrapper" id="selected-diagnosis-display" tabindex="0" role="textbox" aria-label="Select diagnoses">
+                                                <div class="selected-tags-container" id="tags-container"></div>
+                                                <input 
+                                                    type="text" 
+                                                    class="unified-search-input" 
+                                                    id="unified-search-input"
+                                                    placeholder="Search or select diagnoses..." 
+                                                    autocomplete="off"
+                                                    aria-autocomplete="list"
+                                                    aria-controls="diagnosis-options-list"
+                                                >
+                                                <div class="input-actions">
+                                                    <button type="button" class="clear-selection-btn" id="clear-all-btn" title="Clear all selections" aria-label="Clear all selections" style="display: none;">
+                                                        <i class="fas fa-times-circle"></i>
+                                                    </button>
+                                                    <i class="fas fa-chevron-down toggle-icon" aria-hidden="true"></i>
+                                                </div>
+                                            </div>
+
+                                            <!-- HIDDEN SELECT: Form submission - matching encounter form pattern -->
+                                            <select 
+                                                id="hidden-diagnosis-select" 
+                                                name="diagnoses" 
+                                                multiple="multiple" 
+                                                class="d-none" 
+                                                style="display: none !important;"
+                                                aria-hidden="true"
+                                            >
+                                                {% if diseases %}
+                                                    {% for disease in diseases %}
+                                                    {% if disease and disease.id and disease.name and disease.name.strip() %}
+                                                    {% set diagnosis_label = disease.name %}
+                                                    {% if disease.code %}{% set diagnosis_label = diagnosis_label ~ ' (' ~ disease.code ~ ')' %}{% endif %}
+                                                    <option value="{{ disease.id }}" {% if encounter_diseases and str(disease.id) in encounter_diseases %}selected{% endif %}>{{ diagnosis_label }}</option>
+                                                    {% endif %}
+                                                    {% endfor %}
+                                                {% endif %}
+                                            </select>
+
+                                            <!-- DROPDOWN PANEL -->
+                                            <div class="custom-multi-select-dropdown" id="multi-select-dropdown" role="listbox" aria-label="Diagnosis options">
+                                                <div class="dropdown-header">
+                                                    <div class="select-all-controls">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            class="form-check-input" 
+                                                            id="select-all-checkbox"
+                                                            aria-label="Select all filtered diagnoses"
+                                                        >
+                                                        <label class="form-check-label" for="select-all-checkbox" id="select-all-label">
+                                                            Select all filtered (<span id="filtered-count">0</span>)
+                                                        </label>
+                                                    </div>
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary clear-filter-btn" id="clear-filter-btn" title="Clear search filter">
+                                                        <i class="fas fa-times"></i> Clear filter
+                                                    </button>
+                                                </div>
+                                                <div class="options-list" id="diagnosis-options-list" role="list">
+                                                    {% if diseases %}
+                                                        {% set has_valid_diseases = false %}
+                                                        {% for disease in diseases %}
+                                                        {% if disease and disease.id and disease.name and disease.name.strip() %}
+                                                        {% set has_valid_diseases = true %}
+                                                        {% set diagnosis_label = disease.name %}
+                                                        {% if disease.code %}{% set diagnosis_label = diagnosis_label ~ ' (' ~ disease.code ~ ')' %}{% endif %}
+                                                        
+                                                        <div 
+                                                            class="option-item {% if encounter_diseases and str(disease.id) in encounter_diseases %}selected{% endif %}" 
+                                                            data-id="{{ disease.id }}" 
+                                                            data-name="{{ diagnosis_label }}"
+                                                            role="option"
+                                                            aria-selected="{% if encounter_diseases and str(disease.id) in encounter_diseases %}true{% else %}false{% endif %}"
+                                                            tabindex="0"
+                                                        >
+                                                            <input 
+                                                                type="checkbox" 
+                                                                class="form-check-input item-checkbox" 
+                                                                id="item-{{ disease.id }}"
+                                                                aria-label="Select {{ diagnosis_label }}"
+                                                                {% if encounter_diseases and str(disease.id) in encounter_diseases %}checked{% endif %}
+                                                            >
+                                                            <label class="form-check-label" for="item-{{ disease.id }}">{{ diagnosis_label }}</label>
+                                                        </div>
+                                                        {% endif %}
+                                                        {% endfor %}
+                                                        
+                                                        {% if not has_valid_diseases %}
+                                                            <div class="option-item no-results" role="option" style="padding: 20px; text-align: center; color: #6c757d;">
+                                                                <p class="mb-0"><i class="fas fa-info-circle"></i> No valid diseases found in database. Please add diseases first.</p>
+                                                            </div>
+                                                        {% endif %}
+                                                    {% else %}
+                                                        <div class="option-item no-results" role="option" style="padding: 20px; text-align: center; color: #6c757d;">
+                                                            <p class="mb-0"><i class="fas fa-info-circle"></i> No diseases found in database. Please add diseases first.</p>
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <small class="form-text text-muted">Type to search, click to select. Selected items appear as tags above.</small>
+                                        <!-- END: Multi-Select Dropdown for Diagnoses -->
+                                        
+                                        <!-- Fallback textarea for additional notes -->
+                                        <label for="discharge_diagnosis" class="mt-2">Additional Diagnosis Notes</label>
+                                        <textarea class="form-control" id="discharge_diagnosis" name="discharge_diagnosis" rows="3" placeholder="Enter any additional diagnosis notes...">{% if encounter_diagnosis %}{{ encounter_diagnosis }}{% endif %}</textarea>
                                     </div>
 
                                     <div class="form-group">
@@ -115,6 +223,628 @@
             </div>
         </section>
     </div>
+
+{% block extra_js %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+    .custom-multi-select-container {
+        width: 100%;
+        max-width: 100%;
+        position: relative;
+    }
+    
+    /* Input wrapper - modern select-like appearance */
+    .custom-multi-select-input-wrapper {
+        min-height: 46px;
+        max-height: 120px;
+        overflow-y: auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        padding: 6px 12px;
+        background: #fff;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        cursor: text;
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    
+    .custom-multi-select-input-wrapper:hover {
+        border-color: #bdbdbd;
+    }
+    
+    .custom-multi-select-input-wrapper.active {
+        border-color: #28a745;
+        box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.15);
+    }
+    
+    /* Tags container */
+    .selected-tags-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-right: 8px;
+    }
+    
+    /* Beautiful tag styling */
+    .selected-tag {
+        display: inline-flex;
+        align-items: center;
+        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+        color: #2e7d32;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 500;
+        max-width: calc(100% - 24px);
+        white-space: normal;
+        line-height: 1.3;
+        border: 1px solid #a5d6a7;
+        transition: all 0.2s ease;
+    }
+    
+    .selected-tag:hover {
+        background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .selected-tag .remove-tag {
+        margin-left: 6px;
+        cursor: pointer;
+        opacity: 0.7;
+        font-size: 16px;
+        line-height: 1;
+        transition: opacity 0.2s;
+    }
+    
+    .selected-tag .remove-tag:hover {
+        opacity: 1;
+    }
+    
+    /* Unified search input */
+    .unified-search-input {
+        flex: 1;
+        min-width: 120px;
+        border: none;
+        outline: none;
+        font-size: 14px;
+        padding: 4px 0;
+        background: transparent;
+        color: #333;
+    }
+    
+    .unified-search-input::placeholder {
+        color: #9e9e9e;
+    }
+    
+    /* Input actions (clear button and chevron) */
+    .input-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 4px;
+    }
+    
+    .clear-selection-btn {
+        background: none;
+        border: none;
+        color: #9e9e9e;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    }
+    
+    .clear-selection-btn:hover {
+        background: #f5f5f5;
+        color: #757575;
+    }
+    
+    .toggle-icon {
+        color: #757575;
+        font-size: 14px;
+        transition: transform 0.2s;
+    }
+    
+    .custom-multi-select-input-wrapper.active .toggle-icon {
+        transform: rotate(180deg);
+    }
+    
+    /* Dropdown panel */
+    .custom-multi-select-dropdown {
+        width: 100%;
+        max-width: 100%;
+        position: absolute;
+        top: calc(100% + 6px);
+        background: white;
+        border-radius: 10px;
+        border: 1px solid #e0e0e0;
+        z-index: 9999 !important;
+        overflow: hidden;
+        display: none !important;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+    }
+    
+    .custom-multi-select-dropdown.show {
+        display: block !important;
+        animation: slideDown 0.2s ease;
+    }
+    
+    @keyframes slideDown {
+        from {
+            opacity: 0;
+            transform: translateY(-8px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Dropdown header */
+    .dropdown-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        background: #fafafa;
+        border-bottom: 1px solid #eee;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    
+    .select-all-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .select-all-controls .form-check-input {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+    
+    .select-all-controls label {
+        font-size: 13px;
+        color: #555;
+        cursor: pointer;
+    }
+    
+    .clear-filter-btn {
+        padding: 5px 12px;
+        font-size: 12px;
+        border-radius: 6px;
+        transition: all 0.2s;
+    }
+    
+    .clear-filter-btn:hover {
+        background: #e0e0e0;
+    }
+    
+    /* Options list */
+    .options-list {
+        max-height: 280px;
+        overflow-y: auto;
+        padding: 8px;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .options-list::-webkit-scrollbar {
+        width: 8px;
+    }
+    
+    .options-list::-webkit-scrollbar-track {
+        background: #f5f5f5;
+    }
+    
+    .options-list::-webkit-scrollbar-thumb {
+        background: #ccc;
+        border-radius: 4px;
+    }
+    
+    .options-list::-webkit-scrollbar-thumb:hover {
+        background: #bbb;
+    }
+    
+    /* Option items */
+    .option-item {
+        padding: 10px 14px 10px 14px !important;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        border-radius: 8px;
+        margin-bottom: 2px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        min-height: 42px;
+        box-sizing: border-box;
+    }
+    
+    .option-item:hover {
+        background: #f5f9f5;
+    }
+    
+    .option-item.selected {
+        background: #e8f5e9;
+    }
+    
+    .option-item:focus {
+        outline: none;
+        background: #e8f5e9;
+        box-shadow: inset 0 0 0 2px #28a745;
+    }
+    
+    .option-item .form-check-input {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
+        flex-grow: 0;
+        margin: 2px 0 0 0 !important;
+        cursor: pointer;
+        accent-color: #28a745;
+        position: relative;
+        float: none !important;
+        top: 0 !important;
+        left: 0 !important;
+    }
+    
+    .option-item label.form-check-label {
+        padding-left: 0 !important;
+        margin-left: 0 !important;
+        flex: 1;
+        font-size: 14px;
+        color: #333;
+        cursor: pointer;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        line-height: 1.4;
+        display: block;
+    }
+    
+    .option-item.selected label.form-check-label {
+        color: #1b5e20;
+        font-weight: 500;
+    }
+    
+    /* No results message */
+    .option-item.no-results {
+        padding: 20px !important;
+        text-align: center;
+        color: #757575;
+        display: block;
+    }
+    
+    .option-item.no-results p {
+        margin: 0;
+        font-size: 14px;
+    }
+    
+    /* Help text */
+    .form-text.text-muted {
+        font-size: 12px;
+        color: #888;
+        margin-top: 6px;
+    }
+    
+    /* Mobile responsive */
+    @media (max-width: 576px) {
+        .custom-multi-select-dropdown {
+            position: fixed;
+            top: 15%;
+            left: 4%;
+            width: 92%;
+            max-height: 60vh;
+            border-radius: 12px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+        }
+    }
+</style>
+<script>
+$(document).ready(function() {
+    const $container = $('#diagnosis-select-container');
+    const $inputWrapper = $('#selected-diagnosis-display');
+    const $tagsContainer = $('#tags-container');
+    const $unifiedInput = $('#unified-search-input');
+    const $dropdown = $('#multi-select-dropdown');
+    const $optionsList = $('#diagnosis-options-list');
+    const $hiddenSelect = $('#hidden-diagnosis-select');
+    const $selectAllCheckbox = $('#select-all-checkbox');
+    const $selectAllLabel = $('#select-all-label');
+    const $filteredCount = $('#filtered-count');
+    const $clearAllBtn = $('#clear-all-btn');
+    const $clearFilterBtn = $('#clear-filter-btn');
+    
+    let currentFocusedIndex = -1;
+    
+    // Toggle dropdown
+    $inputWrapper.on('click', function(e) {
+        if ($(e.target).hasClass('remove-tag') || $(e.target).closest('.remove-tag').length) {
+            return;
+        }
+        if ($(e.target).hasClass('clear-selection-btn') || $(e.target).closest('.clear-selection-btn').length) {
+            return;
+        }
+        toggleDropdown();
+    });
+    
+    function toggleDropdown() {
+        const isOpen = $dropdown.hasClass('show');
+        $dropdown.toggleClass('show');
+        $inputWrapper.toggleClass('active');
+        $container.attr('aria-expanded', !isOpen);
+        
+        if (!isOpen) {
+            $unifiedInput.focus();
+            updateFilteredCount();
+        }
+    }
+    
+    // Close dropdown when clicking outside
+    $(document).on('click', function(e) {
+        if (!$container.is(e.target) && $container.has(e.target).length === 0) {
+            closeDropdown();
+        }
+    });
+    
+    function closeDropdown() {
+        $dropdown.removeClass('show');
+        $inputWrapper.removeClass('active');
+        $container.attr('aria-expanded', 'false');
+        currentFocusedIndex = -1;
+    }
+    
+    // Prevent dropdown from closing when clicking inside it
+    $dropdown.on('click', function(e) {
+        e.stopPropagation();
+    });
+    
+    // Unified search input functionality
+    $unifiedInput.on('input', function() {
+        const searchTerm = $(this).val().toLowerCase().trim();
+        // Auto-open dropdown when typing
+        if (searchTerm && !$dropdown.hasClass('show')) {
+            toggleDropdown();
+        }
+        filterOptions(searchTerm);
+    });
+    
+    $unifiedInput.on('focus', function() {
+        if (!$dropdown.hasClass('show')) {
+            toggleDropdown();
+        }
+    });
+    
+    function filterOptions(searchTerm) {
+        let visibleCount = 0;
+        
+        $optionsList.find('.option-item:not(.no-results)').each(function() {
+            const $item = $(this);
+            if (!$item.data('id')) return; // Skip invalid items
+            
+            const itemName = $item.data('name') || $item.find('label').text().trim();
+            
+            if (!searchTerm || itemName.toLowerCase().includes(searchTerm)) {
+                $item.show();
+                visibleCount++;
+            } else {
+                $item.hide();
+            }
+        });
+        
+        // Show/hide no results message
+        const $noResults = $optionsList.find('.no-results');
+        if (visibleCount === 0 && searchTerm) {
+            if ($noResults.length === 0) {
+                $optionsList.append('<div class="option-item no-results" role="option"><p class="mb-0"><i class="fas fa-search"></i> No diagnoses found matching "' + searchTerm + '"</p></div>');
+            } else {
+                $noResults.show();
+            }
+        } else {
+            $noResults.hide();
+        }
+        
+        updateFilteredCount();
+        updateSelectAllState();
+    }
+    
+    // Update filtered count
+    function updateFilteredCount() {
+        const visibleCount = $optionsList.find('.option-item:not(.no-results):visible').length;
+        $filteredCount.text(visibleCount);
+    }
+    
+    // Clear filter button
+    $clearFilterBtn.on('click', function(e) {
+        e.stopPropagation();
+        $unifiedInput.val('').trigger('input');
+        $unifiedInput.focus();
+    });
+    
+    // Handle individual checkbox selection - matching encounter form exactly
+    $optionsList.on('change', '.item-checkbox', function() {
+        const $checkbox = $(this);
+        const $item = $checkbox.closest('.option-item');
+        const diseaseId = $item.data('id');
+        
+        if (!diseaseId) return; // Skip invalid items
+        
+        if ($checkbox.is(':checked')) {
+            $item.addClass('selected').attr('aria-selected', 'true');
+            if ($hiddenSelect.find(`option[value="${diseaseId}"]`).length === 0) {
+                const optionText = $item.data('name') || $item.find('label').text().trim();
+                $hiddenSelect.append(`<option value="${diseaseId}" selected>${optionText}</option>`);
+            } else {
+                $hiddenSelect.find(`option[value="${diseaseId}"]`).prop('selected', true);
+            }
+            // Keep dropdown open and refocus search input for quick selection
+            $unifiedInput.focus();
+        } else {
+            $item.removeClass('selected').attr('aria-selected', 'false');
+            $hiddenSelect.find(`option[value="${diseaseId}"]`).prop('selected', false);
+        }
+        
+        updateSelectedDisplay();
+        updateSelectAllState();
+    });
+    
+    // Click on option item (not just checkbox) to toggle
+    $optionsList.on('click', '.option-item:not(.no-results)', function(e) {
+        if ($(e.target).is('input') || $(e.target).is('label')) {
+            return; // Let checkbox handle it
+        }
+        const $checkbox = $(this).find('.item-checkbox');
+        $checkbox.prop('checked', !$checkbox.is(':checked')).trigger('change');
+    });
+    
+    // Handle "Select all filtered" checkbox
+    $selectAllCheckbox.on('change', function() {
+        const isChecked = $(this).is(':checked');
+        const $visibleItems = $optionsList.find('.option-item:not(.no-results):visible');
+        
+        $visibleItems.each(function() {
+            const $item = $(this);
+            if (!$item.data('id')) return; // Skip invalid items
+            const $checkbox = $item.find('.item-checkbox');
+            if ($checkbox.is(':checked') !== isChecked) {
+                $checkbox.prop('checked', isChecked).trigger('change');
+            }
+        });
+    });
+    
+    // Clear all selections
+    $clearAllBtn.on('click', function(e) {
+        e.stopPropagation();
+        $optionsList.find('.item-checkbox:checked').prop('checked', false).trigger('change');
+    });
+    
+    // Handle tag removal (click and keyboard)
+    $tagsContainer.on('click', '.remove-tag', function(e) {
+        e.stopPropagation();
+        removeTag($(this).closest('.selected-tag'));
+    });
+    
+    $tagsContainer.on('keydown', '.selected-tag', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            removeTag($(this));
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+            e.preventDefault();
+            e.stopPropagation();
+            removeTag($(this));
+        }
+    });
+    
+    function removeTag($tag) {
+        const diseaseId = $tag.data('id');
+        const $checkbox = $(`#item-${diseaseId}`);
+        if ($checkbox.length) {
+            $checkbox.prop('checked', false).trigger('change');
+        } else {
+            $hiddenSelect.find(`option[value="${diseaseId}"]`).prop('selected', false);
+            updateSelectedDisplay();
+        }
+    }
+    
+    // Update the selected display (tags in unified input) - matching encounter form exactly
+    function updateSelectedDisplay() {
+        const selectedIds = $hiddenSelect.val() || [];
+        $tagsContainer.empty();
+        
+        if (selectedIds.length === 0) {
+            $clearAllBtn.hide();
+        } else {
+            $clearAllBtn.show();
+            
+            selectedIds.forEach(function(id) {
+                const $option = $hiddenSelect.find(`option[value="${id}"]`);
+                if ($option.length) {
+                    const optionText = $option.text();
+                    const $tag = $(`
+                        <span class="selected-tag" data-id="${id}" role="button" tabindex="0" aria-label="Remove ${optionText}">
+                            ${optionText}
+                            <span class="remove-tag" aria-hidden="true">&times;</span>
+                        </span>
+                    `);
+                    $tagsContainer.append($tag);
+                }
+            });
+        }
+    }
+    
+    // Update select all checkbox state
+    function updateSelectAllState() {
+        const $visibleItems = $optionsList.find('.option-item:not(.no-results):visible');
+        const $visibleChecked = $visibleItems.find('.item-checkbox:checked');
+        const visibleCount = $visibleItems.length;
+        const checkedCount = $visibleChecked.length;
+        
+        if (visibleCount === 0) {
+            $selectAllCheckbox.prop('checked', false);
+            $selectAllCheckbox.prop('indeterminate', false);
+        } else if (checkedCount === visibleCount) {
+            $selectAllCheckbox.prop('checked', true);
+            $selectAllCheckbox.prop('indeterminate', false);
+        } else if (checkedCount > 0) {
+            $selectAllCheckbox.prop('checked', false);
+            $selectAllCheckbox.prop('indeterminate', true);
+        } else {
+            $selectAllCheckbox.prop('checked', false);
+            $selectAllCheckbox.prop('indeterminate', false);
+        }
+    }
+    
+    // Keyboard navigation
+    $unifiedInput.on('keydown', function(e) {
+        if (e.key === 'ArrowDown' || e.key === 'Down') {
+            e.preventDefault();
+            if (!$dropdown.hasClass('show')) {
+                toggleDropdown();
+            }
+            focusFirstOption();
+        } else if (e.key === 'Escape' || e.key === 'Esc') {
+            closeDropdown();
+        }
+    });
+    
+    $optionsList.on('keydown', '.option-item', function(e) {
+        const $items = $optionsList.find('.option-item:not(.no-results):visible');
+        const currentIndex = $items.index(this);
+        
+        if (e.key === 'ArrowDown' || e.key === 'Down') {
+            e.preventDefault();
+            const nextIndex = (currentIndex + 1) % $items.length;
+            $items.eq(nextIndex).focus();
+        } else if (e.key === 'ArrowUp' || e.key === 'Up') {
+            e.preventDefault();
+            const prevIndex = (currentIndex - 1 + $items.length) % $items.length;
+            $items.eq(prevIndex).focus();
+        } else if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            const $checkbox = $(this).find('.item-checkbox');
+            $checkbox.prop('checked', !$checkbox.is(':checked')).trigger('change');
+        }
+    });
+    
+    function focusFirstOption() {
+        const $firstOption = $optionsList.find('.option-item:not(.no-results):visible').first();
+        if ($firstOption.length) {
+            $firstOption.focus();
+        }
+    }
+    
+    // Initialize on page load - show initial selected tags
+    updateSelectedDisplay();
+    updateFilteredCount();
+});
+</script>
+{% endblock %}
 
 {% endblock %}
 

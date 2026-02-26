@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
@@ -12,7 +12,6 @@ from app.models.encounter_models import RadiologyOrder, OrderStatus, Encounter
 from app.models.patient_models import Patient
 
 router = APIRouter(tags=["Radiology Scheduling"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/radiology/schedule", name="radiology_schedule")

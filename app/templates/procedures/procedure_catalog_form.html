@@ -58,7 +58,8 @@
                                                 <label for="procedure_code">Procedure Code</label>
                                                 <input type="text" class="form-control" id="procedure_code" name="procedure_code" 
                                                        value="{{ procedure.procedure_code if procedure else '' }}" 
-                                                       placeholder="e.g., CPT code, ICD-10-PCS">
+                                                       placeholder="Leave blank to auto-generate">
+                                                <small class="text-muted">Optional - Leave blank to auto-generate (e.g., APPX1234)</small>
                                             </div>
                                         </div>
                                         <div class="col-md-6">
@@ -82,6 +83,30 @@
                                             <option value="major" {{ 'selected' if procedure and procedure.procedure_type == 'major' else '' }}>Major</option>
                                         </select>
                                     </div>
+                                    {% if charge_types %}
+                                    <div class="form-group">
+                                        <label for="charge_type">Charge Type <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="charge_type" name="charge_type" required>
+                                            <option value="">Select Charge Type</option>
+                                            {% for ct in charge_types %}
+                                            <option value="{{ ct }}" {{ 'selected' if procedure and procedure.charge_type == ct else '' }}>{{ ct|replace('_', ' ')|title }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="text-muted">Required - Select charge type for billing (e.g., procedure, lab_test, radiology)</small>
+                                    </div>
+                                    {% endif %}
+                                    {% if departments %}
+                                    <div class="form-group">
+                                        <label for="department_id">Department <span class="text-muted">(Optional - for reference)</span></label>
+                                        <select class="form-control" id="department_id" name="department_id">
+                                            <option value="">Select Department</option>
+                                            {% for dept in departments %}
+                                            <option value="{{ dept.id }}" {{ 'selected' if procedure and procedure.department_id == dept.id else '' }}>{{ dept.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="text-muted">Department reference (optional)</small>
+                                    </div>
+                                    {% endif %}
                                     <div class="form-group">
                                         <label for="description">Description</label>
                                         <textarea class="form-control" id="description" name="description" rows="3" 

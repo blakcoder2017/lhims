@@ -230,6 +230,56 @@
                     </div>
                     {% endif %}
 
+                    <!-- OPD Detailed Report -->
+                    {% if user_role in ['Admin', 'Doctor', 'Nurse', 'Front Office', 'Management'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-walking mr-1"></i> OPD Detailed Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">OPD visit statistics, revenue, and demographics with New vs Revisit breakdown.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Visit counts and status</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue by payment status</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> New vs Revisit analysis</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> PDF/Excel/CSV export</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('opd_detailed_report') }}" class="btn btn-primary btn-block">
+                                    <i class="fas fa-walking mr-1"></i> View OPD Detailed Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- IPD Detailed Report -->
+                    {% if user_role in ['Admin', 'Doctor', 'Nurse', 'Management', 'Finance'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-bed mr-1"></i> IPD Detailed Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Inpatient admission statistics, revenue, and detailed breakdown.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Admission counts by status</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Revenue by ward</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Length of stay analysis</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> PDF/Excel/CSV export</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('ipd_detailed_report') }}" class="btn btn-danger btn-block">
+                                    <i class="fas fa-bed mr-1"></i> View IPD Detailed Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
                     <!-- Disease Report -->
                     {% if user_role in ['Admin', 'Management', 'Doctor'] %}
                     <div class="col-lg-4 col-md-6">
@@ -248,6 +298,177 @@
                             <div class="card-footer">
                                 <a href="{{ url_for('disease_report') }}" class="btn btn-primary btn-block">
                                     <i class="fas fa-virus mr-1"></i> View Disease Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Antenatal & Births Report -->
+                    {% if user_role in ['Admin', 'Management', 'Doctor', 'Midwife', 'Nurse'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-info card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-baby mr-1"></i> Antenatal & Births Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Antenatal visits and birth record statistics.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> ANC visit counts</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Births by outcome</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Delivery type breakdown</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('antenatal_births_report') }}" class="btn btn-info btn-block">
+                                    <i class="fas fa-baby mr-1"></i> View Antenatal & Births Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- DHIMS2 Reports Section -->
+                    {% if user_role in ['Admin', 'Management', 'Doctor', 'Nurse', 'Midwife', 'Lab Staff', 'DHIMS2Preparer'] %}
+                    <div class="col-12 mt-3 mb-2">
+                        <h4 class="text-primary"><i class="fas fa-file-medical-alt mr-2"></i>DHIMS2 Reports (Ghana Health Service)</h4>
+                        <hr>
+                    </div>
+                    
+                    <!-- DHIMS2 OPD Report -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card card-primary card-outline">
+                            <div class="card-header bg-primary">
+                                <h3 class="card-title"><i class="fas fa-hospital mr-1"></i> DHIMS2 OPD</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Outpatient Department statistics for DHIMS2 reporting.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Total attendances</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> New cases & revisits</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Gender & age groups</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Emergency cases</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('dhims_opd_report') }}" class="btn btn-primary btn-block">
+                                    <i class="fas fa-chart-bar mr-1"></i> View OPD Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- DHIMS2 IPD Report -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card card-danger card-outline">
+                            <div class="card-header bg-danger">
+                                <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> DHIMS2 IPD</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Inpatient Department statistics for DHIMS2 reporting.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Admissions & discharges</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Deaths by timing</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Transfers</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Average length of stay</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('dhims_ipd_report') }}" class="btn btn-danger btn-block">
+                                    <i class="fas fa-chart-bar mr-1"></i> View IPD Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- DHIMS2 Lab Report -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card card-info card-outline">
+                            <div class="card-header bg-info">
+                                <h3 class="card-title"><i class="fas fa-flask mr-1"></i> DHIMS2 Lab</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Laboratory statistics for DHIMS2 reporting.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Total lab orders</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Tests by category</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Rejection rates</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Top tests</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('dhims_lab_report') }}" class="btn btn-info btn-block">
+                                    <i class="fas fa-chart-bar mr-1"></i> View Lab Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- DHIMS2 MCH Report -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card card-success card-outline">
+                            <div class="card-header bg-success">
+                                <h3 class="card-title"><i class="fas fa-baby-carriage mr-1"></i> DHIMS2 MCH</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Maternal & Child Health for DHIMS2 reporting.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> ANC visits (1-4)</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Deliveries & outcomes</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Birth weight</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> Newborn care</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('dhims_mch_report') }}" class="btn btn-success btn-block">
+                                    <i class="fas fa-chart-bar mr-1"></i> View MCH Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- DHIMS2 Disease Report -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card card-warning card-outline">
+                            <div class="card-header bg-warning">
+                                <h3 class="card-title"><i class="fas fa-virus mr-1"></i> DHIMS2 Disease</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Disease morbidity for DHIMS2 reporting.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-warning mr-2"></i> OPD morbidity</li>
+                                    <li><i class="fas fa-check text-warning mr-2"></i> IPD morbidity</li>
+                                    <li><i class="fas fa-check text-warning mr-2"></i> Gender breakdown</li>
+                                    <li><i class="fas fa-check text-warning mr-2"></i> Age group breakdown</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('dhims_disease_report') }}" class="btn btn-warning btn-block">
+                                    <i class="fas fa-chart-bar mr-1"></i> View Disease Report
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Appointment Report -->
+                    {% if user_role in ['Admin', 'Management', 'Front Office', 'Doctor'] %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card card-secondary card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-calendar-check mr-1"></i> Appointment Report</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Appointment statistics: scheduled vs walk-in, no-shows.</p>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-check text-success mr-2"></i> Scheduled vs walk-in</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> No-show analysis</li>
+                                    <li><i class="fas fa-check text-success mr-2"></i> By department/doctor</li>
+                                </ul>
+                            </div>
+                            <div class="card-footer">
+                                <a href="{{ url_for('appointment_report') }}" class="btn btn-secondary btn-block">
+                                    <i class="fas fa-calendar-check mr-1"></i> View Appointment Report
                                 </a>
                             </div>
                         </div>

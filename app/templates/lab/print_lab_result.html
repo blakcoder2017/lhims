@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lab Result - {{ lab_order.test_name }}</title>
+    {# Handle both list and dict schema formats #}
+    {% if schema_json is mapping %}
+        {% set _schema = schema_json %}
+    {% elif schema_json is sequence and schema_json|length > 0 %}
+        {% set _fields = {} %}
+        {% for f in schema_json %}
+            {% if f is mapping %}
+                {% set fid = f.field_name or f.code or f.id %}
+                {% if fid %}
+                    {% set _ = _fields.update({fid: f}) %}
+                {% endif %}
+            {% endif %}
+        {% endfor %}
+        {% set _schema = {
+            'layout': {'sections': [{'title': 'Results', 'rows': [{'columns': [{'width': 12, 'items': _fields.keys()}]}]}]},
+            'fields': _fields,
+            'rules': {'visibility': []},
+            'calculated': []
+        } %}
+    {% else %}
+        {% set _schema = {'layout': {'sections': []}, 'fields': {}, 'rules': {'visibility': []}, 'calculated': []} %}
+    {% endif %}
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            body { font-size: 11px; }
+            .card { border: none !important; box-shadow: none !important; }
+            .page-break { page-break-after: always; }
+            .no-page-break { page-break-inside: avoid; }
+            .report-header img {
+                max-height: 50px !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            @page {
+                size: A4;
+                margin: 0.5cm;
+            }
+        }
+        
+        * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+        
+        body { 
+            font-size: 12px;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 10px;
+            background: #fff;
+        }
+        
+        /* Header Styles */
+        .report-header {
+            border-bottom: 3px solid #2c3e50;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .hospital-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        
+        .hospital-name {
+            font-size: 22px;
+            font-weight: bold;
+            color: #2c3e50;
+            text-transform: uppercase;
+        }
+        
+        .hospital-address {
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 2px;
+        }
+        
+        .hospital-contact {
+            font-size: 10px;
+            color: #6c757d;
+            text-align: right;
+        }
+        
+        .report-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #007bff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-align: center;
+            padding: 8px 0;
+            border: 2px solid #007bff;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        /* Priority Badge */
+        .priority-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        
+        .priority-stat {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .priority-urgent {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .priority-routine {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        /* Order ID Badge */
+        .order-id-badge {
+            background-color: #e9ecef;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+        
+        /* Info Cards */
+        .info-card {
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .info-card-header {
+            background-color: #f8f9fa;
+            padding: 6px 10px;
+            margin: -10px -10px 10px -10px;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: bold;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #495057;
+        }
+        
+        .info-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .info-item {
+            flex: 1;
+            min-width: 120px;
+        }
+        
+        .info-label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #6c757d;
+            font-weight: bold;
+        }
+        
+        .info-value {
+            font-size: 12px;
+            color: #212529;
+            font-weight: 500;
+        }
+        
+        /* Results Table */
+        .result-table {
+            font-size: 11px;
+            margin-top: 15px;
+        }
+        
+        .result-table thead th {
+            background-color: #2c3e50 !important;
+            color: white !important;
+            padding: 8px 6px;
+            text-align: left;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 10px;
+            border: none !important;
+        }
+        
+        .result-table tbody td {
+            padding: 6px;
+            border: 1px solid #dee2e6 !important;
+            vertical-align: middle;
+        }
+        
+        .result-table tbody tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        .result-table tbody tr:hover {
+            background-color: #e9ecef;
+        }
+        
+        /* Section Headers in Table */
+        .section-header {
+            background-color: #e9ecef !important;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 11px;
+            color: #495057;
+        }
+        
+        /* Flag Styles - Print Optimized */
+        .flag-critical {
+            color: #dc3545 !important;
+            font-weight: bold;
+            background-color: #f8d7da;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #dc3545;
+        }
+        
+        .flag-high {
+            color: #856404 !important;
+            font-weight: bold;
+            background-color: #fff3cd;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #ffc107;
+        }
+        
+        .flag-low {
+            color: #856404 !important;
+            font-weight: bold;
+            background-color: #fff3cd;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #ffc107;
+        }
+        
+        .flag-normal {
+            color: #155724 !important;
+            font-weight: bold;
+            background-color: #d4edda;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #28a745;
+        }
+        
+        /* Critical Row Highlight */
+        .critical-row {
+            background-color: #f8d7da !important;
+            border-left: 4px solid #dc3545;
+        }
+        
+        .abnormal-row {
+            background-color: #fff3cd !important;
+            border-left: 4px solid #ffc107;
+        }
+        
+        /* Comments Section */
+        .comments-box {
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 15px;
+            background-color: #f8f9fa;
+        }
+        
+        .comments-title {
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 11px;
+            color: #495057;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 5px;
+        }
+        
+        /* Footer Styles */
+        .report-footer {
+            margin-top: 25px;
+            padding-top: 15px;
+            border-top: 2px solid #dee2e6;
+        }
+        
+        .signature-block {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+        
+        .signature-line {
+            width: 200px;
+            border-top: 1px solid #212529;
+            padding-top: 5px;
+            text-align: center;
+            font-size: 10px;
+        }
+        
+        .signature-name {
+            font-weight: bold;
+            font-size: 11px;
+        }
+        
+        .disclaimer {
+            font-size: 9px;
+            color: #6c757d;
+            text-align: center;
+            margin-top: 15px;
+            font-style: italic;
+        }
+        
+        .accreditation-info {
+            font-size: 9px;
+            color: #6c757d;
+            text-align: center;
+            margin-top: 5px;
+        }
+        
+        /* Sample Info */
+        .sample-badge {
+            background-color: #17a2b8;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        
+        /* Status Badge */
+        .status-badge {
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .status-draft { background-color: #6c757d; color: white; }
+        .status-submitted { background-color: #ffc107; color: #212529; }
+        .status-verified { background-color: #007bff; color: white; }
+        .status-released { background-color: #28a745; color: white; }
+        
+        /* Print button styling */
+        .print-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .btn-print {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .btn-print:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <!-- Print Buttons (Hidden when printing) -->
+    <div class="no-print" style="text-align: center; margin-bottom: 20px;">
+        <div class="print-buttons">
+            <button onclick="window.print()" class="btn-print">
+                <i class="fas fa-print"></i> Print Report
+            </button>
+            <a href="/api/v1/ancillary/lab/orders/{{ lab_order.id }}" class="btn btn-secondary" style="padding: 10px 20px; text-decoration: none; border-radius: 4px; background-color: #6c757d; color: white;">
+                <i class="fas fa-arrow-left"></i> Back to Order
+            </a>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <div class="report-header">
+        <div class="hospital-info">
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                {% if hospital_settings.logo_url %}
+                <img src="{{ hospital_settings.logo_url|normalize_logo_url }}" 
+                     alt="Hospital Logo" 
+                     style="max-height: 60px; max-width: 120px; object-fit: contain;">
+                {% endif %}
+                <div>
+                    <div class="hospital-name">{{ hospital_settings.name }}</div>
+                    {% if hospital_settings.address %}
+                    <div class="hospital-address">{{ hospital_settings.address }}</div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="hospital-contact">
+                {% if hospital_settings.phone %}
+                <div><i class="fas fa-phone"></i> {{ hospital_settings.phone }}</div>
+                {% endif %}
+                {% if hospital_settings.email %}
+                <div><i class="fas fa-envelope"></i> {{ hospital_settings.email }}</div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="report-title">
+            <i class="fas fa-flask"></i> Laboratory Test Report
+        </div>
+    </div>
+
+    <!-- Order Information Row -->
+    <div class="info-card">
+        <div class="info-card-header">
+            <i class="fas fa-clipboard-list"></i> Order Information
+        </div>
+        <div class="info-row">
+            <div class="info-item">
+                <div class="info-label">Order ID</div>
+                <div class="info-value">
+                    <span class="order-id-badge">#{{ lab_order.id }}</span>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Test Name</div>
+                <div class="info-value">{{ lab_order.test_name }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Test Code</div>
+                <div class="info-value">{{ lab_order.test_code or 'N/A' }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Priority</div>
+                <div class="info-value">
+                    {% if lab_order.priority == 'stat' %}
+                    <span class="priority-badge priority-stat"><i class="fas fa-bolt"></i> STAT</span>
+                    {% elif lab_order.priority == 'urgent' %}
+                    <span class="priority-badge priority-urgent"><i class="fas fa-exclamation-triangle"></i> URGENT</span>
+                    {% else %}
+                    <span class="priority-badge priority-routine"><i class="fas fa-clock"></i> ROUTINE</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Status</div>
+                <div class="info-value">
+                    <span class="status-badge status-{{ lab_order.result_status|lower if lab_order.result_status else 'draft' }}">
+                        {{ lab_order.result_status or 'DRAFT' }}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Patient Information -->
+    <div class="info-card">
+        <div class="info-card-header">
+            <i class="fas fa-user"></i> Patient Information
+        </div>
+        <div class="info-row">
+            <div class="info-item">
+                <div class="info-label">Patient Name</div>
+                <div class="info-value" style="font-size: 14px;">{{ patient.first_name }} {{ patient.last_name }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Patient Number</div>
+                <div class="info-value">{{ patient.patient_number or 'N/A' }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Patient ID</div>
+                <div class="info-value">#{{ patient.id }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Date of Birth / Age</div>
+                <div class="info-value">
+                    {{ patient.date_of_birth or 'N/A' }}
+                    {% if patient.date_of_birth %}
+                    ({{ patient.date_of_birth | age }} years)
+                    {% endif %}
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Gender</div>
+                <div class="info-value">{{ patient.gender or 'N/A' }}</div>
+            </div>
+            {% if patient.phone_number %}
+            <div class="info-item">
+                <div class="info-label">Phone</div>
+                <div class="info-value">{{ patient.phone_number }}</div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sample Information -->
+    {% if samples %}
+    <div class="info-card">
+        <div class="info-card-header">
+            <i class="fas fa-vial"></i> Sample Information
+        </div>
+        <div class="info-row">
+            {% for sample in samples %}
+            <div class="info-item">
+                <div class="info-label">Sample Type</div>
+                <div class="info-value">
+                    <span class="sample-badge">{{ sample.sample_type or 'N/A' }}</span>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Barcode</div>
+                <div class="info-value" style="font-family: 'Courier New', monospace; font-weight: bold;">
+                    {{ sample.barcode or 'N/A' }}
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Collected At</div>
+                <div class="info-value">
+                    {{ sample.collected_at.strftime('%Y-%m-%d %H:%M') if sample.collected_at else 'N/A' }}
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Received At</div>
+                <div class="info-value">
+                    {{ sample.received_at.strftime('%Y-%m-%d %H:%M') if sample.received_at else 'N/A' }}
+                </div>
+            </div>
+            {% if sample.storage_location %}
+            <div class="info-item">
+                <div class="info-label">Storage</div>
+                <div class="info-value">{{ sample.storage_location }}</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Date Information -->
+    <div class="info-card">
+        <div class="info-card-header">
+            <i class="fas fa-calendar"></i> Date & Time Information
+        </div>
+        <div class="info-row">
+            <div class="info-item">
+                <div class="info-label">Order Date</div>
+                <div class="info-value">{{ lab_order.ordered_at.strftime('%Y-%m-%d %H:%M') if lab_order.ordered_at else 'N/A' }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Result Date</div>
+                <div class="info-value">{{ lab_order.result_entered_at.strftime('%Y-%m-%d %H:%M') if lab_order.result_entered_at else 'Pending' }}</div>
+            </div>
+            {% if lab_order.verified_at %}
+            <div class="info-item">
+                <div class="info-label">Verified Date</div>
+                <div class="info-value">{{ lab_order.verified_at.strftime('%Y-%m-%d %H:%M') }}</div>
+            </div>
+            {% endif %}
+            {% if lab_order.authorized_at %}
+            <div class="info-item">
+                <div class="info-label">Authorized Date</div>
+                <div class="info-value">{{ lab_order.authorized_at.strftime('%Y-%m-%d %H:%M') }}</div>
+            </div>
+            {% endif %}
+            <div class="info-item">
+                <div class="info-label">Ordered By</div>
+                <div class="info-value">{{ lab_order.ordered_by.full_name or lab_order.ordered_by.username }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Results -->
+    {% if result_json and schema_json %}
+    <div class="info-card no-page-break">
+        <div class="info-card-header">
+            <i class="fas fa-list-alt"></i> Test Results
+        </div>
+        <table class="table table-bordered result-table">
+            <thead>
+                <tr>
+                    <th style="width: 35%">Test Parameter</th>
+                    <th style="width: 20%">Result</th>
+                    <th style="width: 15%">Flag</th>
+                    <th style="width: 30%">Reference Range</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for section in (_schema.layout.sections or []) %}
+                {% if section.title %}
+                <tr class="section-header">
+                    <td colspan="4"><i class="fas fa-layer-group"></i> {{ section.title }}</td>
+                </tr>
+                {% endif %}
+                {% for row in (section.rows or []) %}
+                {% for col in (row.columns or []) %}
+                {% for fid in (col['items'] or []) %}
+                {% set fld = schema_json.fields.get(fid) %}
+                {% if fld %}
+                {% set val = result_json.get(fid) %}
+                {% if val is not none and val != '' and val != [] %}
+                {% set flag = flags_json.get(fid).flag if flags_json and flags_json.get(fid) else none %}
+                {% set ref_range = ref_ranges.get(fid) if ref_ranges else none %}
+                <tr class="{% if flag == 'CRITICAL' %}critical-row{% elif flag in ['H', 'L'] %}abnormal-row{% endif %}">
+                    <td><strong>{{ fld.label }}</strong></td>
+                    <td>
+                        <span style="font-size: 12px;">
+                        {% if val is string %}{{ val }}{% elif val is sequence %}{{ val | join(', ') }}{% else %}{{ val }}{% endif %}
+                        {% if fld.unit and val is not sequence %} <small>{{ fld.unit }}</small>{% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        {% if flag == 'CRITICAL' %}<span class="flag-critical"><i class="fas fa-exclamation-triangle"></i> CRITICAL</span>
+                        {% elif flag == 'H' %}<span class="flag-high"><i class="fas fa-arrow-up"></i> HIGH</span>
+                        {% elif flag == 'L' %}<span class="flag-low"><i class="fas fa-arrow-down"></i> LOW</span>
+                        {% else %}<span class="flag-normal"><i class="fas fa-check"></i> Normal</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if ref_range %}
+                        {{ ref_range.low }} - {{ ref_range.high }}{% if fld.unit %} {{ fld.unit }}{% endif %}
+                        {% elif fld.unit %}
+                        {{ fld.unit }}
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+                {% endif %}
+                {% endfor %}
+                {% endfor %}
+                {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Comments / Interpretation -->
+    {% if result_json.comment %}
+    <div class="comments-box">
+        <div class="comments-title"><i class="fas fa-comment-medical"></i> Comments / Interpretation</div>
+        <div>{{ result_json.comment }}</div>
+    </div>
+    {% endif %}
+
+    <!-- Footer -->
+    <div class="report-footer">
+        <div class="signature-block">
+            <div class="signature-line">
+                <div class="signature-name">
+                    {% if lab_order.result_entered_by %}
+                    {{ lab_order.result_entered_by.full_name or lab_order.result_entered_by.username }}
+                    {% else %}
+                    _______________________
+                    {% endif %}
+                </div>
+                <div>Result Entered By</div>
+            </div>
+            <div class="signature-line">
+                <div class="signature-name">
+                    {% if lab_order.verified_by %}
+                    {{ lab_order.verified_by.full_name or lab_order.verified_by.username }}
+                    {% else %}
+                    _______________________
+                    {% endif %}
+                </div>
+                <div>Verified By</div>
+            </div>
+            <div class="signature-line">
+                <div class="signature-name">
+                    {% if lab_order.authorized_by %}
+                    {{ lab_order.authorized_by.full_name or lab_order.authorized_by.username }}
+                    {% else %}
+                    _______________________
+                    {% endif %}
+                </div>
+                <div>Authorized By</div>
+            </div>
+        </div>
+        
+        <div class="disclaimer">
+            This is a computer-generated report. No signature is required. Results relate only to the sample(s) tested.
+            {% if lab_order.result_status != 'RELEASED' %}
+            <br><strong>*** PRELIMINARY REPORT - NOT FOR CLINICAL USE ***</strong>
+            {% endif %}
+        </div>
+        
+        {% if hospital_settings.accreditation %}
+        <div class="accreditation-info">
+            <i class="fas fa-certificate"></i> Accredited by: {{ hospital_settings.accreditation }}
+        </div>
+        {% endif %}
+        
+        <div class="accreditation-info" style="margin-top: 10px;">
+            Printed on: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} | Lab Order ID: {{ lab_order.id }}
+        </div>
+    </div>
+</body>
+</html>

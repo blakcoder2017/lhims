@@ -99,3 +99,12 @@ class ReferenceRangeRead(ReferenceRangeBase):
     class Config:
         from_attributes = True
 
+
+# Activation Status Schema
+class LabTestActivate(BaseModel):
+    """Schema for activating a lab test"""
+    activate: bool = Field(..., description="Set to True to activate, False to deactivate")
+
+    class Config:
+        from_attributes = True
+

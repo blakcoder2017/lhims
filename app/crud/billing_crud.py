@@ -1,84 +1,140 @@
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import uuid
+from sqlalchemy.exc import IntegrityError
 
-from app.models.billing_models import Invoice, Charge, Payment, InvoiceStatus, PaymentStatus, PaymentMethod
+from app.models.billing_models import Invoice, Charge, Payment, ChargePayment, InvoiceStatus, PaymentStatus, PaymentMethod, ChargeType, Refund, RefundPolicy, RefundStatus
 from app.models.user_models import User
 from app.schemas.billing_schemas import (
     InvoiceCreate, InvoiceUpdate, InvoiceRead,
     ChargeCreate, ChargeUpdate,
-    PaymentCreate, PaymentUpdate
+    PaymentCreate, PaymentUpdate,
+    RefundCreate, RefundUpdate, RefundPolicyCreate, RefundPolicyUpdate
 )
 
 
 def generate_invoice_number(db: Session) -> str:
-    """Generate a unique invoice number"""
+    """Generate a unique invoice number with retry logic for race conditions"""
     prefix = "INV"
     date_str = datetime.now().strftime("%Y%m%d")
+    max_retries = 5
     
-    # Get the last invoice number for today
-    last_invoice = db.query(Invoice).filter(
-        Invoice.invoice_number.like(f"{prefix}-{date_str}-%")
-    ).order_by(Invoice.id.desc()).first()
-    
-    if last_invoice:
-        # Extract sequence number and increment
-        try:
-            sequence = int(last_invoice.invoice_number.split('-')[-1])
-            sequence += 1
-        except (ValueError, IndexError):
+    for attempt in range(max_retries):
+        # Get the last invoice number for today
+        last_invoice = db.query(Invoice).filter(
+            Invoice.invoice_number.like(f"{prefix}-{date_str}-%")
+        ).order_by(Invoice.id.desc()).first()
+        
+        if last_invoice:
+            # Extract sequence number and increment
+            try:
+                sequence = int(last_invoice.invoice_number.split('-')[-1])
+                sequence += 1
+            except (ValueError, IndexError):
+                sequence = 1
+        else:
             sequence = 1
-    else:
-        sequence = 1
+        
+        invoice_number = f"{prefix}-{date_str}-{sequence:04d}"
+        
+        # Check if this invoice number already exists
+        existing = db.query(Invoice).filter(
+            Invoice.invoice_number == invoice_number
+        ).first()
+        
+        if not existing:
+            return invoice_number
+        
+        # If exists, retry with incremented sequence
+        if attempt < max_retries - 1:
+            db.rollback()  # Clear any pending transaction
+            continue
     
-    return f"{prefix}-{date_str}-{sequence:04d}"
+    # Fallback: use UUID if all retries fail
+    return f"{prefix}-{date_str}-{uuid.uuid4().hex[:8].upper()}"
 
 
 def generate_payment_number(db: Session) -> str:
-    """Generate a unique payment number"""
+    """Generate a unique payment number with retry logic for race conditions"""
     prefix = "PAY"
     date_str = datetime.now().strftime("%Y%m%d")
+    max_retries = 5
     
-    # Get the last payment number for today
-    last_payment = db.query(Payment).filter(
-        Payment.payment_number.like(f"{prefix}-{date_str}-%")
-    ).order_by(Payment.id.desc()).first()
-    
-    if last_payment:
-        try:
-            sequence = int(last_payment.payment_number.split('-')[-1])
-            sequence += 1
-        except (ValueError, IndexError):
+    for attempt in range(max_retries):
+        # Get the last payment number for today
+        last_payment = db.query(Payment).filter(
+            Payment.payment_number.like(f"{prefix}-{date_str}-%")
+        ).order_by(Payment.id.desc()).first()
+        
+        if last_payment:
+            try:
+                sequence = int(last_payment.payment_number.split('-')[-1])
+                sequence += 1
+            except (ValueError, IndexError):
+                sequence = 1
+        else:
             sequence = 1
-    else:
-        sequence = 1
+        
+        payment_number = f"{prefix}-{date_str}-{sequence:04d}"
+        
+        # Check if this payment number already exists
+        existing = db.query(Payment).filter(
+            Payment.payment_number == payment_number
+        ).first()
+        
+        if not existing:
+            return payment_number
+        
+        # If exists, retry with incremented sequence
+        if attempt < max_retries - 1:
+            db.rollback()
+            continue
     
-    return f"{prefix}-{date_str}-{sequence:04d}"
+    # Fallback: use UUID if all retries fail
+    return f"{prefix}-{date_str}-{uuid.uuid4().hex[:8].upper()}"
 
 
 def generate_receipt_number(db: Session) -> str:
-    """Generate a unique receipt number"""
+    """Generate a unique receipt number with retry logic for race conditions"""
     prefix = "RCP"
     date_str = datetime.now().strftime("%Y%m%d")
+    max_retries = 5
     
-    # Get the last receipt number for today
-    last_payment = db.query(Payment).filter(
-        Payment.receipt_number.isnot(None),
-        Payment.receipt_number.like(f"{prefix}-{date_str}-%")
-    ).order_by(Payment.id.desc()).first()
-    
-    if last_payment and last_payment.receipt_number:
-        try:
-            sequence = int(last_payment.receipt_number.split('-')[-1])
-            sequence += 1
-        except (ValueError, IndexError):
+    for attempt in range(max_retries):
+        # Get the last receipt number for today
+        last_payment = db.query(Payment).filter(
+            Payment.receipt_number.isnot(None),
+            Payment.receipt_number.like(f"{prefix}-{date_str}-%")
+        ).order_by(Payment.id.desc()).first()
+        
+        if last_payment and last_payment.receipt_number:
+            try:
+                sequence = int(last_payment.receipt_number.split('-')[-1])
+                sequence += 1
+            except (ValueError, IndexError):
+                sequence = 1
+        else:
             sequence = 1
-    else:
-        sequence = 1
+        
+        receipt_number = f"{prefix}-{date_str}-{sequence:04d}"
+        
+        # Check if this receipt number already exists
+        existing = db.query(Payment).filter(
+            Payment.receipt_number == receipt_number
+        ).first()
+        
+        if not existing:
+            return receipt_number
+        
+        # If exists, retry with incremented sequence
+        if attempt < max_retries - 1:
+            db.rollback()
+            continue
     
-    return f"{prefix}-{date_str}-{sequence:04d}"
+    # Fallback: use UUID if all retries fail
+    return f"{prefix}-{date_str}-{uuid.uuid4().hex[:8].upper()}"
 
 
 def calculate_charge_total(charge: ChargeCreate) -> tuple[Decimal, Decimal]:
@@ -269,7 +325,8 @@ def add_charge_to_invoice(db: Session, invoice_id: int, charge: ChargeCreate) ->
         admission_id=db_invoice.admission_id,  # Link to IPD admission from invoice
         lab_order_id=charge.lab_order_id,
         radiology_order_id=charge.radiology_order_id,
-        prescription_id=charge.prescription_id
+        prescription_id=charge.prescription_id,
+        procedure_catalog_id=charge.procedure_catalog_id  # Link to procedure catalog
     )
     db.add(db_charge)
     
@@ -312,7 +369,27 @@ def update_charge(db: Session, charge_id: int, charge_update: ChargeUpdate) -> O
     db_invoice.subtotal = db_invoice.subtotal - old_subtotal + new_subtotal
     db_invoice.tax_amount = db_invoice.tax_amount - old_tax + new_tax
     db_invoice.total_amount = db_invoice.subtotal - db_invoice.discount_amount + db_invoice.tax_amount
-    db_invoice.balance = db_invoice.total_amount - db_invoice.paid_amount
+    
+    # Calculate potential new balance
+    potential_balance = db_invoice.total_amount - db_invoice.paid_amount
+    
+    # If reducing the charge would cause negative balance (e.g., revisit discount applied after payment),
+    # also reduce the paid_amount to prevent negative balance. This handles cases where a patient
+    # paid full price but later a discount (revisit) is applied.
+    if potential_balance < Decimal('0.00') and db_invoice.paid_amount > Decimal('0.00'):
+        # Adjust paid_amount to match the new total, keeping balance at 0
+        db_invoice.paid_amount = db_invoice.total_amount
+        potential_balance = Decimal('0.00')
+    
+    db_invoice.balance = potential_balance
+    
+    # Update invoice status based on final balance
+    if db_invoice.balance <= Decimal('0.00') and db_invoice.paid_amount > Decimal('0.00'):
+        db_invoice.status = InvoiceStatus.PAID
+        if not db_invoice.paid_date:
+            db_invoice.paid_date = datetime.now()
+    elif db_invoice.paid_amount > Decimal('0.00') and db_invoice.balance > Decimal('0.00'):
+        db_invoice.status = InvoiceStatus.PARTIALLY_PAID
     
     db.commit()
     db.refresh(db_charge)
@@ -387,7 +464,7 @@ def create_payment(db: Session, payment: PaymentCreate, received_by_id: int) -> 
     db_invoice.balance = new_balance
     
     # Update invoice status
-    if new_balance <= Decimal('0.00'):
+    if new_balance <= Decimal('0.00') and payment_amount > Decimal('0.00'):
         db_invoice.status = InvoiceStatus.PAID
         db_invoice.paid_date = datetime.now()
     elif new_paid_amount > Decimal('0.00'):
@@ -404,6 +481,21 @@ def create_payment(db: Session, payment: PaymentCreate, received_by_id: int) -> 
         opd_crud.sync_opd_visit_payment_status(db, db_invoice.opd_visit_id)
     
     return db_payment
+
+
+def allocate_payment_to_charge(db: Session, payment_id: int, charge_id: int, amount: Decimal) -> Optional[ChargePayment]:
+    """Allocate a payment to a charge (ChargePayment) so it appears in paid bills and charge-level tracking."""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    charge = db.query(Charge).filter(Charge.id == charge_id).first()
+    if not payment or not charge or amount <= 0:
+        return None
+    if charge.invoice_id != payment.invoice_id:
+        return None
+    cp = ChargePayment(payment_id=payment_id, charge_id=charge_id, amount=amount)
+    db.add(cp)
+    db.commit()
+    db.refresh(cp)
+    return cp
 
 
 def create_receipt(db: Session, payment_id: int, generated_by_id: int) -> "Receipt":
@@ -512,4 +604,301 @@ def delete_payment(db: Session, payment_id: int) -> bool:
     db_payment.is_active = False
     db.commit()
     return True
+
+
+# ==================== Refund Policy CRUD ====================
+
+def generate_refund_number(db: Session) -> str:
+    """Generate a unique refund number"""
+    prefix = "RFN"
+    date_str = datetime.now().strftime("%Y%m%d")
+    
+    # Get the last refund number for today
+    last_refund = db.query(Refund).filter(
+        Refund.refund_number.like(f"{prefix}-{date_str}-%")
+    ).order_by(Refund.id.desc()).first()
+    
+    if last_refund:
+        try:
+            sequence = int(last_refund.refund_number.split('-')[-1])
+            sequence += 1
+        except (ValueError, IndexError):
+            sequence = 1
+    else:
+        sequence = 1
+    
+    return f"{prefix}-{date_str}-{sequence:04d}"
+
+
+def create_refund_policy(db: Session, policy_data: RefundPolicyCreate, user_id: int) -> RefundPolicy:
+    """Create a new refund policy"""
+    db_policy = RefundPolicy(
+        name=policy_data.name,
+        description=policy_data.description,
+        is_active=policy_data.is_active,
+        max_refund_amount=policy_data.max_refund_amount,
+        refund_window_days=policy_data.refund_window_days,
+        auto_approve_threshold=policy_data.auto_approve_threshold,
+        requires_approval=policy_data.requires_approval,
+        approval_level=policy_data.approval_level,
+        created_by_id=user_id
+    )
+    db.add(db_policy)
+    db.commit()
+    db.refresh(db_policy)
+    return db_policy
+
+
+def get_refund_policies(db: Session, skip: int = 0, limit: int = 100) -> List[RefundPolicy]:
+    """Get all refund policies"""
+    return db.query(RefundPolicy).offset(skip).limit(limit).all()
+
+
+def get_refund_policy(db: Session, policy_id: int) -> Optional[RefundPolicy]:
+    """Get a refund policy by ID"""
+    return db.query(RefundPolicy).filter(RefundPolicy.id == policy_id).first()
+
+
+def get_active_refund_policy(db: Session) -> Optional[RefundPolicy]:
+    """Get the active refund policy"""
+    return db.query(RefundPolicy).filter(RefundPolicy.is_active == True).first()
+
+
+def update_refund_policy(db: Session, policy_id: int, policy_data: RefundPolicyUpdate) -> Optional[RefundPolicy]:
+    """Update a refund policy"""
+    db_policy = db.query(RefundPolicy).filter(RefundPolicy.id == policy_id).first()
+    if not db_policy:
+        return None
+    
+    update_data = policy_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_policy, field, value)
+    
+    db.commit()
+    db.refresh(db_policy)
+    return db_policy
+
+
+def delete_refund_policy(db: Session, policy_id: int) -> bool:
+    """Soft delete a refund policy"""
+    db_policy = db.query(RefundPolicy).filter(RefundPolicy.id == policy_id).first()
+    if not db_policy:
+        return False
+    
+    db_policy.is_active = False
+    db.commit()
+    return True
+
+
+# ==================== Refund CRUD ====================
+
+def create_refund(db: Session, refund_data: RefundCreate, user_id: int) -> Optional[Refund]:
+    """Create a new refund request"""
+    
+    # Verify the payment exists and is valid
+    payment = db.query(Payment).filter(Payment.id == refund_data.payment_id).first()
+    if not payment:
+        return None
+    
+    # Verify the invoice matches
+    invoice = db.query(Invoice).filter(Invoice.id == refund_data.invoice_id).first()
+    if not invoice:
+        return None
+    
+    # Verify the patient matches
+    if payment.patient_id != invoice.patient_id:
+        return None
+    
+    # Check refund policy rules
+    policy = get_active_refund_policy(db)
+    error_message = validate_refund_request(db, payment, invoice, refund_data.amount, policy)
+    if error_message:
+        raise ValueError(error_message)
+    
+    # Generate refund number
+    refund_number = generate_refund_number(db)
+    
+    # Check if auto-approve
+    auto_approve = False
+    if policy and policy.auto_approve_threshold and refund_data.amount <= policy.auto_approve_threshold:
+        auto_approve = True
+    
+    db_refund = Refund(
+        invoice_id=refund_data.invoice_id,
+        payment_id=refund_data.payment_id,
+        patient_id=payment.patient_id,
+        requested_by_id=user_id,
+        refund_number=refund_number,
+        amount=refund_data.amount,
+        reason=refund_data.reason,
+        notes=refund_data.notes,
+        status=RefundStatus.APPROVED if auto_approve else RefundStatus.PENDING,
+        policy_id=policy.id if policy else None
+    )
+    
+    db.add(db_refund)
+    db.commit()
+    db.refresh(db_refund)
+    return db_refund
+
+
+def validate_refund_request(db: Session, payment: Payment, invoice: Invoice, amount: Decimal, policy: Optional[RefundPolicy]) -> Optional[str]:
+    """Validate a refund request against policy rules"""
+    
+    # Check if payment is completed
+    if payment.status != PaymentStatus.COMPLETED:
+        return "Can only refund completed payments"
+    
+    # Check if payment was already refunded
+    existing_refund = db.query(Refund).filter(
+        Refund.payment_id == payment.id,
+        Refund.status == RefundStatus.PROCESSED
+    ).first()
+    if existing_refund:
+        return "Payment has already been refunded"
+    
+    # Check amount doesn't exceed payment amount
+    if amount > payment.amount:
+        return "Refund amount cannot exceed payment amount"
+    
+    # Check policy rules
+    if policy:
+        # Check refund window
+        if policy.refund_window_days:
+            days_since_payment = (datetime.now() - payment.payment_date).days
+            if days_since_payment > policy.refund_window_days:
+                return f"Refund window of {policy.refund_window_days} days has expired"
+        
+        # Check max refund amount
+        if policy.max_refund_amount and amount > policy.max_refund_amount:
+            return f"Refund amount exceeds maximum allowed of {policy.max_refund_amount}"
+    
+    return None
+
+
+def get_refunds(db: Session, skip: int = 0, limit: int = 100, status: Optional[RefundStatus] = None) -> List[Refund]:
+    """Get all refunds with optional status filter"""
+    query = db.query(Refund)
+    if status:
+        query = query.filter(Refund.status == status)
+    return query.order_by(Refund.created_at.desc()).offset(skip).limit(limit).all()
+
+
+def get_refund(db: Session, refund_id: int) -> Optional[Refund]:
+    """Get a refund by ID"""
+    return db.query(Refund).filter(Refund.id == refund_id).first()
+
+
+def get_refund_by_number(db: Session, refund_number: str) -> Optional[Refund]:
+    """Get a refund by refund number"""
+    return db.query(Refund).filter(Refund.refund_number == refund_number).first()
+
+
+def get_patient_refunds(db: Session, patient_id: int, skip: int = 0, limit: int = 100) -> List[Refund]:
+    """Get all refunds for a patient"""
+    return db.query(Refund).filter(
+        Refund.patient_id == patient_id
+    ).order_by(Refund.created_at.desc()).offset(skip).limit(limit).all()
+
+
+def get_invoice_refunds(db: Session, invoice_id: int) -> List[Refund]:
+    """Get all refunds for an invoice"""
+    return db.query(Refund).filter(Refund.invoice_id == invoice_id).all()
+
+
+def approve_refund(db: Session, refund_id: int, user_id: int, notes: Optional[str] = None) -> Optional[Refund]:
+    """Approve a refund request"""
+    db_refund = db.query(Refund).filter(Refund.id == refund_id).first()
+    if not db_refund:
+        return None
+    
+    if db_refund.status != RefundStatus.PENDING:
+        raise ValueError("Only pending refunds can be approved")
+    
+    db_refund.status = RefundStatus.APPROVED
+    db_refund.approved_by_id = user_id
+    db_refund.approval_date = datetime.now()
+    if notes:
+        db_refund.notes = (db_refund.notes or "") + f"\nApproval: {notes}"
+    
+    db.commit()
+    db.refresh(db_refund)
+    return db_refund
+
+
+def reject_refund(db: Session, refund_id: int, user_id: int, rejection_reason: str, notes: Optional[str] = None) -> Optional[Refund]:
+    """Reject a refund request"""
+    db_refund = db.query(Refund).filter(Refund.id == refund_id).first()
+    if not db_refund:
+        return None
+    
+    if db_refund.status != RefundStatus.PENDING:
+        raise ValueError("Only pending refunds can be rejected")
+    
+    db_refund.status = RefundStatus.REJECTED
+    db_refund.approved_by_id = user_id
+    db_refund.approval_date = datetime.now()
+    db_refund.rejection_reason = rejection_reason
+    if notes:
+        db_refund.notes = (db_refund.notes or "") + f"\nRejection: {notes}"
+    
+    db.commit()
+    db.refresh(db_refund)
+    return db_refund
+
+
+def process_refund(db: Session, refund_id: int, user_id: int, refund_method: PaymentMethod, transaction_reference: Optional[str] = None, notes: Optional[str] = None) -> Optional[Refund]:
+    """Process a refund - update payment and invoice status"""
+    db_refund = db.query(Refund).filter(Refund.id == refund_id).first()
+    if not db_refund:
+        return None
+    
+    if db_refund.status != RefundStatus.APPROVED:
+        raise ValueError("Only approved refunds can be processed")
+    
+    # Get the payment
+    payment = db.query(Payment).filter(Payment.id == db_refund.payment_id).first()
+    invoice = db.query(Invoice).filter(Invoice.id == db_refund.invoice_id).first()
+    
+    # Update payment status
+    payment.status = PaymentStatus.REFUNDED
+    
+    # Update invoice - reduce paid amount and update balance
+    invoice.paid_amount -= db_refund.amount
+    invoice.balance = invoice.total_amount - invoice.paid_amount
+    
+    # Update invoice status based on new balance
+    if invoice.balance == invoice.total_amount:
+        invoice.status = InvoiceStatus.PENDING
+        invoice.paid_date = None
+    elif invoice.balance > 0:
+        invoice.status = InvoiceStatus.PARTIALLY_PAID
+    
+    # Update refund
+    db_refund.status = RefundStatus.PROCESSED
+    db_refund.processed_by_id = user_id
+    db_refund.processed_date = datetime.now()
+    db_refund.refund_method = refund_method
+    db_refund.transaction_reference = transaction_reference
+    if notes:
+        db_refund.notes = (db_refund.notes or "") + f"\nProcessed: {notes}"
+    
+    db.commit()
+    db.refresh(db_refund)
+    return db_refund
+
+
+def cancel_refund(db: Session, refund_id: int) -> Optional[Refund]:
+    """Cancel a pending refund request"""
+    db_refund = db.query(Refund).filter(Refund.id == refund_id).first()
+    if not db_refund:
+        return None
+    
+    if db_refund.status not in [RefundStatus.PENDING, RefundStatus.APPROVED]:
+        raise ValueError("Only pending or approved refunds can be cancelled")
+    
+    db_refund.is_active = False
+    db.commit()
+    db.refresh(db_refund)
+    return db_refund
 

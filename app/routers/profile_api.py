@@ -2,7 +2,7 @@
 User Profile Management Routes
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, Form
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -13,7 +13,6 @@ from app.models.user_models import User
 from app.core.security import verify_password, get_password_hash
 
 router = APIRouter(tags=["Profile"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/profile", name="view_profile")

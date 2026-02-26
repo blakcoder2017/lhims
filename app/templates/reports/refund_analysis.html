@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Refund Analysis Report</h2>
+        <div>
+            <a href="/reports/financial/refund-analysis?format=excel&start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-success">
+                <i class="fas fa-file-excel"></i> Export Excel
+            </a>
+        </div>
+    </div>
+
+    <!-- Date Filter -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-3">
+                    <label>Start Date</label>
+                    <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                </div>
+                <div class="col-md-3">
+                    <label>End Date</label>
+                    <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                </div>
+                <div class="col-md-2">
+                    <label>&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">Filter</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5>Total Refunds</h5>
+                    <h3>GHS {{ "{:,.2f}".format(total_refunds) }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5>Total Refund Requests</h5>
+                    <h3>{{ total_count }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5>Average Refund</h5>
+                    <h3>GHS {{ "{:,.2f}".format(avg_refund) }}</h3>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body">
+                    <h5>Approved Refunds</h5>
+                    <h3>GHS {{ "{:,.2f}".format(status_breakdown.approved.total) }}</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Status Breakdown -->
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h4>By Status</h4>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th class="text-right">Count</th>
+                                <th class="text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for status, data in status_breakdown.items() %}
+                            <tr>
+                                <td>{{ status|title }}</td>
+                                <td class="text-right">{{ data.count }}</td>
+                                <td class="text-right">GHS {{ "{:,.2f}".format(data.total) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Reasons -->
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h4>Top Refund Reasons</h4>
+                </div>
+                <div class="card-body">
+                    {% if top_reasons %}
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Reason</th>
+                                <th class="text-right">Count</th>
+                                <th class="text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for reason, data in top_reasons %}
+                            <tr>
+                                <td>{{ reason }}</td>
+                                <td class="text-right">{{ data.count }}</td>
+                                <td class="text-right">GHS {{ "{:,.2f}".format(data.total) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p class="text-muted">No refund reasons recorded.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monthly Trend -->
+    {% if monthly_trend %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h4>Monthly Trend</h4>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th class="text-right">Count</th>
+                            <th class="text-right">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for month, data in monthly_trend %}
+                        <tr>
+                            <td>{{ month }}</td>
+                            <td class="text-right">{{ data.count }}</td>
+                            <td class="text-right">GHS {{ "{:,.2f}".format(data.total) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Refund Details -->
+    <div class="card">
+        <div class="card-header">
+            <h4>Refund Details</h4>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Refund #</th>
+                            <th>Date</th>
+                            <th>Patient</th>
+                            <th>Invoice #</th>
+                            <th class="text-right">Amount</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for refund in refunds %}
+                        <tr>
+                            <td>{{ refund.refund_number }}</td>
+                            <td>{{ refund.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>{{ refund.patient.first_name }} {{ refund.patient.last_name }}</td>
+                            <td>{{ refund.invoice.invoice_number if refund.invoice else '-' }}</td>
+                            <td class="text-right">GHS {{ "{:,.2f}".format(refund.amount) }}</td>
+                            <td>{{ refund.reason|truncate(50) }}</td>
+                            <td><span class="badge bg-{% if refund.status.value == 'approved' %}success{% elif refund.status.value == 'pending' %}warning{% elif refund.status.value == 'rejected' %}danger{% else %}info{% endif %}">{{ refund.status.value }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

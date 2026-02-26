@@ -30,8 +30,8 @@
                             <tbody>
                                 {% for v in visits %}
                                 <tr>
-                                    <td><a href="{{ url_for('view_patient_records', patient_id=v.patient_id) }}">{{ v.patient.first_name }} {{ v.patient.last_name }}</a></td>
-                                    <td>{{ v.visit_date.strftime('%Y-%m-%d') }}</td>
+                                    <td><a href="{{ url_for('midwife_antenatal_visits_list_patient', patient_id=v.patient_id) }}">{{ v.patient.first_name }} {{ v.patient.last_name }}</a></td>
+                                    <td><a href="{{ url_for('midwife_antenatal_visit_detail', visit_id=v.id) }}">{{ v.visit_date.strftime('%Y-%m-%d') }}</a></td>
                                     <td>{{ v.visit_number or '–' }}</td>
                                     <td>{{ v.gestational_weeks or '–' }}</td>
                                     <td>{% if v.blood_pressure_systolic and v.blood_pressure_diastolic %}{{ v.blood_pressure_systolic }}/{{ v.blood_pressure_diastolic }}{% else %}–{% endif %}</td>

@@ -43,6 +43,13 @@
                             <a href="{{ url_for('midwife_antenatal_visits_list') }}" class="small-box-footer">View List <i class="fas fa-arrow-circle-right"></i></a>
                         </div>
                     </div>
+                    <div class="col-lg-4 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner"><h3>{{ high_risk_count }}</h3><p>High Risk Patients</p></div>
+                            <div class="icon"><i class="fas fa-exclamation-triangle"></i></div>
+                            <a href="{{ url_for('midwife_antenatal_visits_list') }}" class="small-box-footer">View List <i class="fas fa-arrow-circle-right"></i></a>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="row">
@@ -58,10 +65,10 @@
                                     <tbody>
                                         {% for v in recent_visits %}
                                         <tr>
-                                            <td><a href="{{ url_for('view_patient_records', patient_id=v.patient_id) }}">{{ v.patient.first_name }} {{ v.patient.last_name }}</a></td>
+                                            <td><a href="{{ url_for('midwife_antenatal_visits_list_patient', patient_id=v.patient_id) }}">{{ v.patient.first_name }} {{ v.patient.last_name }}</a></td>
                                             <td>{{ v.visit_date.strftime('%Y-%m-%d') }}</td>
                                             <td>{{ v.gestational_weeks or '–' }}</td>
-                                            <td>{% if v.blood_pressure_systolic and v.blood_pressure_diastolic %}{{ v.blood_pressure_systolic }}/{{ v.blood_pressure_diastolic }}{% else %}–{% endif %}</td>
+                                            <td>{% if v.blood_pressure_systolic and v.blood_pressure_diastolic %}<span class="badge badge-{% if v.blood_pressure_systolic >= 140 or v.blood_pressure_diastolic >= 90 %}danger{% else %}success{% endif %}">{{ v.blood_pressure_systolic }}/{{ v.blood_pressure_diastolic }}</span>{% else %}–{% endif %}</td>
                                             <td>{{ v.next_visit_date.strftime('%Y-%m-%d') if v.next_visit_date else '–' }}</td>
                                         </tr>
                                         {% endfor %}
@@ -85,7 +92,7 @@
                                     <tbody>
                                         {% for v in upcoming_visits %}
                                         <tr>
-                                            <td><a href="{{ url_for('view_patient_records', patient_id=v.patient_id) }}">{{ v.patient.first_name }} {{ v.patient.last_name }}</a></td>
+                                            <td><a href="{{ url_for('midwife_antenatal_visits_list_patient', patient_id=v.patient_id) }}">{{ v.patient.first_name }} {{ v.patient.last_name }}</a></td>
                                             <td>{{ v.next_visit_date.strftime('%Y-%m-%d') if v.next_visit_date else '–' }}</td>
                                         </tr>
                                         {% endfor %}

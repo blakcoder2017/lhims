@@ -14,6 +14,7 @@ class AppointmentType(str, enum.Enum):
     LAB_WORK = "lab_work"
     RADIOLOGY = "radiology"
     OTHER = "other"
+    WALK_IN = "walk_in"
 
 
 class AppointmentStatus(str, enum.Enum):

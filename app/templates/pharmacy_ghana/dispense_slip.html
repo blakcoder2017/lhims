@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dispense Slip #{{ dispense.id }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .patient-info { margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .totals { margin-top: 20px; text-align: right; }
+        .footer { margin-top: 30px; font-size: 12px; color: #666; }
+        @media print {
+            body { padding: 0; }
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>PHARMACY DISPENSE SLIP</h2>
+        <p>Dispense ID: {{ dispense.id }}</p>
+    </div>
+    
+    <div class="patient-info">
+        <h3>Patient Information</h3>
+        <p><strong>Name:</strong> {{ patient.first_name }} {{ patient.last_name }}</p>
+        <p><strong>Patient Number:</strong> {{ patient.patient_number or 'N/A' }}</p>
+        <p><strong>Date:</strong> {{ dispense.dispensed_at.strftime('%Y-%m-%d %H:%M') if dispense.dispensed_at else 'N/A' }}</p>
+    </div>
+    
+    <h3>Medications Dispensed</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Drug</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Total</th>
+                <th>Instructions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in dispense.items %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>
+                    {{ item.drug.generic_name if item.drug else 'N/A' }}
+                    {% if item.drug and item.drug.dosage_form %}
+                        {{ item.drug.dosage_form.name }}
+                    {% endif %}
+                </td>
+                <td>{{ item.qty_dispensed }}</td>
+                <td>GHS {{ "%.2f"|format(item.unit_selling_price) if item.unit_selling_price else '0.00' }}</td>
+                <td>GHS {{ "%.2f"|format(item.total_amount) if item.total_amount else '0.00' }}</td>
+                <td>{{ item.dosage_instructions or 'N/A' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <div class="totals">
+        <p><strong>Total Amount:</strong> GHS 
+            {% set total = namespace(value=0) %}
+            {% for item in dispense.items %}
+                {% if item.total_amount %}
+                    {% set total.value = total.value + item.total_amount %}
+                {% endif %}
+            {% endfor %}
+            {{ "%.2f"|format(total.value) }}
+        </p>
+    </div>
+    
+    {% if dispense.items[0].allocations %}
+    <h3>Batches Used (FEFO)</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Drug</th>
+                <th>Batch No</th>
+                <th>Expiry Date</th>
+                <th>Qty Used</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in dispense.items %}
+                {% for alloc in item.allocations %}
+                <tr>
+                    <td>{{ item.drug.generic_name if item.drug else 'N/A' }}</td>
+                    <td>{{ alloc.batch.batch_no if alloc.batch else 'N/A' }}</td>
+                    <td>{{ alloc.batch.expiry_date.strftime('%Y-%m-%d') if alloc.batch and alloc.batch.expiry_date else 'N/A' }}</td>
+                    <td>{{ alloc.qty_allocated }}</td>
+                </tr>
+                {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    
+    <div class="footer">
+        <p>Dispensed by: {{ dispense.dispensed_by_id if dispense.dispensed_by_id else 'N/A' }}</p>
+        <p>Payment Type: {{ dispense.payment_type or 'N/A' }}</p>
+    </div>
+    
+    <div class="no-print" style="margin-top: 20px;">
+        <button onclick="window.print()">Print</button>
+        <button onclick="window.close()">Close</button>
+    </div>
+</body>
+</html>

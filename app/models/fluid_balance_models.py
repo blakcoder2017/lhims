@@ -22,6 +22,7 @@ class FluidBalance(Base):
     # 'intake' or 'output'
     entry_type = Column(String(20), nullable=False)
     volume_ml = Column(Integer, nullable=False)
+    color = Column(String(50), nullable=True)  # e.g., Clear, Yellow, Brown, Bloody
     recorded_at = Column(DateTime, nullable=False, server_default=func.now())
     notes = Column(Text, nullable=True)
 

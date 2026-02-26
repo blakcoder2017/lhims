@@ -20,7 +20,7 @@ router = APIRouter(
 @router.post("/register") 
 def register_patient_form(
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Front Office", "Admin"])), 
+    current_user = Depends(role_required(["Front Office", "Nurse", "Admin"])), 
     
     first_name: str = Form(...),
     last_name: str = Form(...),
@@ -29,8 +29,8 @@ def register_patient_form(
     national_id: str = Form(None),  # Optional - not compulsory 
     phone_number: str = Form(""), 
     address: str = Form(""),
-    # Financial Screening Fields (Workflow Step 3)
-    payment_mechanism: str = Form(""),
+    # Financial Screening Fields (Workflow Step 3) - NOW REQUIRED
+    payment_mechanism: str = Form(..., description="Payment mechanism is required: cash, nhis, or private_insurance"),
     nhis_number: str = Form(""),
     insurance_provider: str = Form(""),
     insurance_provider_manual: str = Form(""),
@@ -39,23 +39,24 @@ def register_patient_form(
     languages_spoken: Optional[str] = Form(None),
     # Emergency case flag
     is_emergency: Optional[str] = Form(None),
+    # Department for this visit (determines consultation fee; required)
+    department: str = Form(..., description="Department patient will visit"),
 ):
     """
     Handles HTML form submission for patient registration with financial screening.
-    Workflow Steps 1 & 3: Registration & Financial Screening
-    Saves to DB and redirects to the patient's Triage page.
+    Workflow: Save patient; for cash → redirect to pay consultation (then receipt, dashboard, add to triage);
+    for insurance → add to vitals queue and redirect to dashboard.
     """
     from app.models.patient_models import PaymentMechanism
     
     # 1. Pydantic Validation & Data Preparation
     try:
-        # Parse payment mechanism
-        payment_mech = None
-        if payment_mechanism:
-            try:
-                payment_mech = PaymentMechanism(payment_mechanism)
-            except ValueError:
-                payment_mech = None
+        # Parse payment mechanism - now required
+        try:
+            payment_mech = PaymentMechanism(payment_mechanism)
+        except ValueError:
+            # Invalid payment mechanism value
+            return RedirectResponse(url="/patients/register?error=Invalid+payment+mechanism", status_code=status.HTTP_302_FOUND)
         
         # Handle optional national_id
         national_id_clean = national_id.strip() if national_id and national_id.strip() else None
@@ -142,14 +143,16 @@ def register_patient_form(
     
     # 4. Handle emergency cases - create appointment with high priority and fast-track
     is_emergency_case = is_emergency and is_emergency.lower() == "yes"
+    department_clean = (department or "").strip() or "General Medicine"
     
-    # 5. Cash and insurance: go to triage first. Cash pays after doctor + labs (see CASH_PAYMENT_FLOW_PLAN).
+    # 5. Registration flow: cash → pay consultation (then add to triage, receipt, dashboard); insurance → add to triage, dashboard
     from app.utils.payment_verification import is_cash_patient
+    from urllib.parse import quote
     
     if is_cash_patient(db, new_patient.id):
-        # Cash patient: go to triage (payment is after doctor orders labs, not before)
+        # Cash patient: redirect to pay consultation (department-based); after payment: add to triage, print receipt, redirect dashboard
         if is_emergency_case:
-            # For emergency cases, create appointment immediately with highest priority
+            # Emergency: still create appointment and send to triage (payment can be deferred)
             from app.crud import appointment_crud
             from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
             from app.models.scheduled_appointment_models import AppointmentType, AppointmentStatus
@@ -163,34 +166,45 @@ def register_patient_form(
                 scheduled_date=datetime.now(),
                 chief_complaint="Emergency case - immediate attention required",
                 notes="Emergency case - fast-tracked from registration",
-                priority=1,  # Highest priority
+                priority=1,
                 assigned_clinician_id=None,
                 created_by_id=current_user.id
             )
-            
             new_appointment = appointment_crud.create_appointment(db, emergency_appointment)
-            # Auto check-in emergency patients
             appointment_crud.update_appointment(
                 db,
                 new_appointment.id,
                 AppointmentUpdate(status=AppointmentStatus.CHECKED_IN, checked_in_at=datetime.now())
             )
-            
             redirect_url = f"/patients/{new_patient.id}/triage?status=registered&emergency=true&appointment_id={new_appointment.id}&from_registration=true"
         else:
-            # Normal cash: triage first, pay after doctor + labs
-            redirect_url = f"/patients/{new_patient.id}/triage?status=registered&from_registration=true"
+            # Normal cash: show patient ID & number for paper, then collect payment
+            redirect_url = f"/patients/{new_patient.id}/registration-success?department={quote(department_clean)}&from_registration=1"
     else:
-        # Insurance patient: go directly to triage
-        redirect_url = f"/patients/{new_patient.id}/triage?status=registered"
+        # Insurance patient: add to vitals queue (OPDQueue) and redirect to dashboard (no payment, no receipt)
+        from app.crud import appointment_crud
+        from app.schemas.appointment_schemas import QueueCreate
+        from app.models.appointment_models import VisitType
+        
+        queue_data = QueueCreate(
+            patient_id=new_patient.id,
+            department=department_clean,
+            department_type="opd",
+            visit_type=VisitType.WALK_IN,
+            priority=5,
+            chief_complaint=None,
+            notes="Registered from front office",
+            assigned_clinician_id=None,
+            created_by_id=current_user.id
+        )
+        appointment_crud.create_queue_entry(db, queue_data)
+        redirect_url = "/?status=registered&insurance=1"
         
         if is_emergency_case:
-            # For emergency cases, create appointment immediately with highest priority
-            from app.crud import appointment_crud
+            from app.crud import appointment_crud as apt_crud
             from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
             from app.models.scheduled_appointment_models import AppointmentType, AppointmentStatus
             from datetime import datetime
-            
             emergency_appointment = AppointmentCreate(
                 patient_id=new_patient.id,
                 department="Emergency",
@@ -199,26 +213,15 @@ def register_patient_form(
                 scheduled_date=datetime.now(),
                 chief_complaint="Emergency case - immediate attention required",
                 notes="Emergency case - fast-tracked from registration",
-                priority=1,  # Highest priority
+                priority=1,
                 assigned_clinician_id=None,
                 created_by_id=current_user.id
             )
-            
-            new_appointment = appointment_crud.create_appointment(db, emergency_appointment)
-            # Auto check-in emergency patients
-            appointment_crud.update_appointment(
-                db,
-                new_appointment.id,
-                AppointmentUpdate(status=AppointmentStatus.CHECKED_IN, checked_in_at=datetime.now())
-            )
-            
+            new_appointment = apt_crud.create_appointment(db, emergency_appointment)
+            apt_crud.update_appointment(db, new_appointment.id, AppointmentUpdate(status=AppointmentStatus.CHECKED_IN, checked_in_at=datetime.now()))
             redirect_url = f"/patients/{new_patient.id}/triage?status=registered&emergency=true&appointment_id={new_appointment.id}"
     
-    # FINAL REDIRECT
-    return RedirectResponse(
-        url=redirect_url, 
-        status_code=status.HTTP_302_FOUND
-    )
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/search", response_model=List[Patient])
@@ -274,6 +277,36 @@ def get_patients_api(
     )
     
     return patients
+
+
+@router.get("/{patient_id}/revisit-eligible")
+def get_revisit_eligible_api(
+    patient_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Check if patient is eligible for revisit/follow-up discount (has completed encounter)."""
+    from app.models.encounter_models import Encounter, EncounterStatus
+    from app.crud import hospital_settings_crud
+    patient = patient_crud.get_patient(db, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    has_previous = db.query(Encounter).filter(
+        Encounter.patient_id == patient_id,
+        Encounter.is_active == True,
+        Encounter.status == EncounterStatus.COMPLETED.value,
+    ).first() is not None
+    revisit_pct = None
+    try:
+        settings = hospital_settings_crud.get_hospital_settings(db)
+        if settings and getattr(settings, "revisit_follow_up_percentage", None) is not None:
+            revisit_pct = float(settings.revisit_follow_up_percentage)
+    except Exception:
+        pass
+    return {
+        "eligible": has_previous and revisit_pct is not None,
+        "discount_pct": revisit_pct,
+    }
 
 
 @router.get("/{patient_id}", response_model=Patient)

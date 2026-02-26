@@ -2,7 +2,7 @@
 API routes for NHIS Claims management.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Form
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -15,7 +15,19 @@ from app.models.encounter_models import Encounter
 from app.crud import claims_crud
 
 router = APIRouter(tags=["NHIS Claims"])
-templates = Jinja2Templates(directory="app/templates")
+# Register the age filter
+from datetime import date
+def calculate_age(dob):
+    if not dob:
+        return None
+    if isinstance(dob, str):
+        dob = date.fromisoformat(dob)
+    today = date.today()
+    age = today.year - dob.year
+    if (today.month, today.day) < (dob.month, dob.day):
+        age -= 1
+    return age
+templates.env.filters["age"] = calculate_age
 
 
 @router.get("/claims", name="claims_dashboard")
@@ -40,6 +52,8 @@ def claims_dashboard(
     nhis_query = db.query(NHISClaim).filter(NHISClaim.is_active == True)
     
     if status_filter and provider_filter != "private_insurance":
+        # Normalize to lowercase to match database enum values
+        status_filter = status_filter.lower()
         try:
             status_enum = ClaimStatus(status_filter)
             nhis_query = nhis_query.filter(NHISClaim.status == status_enum.value)
@@ -204,6 +218,8 @@ def private_insurance_claims_dashboard(
     )
     
     if status_filter:
+        # Normalize to lowercase to match database enum values
+        status_filter = status_filter.lower()
         try:
             status_enum = InvoiceStatus(status_filter)
             base_query = base_query.filter(Invoice.status == status_enum.value)
@@ -323,6 +339,8 @@ def export_nhis_claims(
     query = db.query(NHISClaim).filter(NHISClaim.is_active == True)
     
     if status_filter:
+        # Normalize to lowercase to match database enum values
+        status_filter = status_filter.lower()
         try:
             status_enum = ClaimStatus(status_filter)
             query = query.filter(NHISClaim.status == status_enum.value)
@@ -581,6 +599,8 @@ def export_private_insurance_invoices(
     )
     
     if status_filter:
+        # Normalize to lowercase to match database enum values
+        status_filter = status_filter.lower()
         try:
             status_enum = InvoiceStatus(status_filter)
             base_query = base_query.filter(Invoice.status == status_enum.value)

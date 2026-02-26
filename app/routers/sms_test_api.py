@@ -4,7 +4,7 @@ For testing SMS functionality
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from app.core.deps import role_required
 from app.services.sms_onlinegh_service import sms_service, send_personalized_sms_notification
 
@@ -12,7 +12,6 @@ router = APIRouter(
     prefix="/api/v1/sms",
     tags=["SMS Testing"]
 )
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/test", name="test_sms_page")

@@ -6,7 +6,7 @@ Supports Pharmacy, Lab, Radiology, and Procedures with restrictions and pricing 
 """
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Form, status
 from fastapi.responses import RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional, Dict
 from decimal import Decimal
@@ -40,10 +40,10 @@ from app.services import (
     create_charge_for_radiology_order,
     create_charge_for_procedure,
     create_charge_for_prescription,
+    create_sample_if_not_exists
 )
 
 router = APIRouter(tags=["Direct Service Requests"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/direct-service-requests", name="direct_service_requests_dashboard")
@@ -379,7 +379,9 @@ def create_direct_pharmacy_request(
     patient_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Front Office", "Admin", "Finance", "Pharmacy Staff"])),
-    medication_id: int = Form(...),
+    medication_id: Optional[str] = Form(None),
+    pharmacy_drug_id: Optional[str] = Form(None),
+    medication_name: str = Form(...),
     dosage: str = Form(...),
     frequency: str = Form(...),
     duration: str = Form(...),
@@ -388,6 +390,93 @@ def create_direct_pharmacy_request(
 ):
     """Create a direct pharmacy request from patient profile"""
     import traceback
+    from uuid import UUID
+    
+    # Validate medication - either pharmacy_drug_id (Ghana system) or medication_id (legacy)
+    if not pharmacy_drug_id and not medication_id:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Medication+is+required",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Track which system we're using
+    use_ghana_system = bool(pharmacy_drug_id and pharmacy_drug_id.strip())
+    
+    # Ghana: Get drug details from PharmacyDrug if pharmacy_drug_id provided
+    pharmacy_drug = None
+    if use_ghana_system:
+        try:
+            pharmacy_drug_uuid = UUID(pharmacy_drug_id.strip())
+            from app.models.pharmacy_models import PharmacyDrug
+            pharmacy_drug = db.query(PharmacyDrug).options(
+                joinedload(PharmacyDrug.dosage_form)
+            ).filter(
+                PharmacyDrug.id == pharmacy_drug_uuid,
+                PharmacyDrug.is_active == True
+            ).first()
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Invalid pharmacy_drug_id format: {e}")
+    
+    # Build medication name from pharmacy drug if available
+    medication_name_final = medication_name
+    medication_code_final = None
+    dosage_form_name = None
+    strength_value = None
+    strength_unit = None
+    route = None
+    concentration_value = None
+    concentration_unit = None
+    stock_warning = None
+    
+    if pharmacy_drug:
+        strength = f"{pharmacy_drug.strength_value} {pharmacy_drug.strength_unit or ''}" if pharmacy_drug.strength_value else ""
+        if pharmacy_drug.concentration_value:
+            strength = f"{pharmacy_drug.concentration_value} {pharmacy_drug.concentration_unit or ''}"
+        medication_name_final = f"{pharmacy_drug.generic_name} {strength} {pharmacy_drug.dosage_form.name if pharmacy_drug.dosage_form else ''}".strip()
+        medication_code_final = pharmacy_drug.item_code
+        dosage_form_name = pharmacy_drug.dosage_form.name if pharmacy_drug.dosage_form else None
+        strength_value = float(pharmacy_drug.strength_value) if pharmacy_drug.strength_value else None
+        strength_unit = pharmacy_drug.strength_unit
+        route = pharmacy_drug.route
+        concentration_value = float(pharmacy_drug.concentration_value) if pharmacy_drug.concentration_value else None
+        concentration_unit = pharmacy_drug.concentration_unit
+        
+        # STOCK CHECK: Verify medication is available in pharmacy inventory
+        stock_warning = None
+        from datetime import date
+        from app.models.pharmacy_models import PharmacyBatch, PharmacyStore
+        store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+        
+        if store:
+            try:
+                pharmacy_drug_uuid = UUID(pharmacy_drug_id.strip())
+                batches = db.query(PharmacyBatch).filter(
+                    PharmacyBatch.store_id == store.id,
+                    PharmacyBatch.drug_id == pharmacy_drug_uuid,
+                    PharmacyBatch.status == "ACTIVE",
+                    PharmacyBatch.expiry_date >= date.today(),
+                ).all()
+                
+                total_available = sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0)
+                required_qty = quantity if quantity else 1
+                
+                if total_available == 0:
+                    stock_warning = {
+                        "message": f"{medication_name_final} is currently OUT OF STOCK.",
+                        "is_out_of_stock": True,
+                        "available_quantity": 0,
+                        "requested_quantity": required_qty
+                    }
+                elif total_available < required_qty:
+                    stock_warning = {
+                        "message": f"Insufficient stock. Requested: {required_qty}, Available: {total_available}.",
+                        "is_out_of_stock": False,
+                        "is_partial": True,
+                        "available_quantity": total_available,
+                        "requested_quantity": required_qty
+                    }
+            except (ValueError, TypeError):
+                pass
     
     try:
         # Get patient
@@ -395,18 +484,24 @@ def create_direct_pharmacy_request(
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
         
-        # Check restriction
-        restriction = check_medication_restriction(db, medication_id)
-        if restriction["restricted"]:
-            return RedirectResponse(
-                url=str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?error={restriction['reason']}",
-                status_code=status.HTTP_302_FOUND
-            )
-        
-        # Get medication
-        medication = inventory_crud.get_medication(db, medication_id)
-        if not medication:
-            raise HTTPException(status_code=404, detail="Medication not found")
+        # For Ghana system, skip medication restriction check (it's handled by drug interactions)
+        if not use_ghana_system and medication_id:
+            # Legacy: check restriction
+            try:
+                medication_id_int = int(medication_id)
+                restriction = check_medication_restriction(db, medication_id_int)
+                if restriction["restricted"]:
+                    return RedirectResponse(
+                        url=str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?error={restriction['reason']}",
+                        status_code=status.HTTP_302_FOUND
+                    )
+                
+                # Get medication for legacy system
+                medication = inventory_crud.get_medication(db, medication_id_int)
+                if not medication:
+                    raise HTTPException(status_code=404, detail="Medication not found")
+            except (ValueError, TypeError):
+                pass
         
         # For direct requests, temporarily set payment mechanism to CASH for invoice creation
         original_payment_mechanism = patient.payment_mechanism
@@ -419,17 +514,24 @@ def create_direct_pharmacy_request(
             encounter_data = EncounterCreate(
                 patient_id=patient.id,
                 clinician_id=current_user.id,
-                chief_complaint=f"Direct pharmacy request: {medication.name}",
+                chief_complaint=f"Direct pharmacy request: {medication_name_final}",
                 status=EncounterStatus.COMPLETED
             )
             encounter = encounter_crud.create_encounter(db, encounter_data)
             
-            # Create prescription
+            # Create prescription with pharmacy_drug_id for Ghana system
             prescription_data = PrescriptionCreate(
                 encounter_id=encounter.id,
                 prescribed_by_id=current_user.id,
-                medication_name=medication.name,
-                medication_code=medication.medication_code,
+                medication_name=medication_name_final,
+                medication_code=medication_code_final,
+                pharmacy_drug_id=pharmacy_drug_id.strip() if use_ghana_system else None,
+                dosage_form_name=dosage_form_name,
+                strength_value=strength_value,
+                strength_unit=strength_unit,
+                route=route,
+                concentration_value=concentration_value,
+                concentration_unit=concentration_unit,
                 dosage=dosage,
                 frequency=frequency,
                 duration=duration,
@@ -441,19 +543,40 @@ def create_direct_pharmacy_request(
             new_prescription = encounter_crud.create_prescription(db, prescription_data)
             
             # Create charge (invoice will use CASH payment mechanism)
-            try:
-                create_charge_for_prescription(db, new_prescription, current_user.id, check_payment_required=False)
-            except Exception as billing_error:
-                print(f"Warning: Unable to create direct pharmacy charge: {billing_error}")
-                traceback.print_exc()
+            # SKIP billing if medication is out of stock or has insufficient stock
+            skip_billing = False
+            if stock_warning:
+                if stock_warning.get("is_out_of_stock") or stock_warning.get("is_partial"):
+                    skip_billing = True
+            
+            if not skip_billing:
+                try:
+                    create_charge_for_prescription(db, new_prescription, current_user.id, check_payment_required=False)
+                except Exception as billing_error:
+                    print(f"Warning: Unable to create direct pharmacy charge: {billing_error}")
+                    traceback.print_exc()
+            else:
+                print(f"Note: Skipping charge for prescription {new_prescription.id} - out of stock/insufficient stock")
         finally:
             # Restore original payment mechanism
             if original_payment_mechanism != PaymentMechanism.CASH:
                 patient.payment_mechanism = original_payment_mechanism
                 db.commit()
         
+        # Build redirect URL with stock warning if applicable
+        redirect_url = str(request.url_for("view_patient_records", patient_id=patient_id)) + "?status=pharmacy_request_created"
+        if stock_warning:
+            if stock_warning.get("is_out_of_stock"):
+                from urllib.parse import quote
+                warning_msg = f"WARNING_OUT_OF_STOCK:{stock_warning['message']}"
+                redirect_url += f"&stock_warning={quote(warning_msg)}"
+            elif stock_warning.get("is_partial"):
+                from urllib.parse import quote
+                warning_msg = f"WARNING_INSUFFICIENT_STOCK:{stock_warning['message']}"
+                redirect_url += f"&stock_warning={quote(warning_msg)}"
+        
         return RedirectResponse(
-            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?status=pharmacy_request_created",
+            url=redirect_url,
             status_code=status.HTTP_302_FOUND
         )
     except HTTPException:
@@ -474,27 +597,54 @@ def create_direct_lab_request(
     patient_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Front Office", "Admin", "Finance", "Lab Staff"])),
-    test_name: str = Form(...),
-    test_code: Optional[str] = Form(None),
+    test_ids: str = Form(...),
     instructions: Optional[str] = Form(None),
     priority: str = Form("routine"),
 ):
     """Create a direct lab request from patient profile"""
     import traceback
     
+    # Parse test_ids (comma-separated)
+    try:
+        test_id_list = [int(tid.strip()) for tid in test_ids.split(',') if tid.strip()]
+    except ValueError:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Invalid test IDs",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    if not test_id_list:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Please select at least one test",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Get selected tests from database
+    selected_tests = db.query(LabTest).filter(LabTest.id.in_(test_id_list)).all()
+    
+    if not selected_tests:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Selected tests not found",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # Create a mapping for quick lookup
+    test_map = {t.id: t for t in selected_tests}
+    
+    # Check if all requested tests were found
+    found_ids = set(test_map.keys())
+    missing_ids = set(test_id_list) - found_ids
+    if missing_ids:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?error=Some tests not found (IDs: {missing_ids})",
+            status_code=status.HTTP_302_FOUND
+        )
+    
     try:
         # Get patient
         patient = patient_crud.get_patient(db, patient_id)
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
-        
-        # Check restriction
-        restriction = check_lab_test_restriction(db, test_name, test_code)
-        if restriction["restricted"]:
-            return RedirectResponse(
-                url=str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?error={restriction['reason']}",
-                status_code=status.HTTP_302_FOUND
-            )
         
         # For direct requests, temporarily set payment mechanism to CASH for invoice creation
         original_payment_mechanism = patient.payment_mechanism
@@ -503,31 +653,55 @@ def create_direct_lab_request(
             db.commit()
         
         try:
-            # Create lab order
-            lab_order_data = LabOrderCreate(
-                encounter_id=None,
-                patient_id=patient.id,
-                ordered_by_id=current_user.id,
-                test_name=test_name,
-                test_code=test_code if test_code else None,
-                instructions=instructions if instructions else None,
-                priority=priority,
-                is_walk_in=True
-            )
-            
-            new_order = encounter_crud.create_lab_order(db, lab_order_data)
-            
-            # Create charge (invoice will use CASH payment mechanism)
-            try:
-                create_charge_for_lab_order(db, new_order, current_user.id, check_payment_required=False)
-            except Exception as billing_error:
-                print(f"Warning: Unable to create direct lab charge: {billing_error}")
-                traceback.print_exc()
+            created_orders = []
+            # Create lab order for each selected test
+            for test in selected_tests:
+                # Check restriction for each test
+                restriction = check_lab_test_restriction(db, test.test_name, test.test_code)
+                if restriction["restricted"]:
+                    continue  # Skip restricted tests
+                
+                # Create lab order
+                lab_order_data = LabOrderCreate(
+                    encounter_id=None,
+                    patient_id=patient.id,
+                    ordered_by_id=current_user.id,
+                    test_name=test.test_name,
+                    test_code=test.test_code if test.test_code else None,
+                    lab_test_id=test.id,
+                    instructions=instructions if instructions else None,
+                    priority=priority,
+                    is_walk_in=True
+                )
+                
+                new_order = encounter_crud.create_lab_order(db, lab_order_data)
+                created_orders.append(new_order)
+                
+                # Create charge (invoice will use CASH payment mechanism)
+                try:
+                    create_charge_for_lab_order(db, new_order, current_user.id, check_payment_required=False)
+                except Exception as billing_error:
+                    print(f"Warning: Unable to create direct lab charge: {billing_error}")
+                    traceback.print_exc()
+                
+                # Auto-create sample for the lab order
+                try:
+                    sample = create_sample_if_not_exists(db, new_order.id, current_user.id)
+                    if sample:
+                        print(f"Auto-created sample {sample.barcode} for direct lab order {new_order.id}")
+                except Exception as sample_error:
+                    print(f"Warning: Unable to auto-create sample for order {new_order.id}: {sample_error}")
         finally:
             # Restore original payment mechanism
             if original_payment_mechanism != PaymentMechanism.CASH:
                 patient.payment_mechanism = original_payment_mechanism
                 db.commit()
+        
+        if not created_orders:
+            return RedirectResponse(
+                url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=No orders could be created (all tests may be restricted)",
+                status_code=status.HTTP_302_FOUND
+            )
         
         return RedirectResponse(
             url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?status=lab_request_created",
@@ -624,14 +798,16 @@ def create_direct_procedure_request(
     patient_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Front Office", "Admin", "Finance"])),
-    procedure_name: str = Form(...),
+    procedure_catalog_ids: Optional[str] = Form(None),  # Comma-separated IDs from catalog selection
+    procedure_names: Optional[str] = Form(None),  # Semicolon-separated names from catalog
+    procedure_name: Optional[str] = Form(None),  # Manual single procedure entry
     procedure_code: Optional[str] = Form(None),
     procedure_type: str = Form(...),
     description: Optional[str] = Form(None),
     indication: Optional[str] = Form(None),
     location: Optional[str] = Form(None),
 ):
-    """Create a direct procedure request from patient profile"""
+    """Create a direct procedure request from patient profile - supports multiple procedures from catalog"""
     import traceback
     
     try:
@@ -648,30 +824,90 @@ def create_direct_procedure_request(
         
         try:
             from app.models.procedure_models import ProcedureType
+            from app.models.procedure_catalog_models import ProcedureCatalog
             
-            # Create procedure
-            procedure_data = ProcedureCreate(
-                patient_id=patient.id,
-                encounter_id=None,
-                ordered_by_id=current_user.id,
-                procedure_name=procedure_name,
-                procedure_code=procedure_code if procedure_code else None,
-                procedure_type=ProcedureType(procedure_type),
-                description=description if description else None,
-                indication=indication if indication else None,
-                location=location if location else None,
-                status=ProcedureStatus.SCHEDULED,
-                is_walk_in=True
-            )
+            # Determine which procedures to create
+            procedures_to_create = []
             
-            procedure = procedure_crud.create_procedure(db, procedure_data)
+            # Option 1: Multiple procedures from catalog selection
+            if procedure_catalog_ids:
+                catalog_ids = [x.strip() for x in procedure_catalog_ids.split(',') if x.strip()]
+                for cat_id in catalog_ids:
+                    try:
+                        catalog_id = int(cat_id)
+                        catalog = db.query(ProcedureCatalog).filter(ProcedureCatalog.id == catalog_id).first()
+                        if catalog:
+                            procedures_to_create.append({
+                                'procedure_catalog_id': catalog.id,
+                                'procedure_name': catalog.procedure_name,
+                                'procedure_code': catalog.procedure_code,
+                                'procedure_type': procedure_type,
+                                'description': description,
+                                'indication': indication,
+                                'location': location
+                            })
+                    except ValueError:
+                        continue
             
-            # Create charge (invoice will use CASH payment mechanism)
-            try:
-                create_charge_for_procedure(db, procedure, current_user.id)
-            except Exception as billing_error:
-                print(f"Warning: Unable to create direct procedure charge: {billing_error}")
-                traceback.print_exc()
+            # Option 2: Single manual procedure entry
+            elif procedure_name:
+                procedures_to_create.append({
+                    'procedure_catalog_id': None,
+                    'procedure_name': procedure_name,
+                    'procedure_code': procedure_code,
+                    'procedure_type': procedure_type,
+                    'description': description,
+                    'indication': indication,
+                    'location': location
+                })
+            
+            # Create procedures and charges
+            created_count = 0
+            failed_procedures = []
+            
+            for proc_data in procedures_to_create:
+                try:
+                    procedure_data = ProcedureCreate(
+                        patient_id=patient.id,
+                        encounter_id=None,
+                        ordered_by_id=current_user.id,
+                        procedure_catalog_id=proc_data.get('procedure_catalog_id'),
+                        procedure_name=proc_data['procedure_name'],
+                        procedure_code=proc_data.get('procedure_code'),
+                        procedure_type=ProcedureType(proc_data['procedure_type']),
+                        description=proc_data.get('description'),
+                        indication=proc_data.get('indication'),
+                        location=proc_data.get('location'),
+                        status=ProcedureStatus.SCHEDULED,
+                        is_walk_in=True
+                    )
+                    
+                    procedure = procedure_crud.create_procedure(db, procedure_data)
+                    created_count += 1
+                    
+                    # Create charge with proper procedure catalog pricing
+                    try:
+                        create_charge_for_procedure(db, procedure, current_user.id)
+                    except Exception as billing_error:
+                        print(f"Warning: Unable to create direct procedure charge: {billing_error}")
+                        traceback.print_exc()
+                except Exception as proc_error:
+                    # Log the failed procedure but continue with others
+                    failed_procedures.append({
+                        'name': proc_data.get('procedure_name'),
+                        'error': str(proc_error)
+                    })
+                    print(f"Warning: Failed to create procedure {proc_data.get('procedure_name')}: {proc_error}")
+                    traceback.print_exc()
+            
+            # Build status message
+            status_msg = f"procedure_request_created"
+            if created_count > 0:
+                status_msg = f"procedure_request_created&created={created_count}"
+            if failed_procedures:
+                failed_names = ', '.join([p['name'] for p in failed_procedures])
+                status_msg = f"{status_msg}&failed={len(failed_procedures)}"
+                print(f"[WARNING] {len(failed_procedures)} procedures failed to create: {failed_names}")
         finally:
             # Restore original payment mechanism
             if original_payment_mechanism != PaymentMechanism.CASH:
@@ -679,7 +915,7 @@ def create_direct_procedure_request(
                 db.commit()
         
         return RedirectResponse(
-            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?status=procedure_request_created",
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?status={status_msg}",
             status_code=status.HTTP_302_FOUND
         )
     except HTTPException:

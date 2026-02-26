@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 
 # --- CONFIGURATION ---
 ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "Westafrica1" # Change this in a real system
-ADMIN_EMAIL = "sherifdata@gmail.com"
+ADMIN_PASSWORD = "User@dei.com" # Change this in a real system
+ADMIN_EMAIL = "mawuwebs@gmail.com"
 
 # Roles from your LHIMS Workflows doc
 ROLES_TO_CREATE = [

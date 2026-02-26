@@ -10,8 +10,12 @@ def create_service_pricing(db: Session, pricing: ServicePricingCreate, created_b
     """Create a new service pricing entry"""
     db_pricing = ServicePricing(**pricing.dict(), created_by_id=created_by_id)
     db.add(db_pricing)
-    db.commit()
-    db.refresh(db_pricing)
+    try:
+        db.commit()
+        db.refresh(db_pricing)
+    except Exception as e:
+        db.rollback()
+        raise e
     return db_pricing
 
 
@@ -64,8 +68,12 @@ def update_service_pricing(db: Session, pricing_id: int, pricing_update: Service
     for field, value in update_data.items():
         setattr(db_pricing, field, value)
     
-    db.commit()
-    db.refresh(db_pricing)
+    try:
+        db.commit()
+        db.refresh(db_pricing)
+    except Exception as e:
+        db.rollback()
+        raise e
     return db_pricing
 
 

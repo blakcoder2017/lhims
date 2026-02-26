@@ -7,14 +7,14 @@ Routes for doctor/clinician-specific functionality:
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, or_
 from typing import Optional, List
 from datetime import datetime, timedelta, date
 
 from app.db.database import get_db
-from app.core.deps import get_current_user, role_required
+from app.core.deps import get_current_user, role_required, permission_required
 from app.models.user_models import User
 from app.models.appointment_models import OPDQueue, QueueStatus
 from app.models.scheduled_appointment_models import ScheduledAppointment
@@ -27,10 +27,9 @@ router = APIRouter(
     tags=["Doctor"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 
-@router.get("/dashboard", name="doctor_dashboard")
+@router.get("/dashboard", name="doctor_dashboard", dependencies=[Depends(permission_required("doctor_dashboard"))])
 def doctor_dashboard(
     request: Request,
     db: Session = Depends(get_db),
@@ -145,7 +144,7 @@ def doctor_dashboard(
     return templates.TemplateResponse("doctor/dashboard.html", context)
 
 
-@router.get("/queue", name="doctor_queue")
+@router.get("/queue", name="doctor_queue", dependencies=[Depends(permission_required("doctor_queue"))])
 def doctor_queue(
     request: Request,
     db: Session = Depends(get_db),
@@ -163,7 +162,8 @@ def doctor_queue(
     
     today = date.today()
     
-    # Build query for queue entries
+    # Build query for queue entries — only show patients checked in after vitals (consciously added to doctor queue)
+    # Patients in vitals/triage queue (checked_in_at=None) do NOT appear until nurse records vitals and checks them in
     query = db.query(OPDQueue).options(
         joinedload(OPDQueue.patient)
     ).filter(
@@ -172,7 +172,8 @@ def doctor_queue(
             QueueStatus.WAITING.value,
             QueueStatus.IN_PROGRESS.value
         ]),
-        OPDQueue.is_active == True
+        OPDQueue.is_active == True,
+        OPDQueue.checked_in_at.isnot(None)  # Only patients checked in after vitals (ready for doctor)
     )
     
     # Add search filter for patient name or patient number
@@ -180,10 +181,10 @@ def doctor_queue(
         search_term = f"%{search.strip()}%"
         query = query.join(OPDQueue.patient).filter(
             or_(
-                OPDQueue.patient.first_name.ilike(search_term),
-                OPDQueue.patient.last_name.ilike(search_term),
-                OPDQueue.patient.patient_number.ilike(search_term),
-                OPDQueue.patient.phone_number.ilike(search_term)
+                Patient.first_name.ilike(search_term),
+                Patient.last_name.ilike(search_term),
+                Patient.patient_number.ilike(search_term),
+                Patient.phone_number.ilike(search_term)
             )
         )
     
@@ -219,10 +220,10 @@ def doctor_queue(
         search_term = f"%{search.strip()}%"
         encounters_query = encounters_query.join(Encounter.patient).filter(
             or_(
-                Encounter.patient.first_name.ilike(search_term),
-                Encounter.patient.last_name.ilike(search_term),
-                Encounter.patient.patient_number.ilike(search_term),
-                Encounter.patient.phone_number.ilike(search_term)
+                Patient.first_name.ilike(search_term),
+                Patient.last_name.ilike(search_term),
+                Patient.patient_number.ilike(search_term),
+                Patient.phone_number.ilike(search_term)
             )
         )
     

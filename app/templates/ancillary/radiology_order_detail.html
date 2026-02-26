@@ -81,7 +81,7 @@
                             <div class="col-md-3"><strong>Patient:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
                             <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
                             <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
-                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }} (Age: {{ patient.date_of_birth | age }} years)</div>
                         </div>
                         <div class="row mt-2">
                             <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>

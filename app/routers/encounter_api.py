@@ -6,19 +6,22 @@ from datetime import datetime, date
 from decimal import Decimal
 
 from app.db.database import get_db
-from app.core.deps import role_required, get_current_user
+from app.core.deps import role_required, get_current_user, permission_required
 from app.crud import encounter_crud, billing_crud, service_pricing_crud, appointment_crud
 from app.schemas.encounter_schemas import (
-    EncounterCreate, EncounterUpdate, Encounter,
+    EncounterCreate, EncounterUpdate, Encounter, EncounterAutoSave,
     LabOrderCreate, LabOrderUpdate, LabOrder,
     RadiologyOrderCreate, RadiologyOrderUpdate, RadiologyOrder,
     PrescriptionCreate, PrescriptionUpdate, Prescription,
-    DifferentialInput, DifferentialResponse, DifferentialSaveRequest
+    DifferentialInput, DifferentialResponse, DifferentialSaveRequest,
+    AddendumCreate, Addendum
 )
 from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
-from app.models.encounter_models import EncounterStatus, OrderStatus, LabOrder as LabOrderModel, RadiologyOrder as RadiologyOrderModel
+from app.models.encounter_models import EncounterStatus, OrderStatus, LabOrder as LabOrderModel, RadiologyOrder as RadiologyOrderModel, EncounterAddendum
+from app.models.procedure_models import ProcedureStatus
 from app.models.billing_models import InvoiceStatus, ChargeType
 from app.models.scheduled_appointment_models import AppointmentType, AppointmentStatus
+from app.models.appointment_models import QueueStatus
 from app.schemas.billing_schemas import ChargeCreate
 
 from app.services import (
@@ -26,8 +29,11 @@ from app.services import (
     create_charge_for_radiology_order,
     create_charge_for_procedure,
     create_charge_for_consultation,
+    auto_create_lab_sample,
+    create_sample_if_not_exists
 )
 from app.services.gstg_differential import generate_differential_suggestions
+from app.utils.payment_verification import link_existing_charge_to_encounter
 
 router = APIRouter(
     prefix="/api/v1/encounters",
@@ -66,6 +72,7 @@ def create_encounter_form(
     
     # Form fields
     patient_id: int = Form(...),
+    queue_entry_id: Optional[int] = Form(None),  # Link to OPD queue entry
     appointment_id: Optional[int] = Form(None),
     opd_visit_id: Optional[int] = Form(None),  # OPD visit link
     admission_id: Optional[int] = Form(None),  # IPD admission link
@@ -119,11 +126,20 @@ def create_encounter_form(
     # Use the verified appointment record
     if appointment_record:
         appointment_id = appointment_record.id
+    else:
+        # Validate that appointment_id exists if provided
+        if appointment_id:
+            from app.models.scheduled_appointment_models import ScheduledAppointment
+            existing = db.query(ScheduledAppointment).filter(ScheduledAppointment.id == appointment_id).first()
+            if not existing:
+                # Invalid appointment_id, set to None
+                appointment_id = None
     
     try:
         # Create encounter data
         encounter_data = EncounterCreate(
             patient_id=patient_id,
+            queue_entry_id=queue_entry_id if queue_entry_id else None,
             appointment_id=appointment_id,
             opd_visit_id=opd_visit_id if opd_visit_id else None,
             admission_id=admission_id if admission_id else None,
@@ -154,14 +170,14 @@ def create_encounter_form(
                 status_code=status.HTTP_302_FOUND
             )
         
-        # Ensure consultation charge exists for this encounter (cash pays after doctor + labs)
+        # Link existing paid consultation charge to this encounter (don't create new charge)
+        # This prevents duplicate charges when patient has already paid at registration
         try:
-            create_charge_for_consultation(
-                db, new_encounter.patient_id, current_user.id,
-                encounter_id=new_encounter.id, opd_visit_id=opd_visit_id
+            link_existing_charge_to_encounter(
+                db, new_encounter.patient_id, new_encounter.id
             )
         except Exception as _:
-            pass  # Charge may already exist; lab orders will attach to same invoice
+            print(f"Warning: Could not link existing charge to encounter {new_encounter.id}")
         
         # Link diseases to encounter
         from app.crud import disease_crud
@@ -282,6 +298,37 @@ def create_encounter_form(
         )
 
 
+@router.post("/create", response_model=Encounter, status_code=status.HTTP_201_CREATED)
+def create_encounter_json(
+    encounter: EncounterCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """
+    Create a new clinical encounter via JSON API.
+    """
+    # Override clinician_id with current user
+    if not encounter.clinician_id:
+        encounter.clinician_id = current_user.id
+    
+    # Create encounter
+    new_encounter = encounter_crud.create_encounter(db, encounter)
+    
+    # Link diseases to encounter if diagnoses provided
+    if encounter.diagnoses and len(encounter.diagnoses) > 0:
+        from app.crud import disease_crud
+        for idx, disease_id in enumerate(encounter.diagnoses):
+            is_primary = (idx == 0)  # First one is primary
+            try:
+                disease_crud.add_disease_to_encounter(
+                    db, new_encounter.id, disease_id=disease_id, is_primary=is_primary
+                )
+            except Exception:
+                continue
+    
+    return new_encounter
+
+
 @router.get("/{encounter_id}", response_model=Encounter)
 def get_encounter_endpoint(
     encounter_id: int,
@@ -305,6 +352,92 @@ def get_patient_encounters(
 ):
     """Get all encounters for a specific patient."""
     return encounter_crud.get_encounters_by_patient(db, patient_id, skip, limit)
+
+
+@router.get("/{encounter_id}/compare", name="encounter_compare")
+def compare_encounters(
+    encounter_id: int,
+    compare_with: int = Query(..., description="ID of the encounter to compare with"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """
+    Compare two encounters side-by-side.
+    Returns clinical data from both encounters for comparison.
+    """
+    # Get current encounter
+    current_encounter = encounter_crud.get_encounter_with_orders(db, encounter_id)
+    if not current_encounter:
+        raise HTTPException(status_code=404, detail="Current encounter not found")
+    
+    # Get comparison encounter
+    compare_encounter = encounter_crud.get_encounter_with_orders(db, compare_with)
+    if not compare_encounter:
+        raise HTTPException(status_code=404, detail="Comparison encounter not found")
+    
+    # Verify they're for the same patient
+    if current_encounter.patient_id != compare_encounter.patient_id:
+        raise HTTPException(status_code=400, detail="Cannot compare encounters from different patients")
+    
+    def format_encounter(enc):
+        return {
+            "id": enc.id,
+            "encounter_date": enc.encounter_date.isoformat() if enc.encounter_date else None,
+            "status": enc.status.value if enc.status else None,
+            "clinician": enc.clinician.full_name if enc.clinician else None,
+            "chief_complaint": enc.chief_complaint,
+            "history_of_present_illness": enc.history_of_present_illness,
+            "past_medical_history": enc.past_medical_history,
+            "allergies": enc.allergies,
+            "medications": enc.medications,
+            "physical_examination": enc.physical_examination,
+            "assessment": enc.assessment,
+            "plan": enc.plan,
+            "primary_diagnosis_code": enc.primary_diagnosis_code,
+            "primary_diagnosis_description": enc.primary_diagnosis_description,
+            "lab_orders": [
+                {
+                    "id": o.id,
+                    "test_name": o.test_name,
+                    "status": o.status.value,
+                    "result": o.result
+                }
+                for o in (enc.lab_orders or [])
+            ],
+            "radiology_orders": [
+                {
+                    "id": o.id,
+                    "procedure_name": o.procedure_name,
+                    "status": o.status.value,
+                    "result": o.result
+                }
+                for o in (enc.radiology_orders or [])
+            ],
+            "prescriptions": [
+                {
+                    "id": p.id,
+                    "medication_name": p.medication_name,
+                    "dosage": p.dosage,
+                    "frequency": p.frequency,
+                    "duration": p.duration
+                }
+                for p in (enc.prescriptions or [])
+            ],
+            "procedures": [
+                {
+                    "id": p.id,
+                    "procedure_name": p.procedure_name,
+                    "status": p.status.value if p.status else None
+                }
+                for p in (enc.procedures or [])
+            ]
+        }
+    
+    return {
+        "current": format_encounter(current_encounter),
+        "comparison": format_encounter(compare_encounter),
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 @router.post("/{encounter_id}/detain", response_model=Encounter, status_code=status.HTTP_200_OK)
@@ -340,97 +473,297 @@ def update_encounter_endpoint(
     # Check if trying to close the encounter
     # Handle both Enum and string values
     status_to_check = encounter_update.status
-    if isinstance(status_to_check, str):
-        status_to_check = EncounterStatus(status_to_check)
     
-    if status_to_check == EncounterStatus.COMPLETED:
-        # Get the encounter with orders
-        encounter = encounter_crud.get_encounter(db, encounter_id)
-        if not encounter:
-            raise HTTPException(status_code=404, detail="Encounter not found")
+    # Skip validation if status is not being changed (None)
+    if status_to_check is not None:
+        if isinstance(status_to_check, str):
+            status_to_check = EncounterStatus(status_to_check)
         
-        # Check for pending lab orders
-        pending_lab_orders = db.query(LabOrderModel).filter(
-            LabOrderModel.encounter_id == encounter_id,
-            LabOrderModel.status.in_([OrderStatus.PENDING, OrderStatus.ORDERED, OrderStatus.IN_PROGRESS])
-        ).count()
-        
-        # Check for pending radiology orders
-        pending_radiology_orders = db.query(RadiologyOrderModel).filter(
-            RadiologyOrderModel.encounter_id == encounter_id,
-            RadiologyOrderModel.status.in_([OrderStatus.PENDING, OrderStatus.ORDERED, OrderStatus.IN_PROGRESS])
-        ).count()
-        
-        # Validate force_close permission
-        if force_close and current_user.role.name != "Admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only Administrators can force close encounters with pending orders."
-            )
-        
-        # Check for pending orders (unless force_close is enabled for Admin)
-        if (pending_lab_orders > 0 or pending_radiology_orders > 0) and not (force_close and current_user.role.name == "Admin"):
-            error_details = []
-            if pending_lab_orders > 0:
-                error_details.append(f"{pending_lab_orders} pending lab order(s)")
-            if pending_radiology_orders > 0:
-                error_details.append(f"{pending_radiology_orders} pending radiology order(s)")
+        if status_to_check == EncounterStatus.COMPLETED:
+            # Get the encounter with orders
+            encounter = encounter_crud.get_encounter(db, encounter_id)
+            if not encounter:
+                raise HTTPException(status_code=404, detail="Encounter not found")
             
-            error_message = f"Cannot close encounter. There are {', '.join(error_details)}. Please complete all orders before closing the encounter."
+            # Check for pending lab orders
+            pending_lab_orders = db.query(LabOrderModel).filter(
+                LabOrderModel.encounter_id == encounter_id,
+                LabOrderModel.status.in_([OrderStatus.PENDING, OrderStatus.ORDERED, OrderStatus.IN_PROGRESS])
+            ).count()
             
-            # If user is Admin, suggest force close option
-            if current_user.role.name == "Admin":
-                error_message += " As an Administrator, you can use the 'Force Close' option if necessary."
+            # Check for pending radiology orders
+            pending_radiology_orders = db.query(RadiologyOrderModel).filter(
+                RadiologyOrderModel.encounter_id == encounter_id,
+                RadiologyOrderModel.status.in_([OrderStatus.PENDING, OrderStatus.ORDERED, OrderStatus.IN_PROGRESS])
+            ).count()
             
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_message
-            )
-        
-        # Check for unpaid bills if patient is admitted
-        from app.crud import ipd_crud
-        from app.models.ipd_models import AdmissionStatus
-        
-        # Check if patient is currently admitted
-        current_admission = ipd_crud.get_current_admission(db, encounter.patient_id)
-        
-        if current_admission:
-            # Patient is admitted - check for unpaid bills
-            encounter_invoices = billing_crud.get_invoices_by_encounter(db, encounter_id)
-            unpaid_invoices = [inv for inv in encounter_invoices if inv.status in [InvoiceStatus.PENDING, InvoiceStatus.PARTIALLY_PAID] and inv.balance > 0]
+            # Validate force_close permission
+            if force_close and current_user.role.name != "Admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only Administrators can force close encounters with pending orders."
+                )
             
-            # Also check for any invoices related to the admission (ward/bed charges)
-            from app.models.billing_models import Invoice
-            patient_invoices = billing_crud.get_invoices_by_patient(db, encounter.patient_id)
-            admission_unpaid = [inv for inv in patient_invoices 
-                              if inv.status in [InvoiceStatus.PENDING, InvoiceStatus.PARTIALLY_PAID] 
-                              and inv.balance > 0 
-                              and inv.invoice_date >= current_admission.admission_date]
-            
-            if unpaid_invoices or admission_unpaid:
-                total_unpaid = sum([inv.balance for inv in unpaid_invoices + admission_unpaid])
+            # Check for pending orders (unless force_close is enabled for Admin)
+            if (pending_lab_orders > 0 or pending_radiology_orders > 0) and not (force_close and current_user.role.name == "Admin"):
+                error_details = []
+                if pending_lab_orders > 0:
+                    error_details.append(f"{pending_lab_orders} pending lab order(s)")
+                if pending_radiology_orders > 0:
+                    error_details.append(f"{pending_radiology_orders} pending radiology order(s)")
+                
+                error_message = f"Cannot close encounter. There are {', '.join(error_details)}. Please complete all orders before closing the encounter."
+                
+                # If user is Admin, suggest force close option
+                if current_user.role.name == "Admin":
+                    error_message += " As an Administrator, you can use the 'Force Close' option if necessary."
+                
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot close encounter. Patient is admitted and has outstanding bills of {total_unpaid:.2f}. Please settle all bills before closing the encounter or discharging the patient."
+                    detail=error_message
                 )
+            
+            # Check for unpaid bills if patient is admitted
+            from app.crud import ipd_crud
+            from app.models.ipd_models import AdmissionStatus
+            
+            # Check if patient is currently admitted
+            current_admission = ipd_crud.get_current_admission(db, encounter.patient_id)
+            
+            if current_admission:
+                # Patient is admitted - check for unpaid bills
+                encounter_invoices = billing_crud.get_invoices_by_encounter(db, encounter_id)
+                unpaid_invoices = [inv for inv in encounter_invoices if inv.status in [InvoiceStatus.PENDING, InvoiceStatus.PARTIALLY_PAID] and inv.balance > 0]
+                
+                # Also check for any invoices related to the admission (ward/bed charges)
+                from app.models.billing_models import Invoice
+                patient_invoices = billing_crud.get_invoices_by_patient(db, encounter.patient_id)
+                admission_unpaid = [inv for inv in patient_invoices 
+                                  if inv.status in [InvoiceStatus.PENDING, InvoiceStatus.PARTIALLY_PAID] 
+                                  and inv.balance > 0 
+                                  and inv.invoice_date >= current_admission.admission_date]
+                
+                if unpaid_invoices or admission_unpaid:
+                    total_unpaid = sum([inv.balance for inv in unpaid_invoices + admission_unpaid])
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot close encounter. Patient is admitted and has outstanding bills of {total_unpaid:.2f}. Please settle all bills before closing the encounter or discharging the patient."
+                    )
         
     encounter = encounter_crud.update_encounter(db, encounter_id, encounter_update)
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
     
-    # If encounter is completed, remove patient from queue (update appointment status)
-    if status_to_check == EncounterStatus.COMPLETED:
+    # If addendum is being updated, set the author and timestamp
+    if encounter_update.addendum is not None:
+        # Get the existing encounter to check if addendum changed
+        existing_encounter = encounter_crud.get_encounter(db, encounter_id)
+        if existing_encounter and existing_encounter.addendum != encounter_update.addendum:
+            # Addendum changed - update the tracking fields
+            from datetime import datetime
+            existing_encounter.addendum_by_id = current_user.id
+            existing_encounter.addendum_at = datetime.now()
+            db.commit()
+            # Refresh the encounter to get updated values
+            db.refresh(existing_encounter)
+            encounter = existing_encounter
+    
+    # If encounter is completed, update appointment and queue entry
+    if status_to_check is not None and status_to_check == EncounterStatus.COMPLETED:
+        # Update scheduled appointment if exists
         if encounter.appointment_id:
             appointment_update = AppointmentUpdate(
                 status=AppointmentStatus.COMPLETED,
                 completed_at=datetime.now()
             )
             appointment_crud.update_appointment(db, encounter.appointment_id, appointment_update)
+        
+        # Update queue entry if exists (remove patient from queue)
+        if encounter.queue_entry_id:
+            from app.models.appointment_models import OPDQueue
+            queue_entry = db.query(OPDQueue).filter(
+                OPDQueue.id == encounter.queue_entry_id,
+                OPDQueue.is_active == True
+            ).first()
+            if queue_entry:
+                queue_entry.status = QueueStatus.COMPLETED
+                queue_entry.completed_at = datetime.now()
+                db.commit()
     
     return encounter
 
 
-@router.post("/{encounter_id}/create-appointment", name="create_appointment_from_encounter", status_code=status.HTTP_302_FOUND)
+@router.post("/{encounter_id}/autosave", name="encounter_autosave")
+def auto_save_encounter(
+    encounter_id: int,
+    auto_save: EncounterAutoSave,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """
+    Auto-save clinical notes without full validation.
+    Used for real-time saving of clinical documentation.
+    """
+    # Get existing encounter
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # Create update data - only update non-None fields
+    update_data = auto_save.model_dump(exclude_unset=True)
+    
+    if update_data:
+        # Use the existing update_encounter function with minimal validation
+        from app.schemas.encounter_schemas import EncounterUpdate
+        encounter_update = EncounterUpdate(**update_data)
+        updated_encounter = encounter_crud.update_encounter(db, encounter_id, encounter_update)
+        
+        if not updated_encounter:
+            raise HTTPException(status_code=500, detail="Failed to save encounter")
+        
+        return {
+            "status": "success",
+            "message": "Clinical notes saved",
+            "encounter_id": encounter_id,
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    return {
+        "status": "no_changes",
+        "message": "No changes to save",
+        "encounter_id": encounter_id,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/{encounter_id}/order-status", name="encounter_order_status")
+def get_encounter_order_status(
+    encounter_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """
+    Get real-time status of lab and radiology orders for an encounter.
+    Used for polling/refresh without full page reload.
+    """
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # Get lab orders
+    lab_orders = db.query(LabOrderModel).filter(
+        LabOrderModel.encounter_id == encounter_id
+    ).order_by(LabOrderModel.created_at.desc()).all()
+    
+    # Get radiology orders
+    radiology_orders = db.query(RadiologyOrderModel).filter(
+        RadiologyOrderModel.encounter_id == encounter_id
+    ).order_by(RadiologyOrderModel.created_at.desc()).all()
+    
+    return {
+        "encounter_id": encounter_id,
+        "lab_orders": [
+            {
+                "id": order.id,
+                "test_name": order.test_name,
+                "status": order.status.value,
+                "priority": order.priority,
+                "result": order.result,
+                "created_at": order.created_at.isoformat() if order.created_at else None,
+                "completed_at": order.completed_at.isoformat() if order.completed_at else None
+            }
+            for order in lab_orders
+        ],
+        "radiology_orders": [
+            {
+                "id": order.id,
+                "procedure_name": order.procedure_name,
+                "status": order.status.value,
+                "priority": order.priority,
+                "result": order.result,
+                "created_at": order.created_at.isoformat() if order.created_at else None,
+                "completed_at": order.completed_at.isoformat() if order.completed_at else None
+            }
+            for order in radiology_orders
+        ],
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.post("/{encounter_id}/check-drug-interaction", name="check_drug_interaction")
+def check_drug_interaction(
+    encounter_id: int,
+    medication_name: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """
+    Check for potential drug-allergy interactions before prescribing.
+    Returns warnings if potential interactions are detected.
+    """
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    warnings = []
+    medication_name_lower = medication_name.lower()
+    
+    # Check patient allergies
+    patient_allergies = (encounter.allergies or "").lower()
+    
+    drug_class_keywords = {
+        'penicillin': ['penicillin', 'amoxicillin', 'ampicillin', 'amoxil', 'cloxacillin'],
+        'sulfa': ['sulfonamide', 'sulfamethoxazole', 'co-trimoxazole', 'bactrim', 'septrin'],
+        'nsaid': ['ibuprofen', 'diclofenac', 'naproxen', 'aspirin', 'paracetamol', 'acetaminophen'],
+        'cephalosporin': ['cephalexin', 'ceftriaxone', 'cefuroxime', 'cefixime'],
+        'macrolide': ['erythromycin', 'azithromycin', 'clarithromycin'],
+        'fluoroquinolone': ['ciprofloxacin', 'levofloxacin', 'ofloxacin'],
+        'ACE inhibitor': ['lisinopril', 'enalapril', 'captopril', 'ramipril'],
+    }
+    
+    for allergy_class, class_drugs in drug_class_keywords.items():
+        for drug in class_drugs:
+            if drug in medication_name_lower and allergy_class in patient_allergies:
+                warnings.append({
+                    "type": "allergy",
+                    "severity": "high",
+                    "message": f"Patient has {allergy_class} allergy - {medication_name} belongs to this class"
+                })
+    
+    # Check current medications
+    current_meds = (encounter.medications or "").lower()
+    
+    interaction_checks = [
+        ('warfarin', ['aspirin', 'ibuprofen', 'nsaid', 'naproxen'], 'Increased bleeding risk'),
+        ('metformin', ['contrast', 'alcohol'], 'Risk of lactic acidosis'),
+        ('lisinopril', ['potassium', 'spironolactone'], 'Risk of hyperkalemia'),
+        ('sildenafil', ['nitrate', 'nitroglycerin'], 'Dangerous blood pressure drop'),
+        ('ciprofloxacin', ['tizanidine'], 'Dangerous blood pressure drop'),
+        ('simvastatin', ['erythromycin', 'clarithromycin'], 'Risk of muscle toxicity'),
+    ]
+    
+    for med, interactants, warning in interaction_checks:
+        if med in medication_name_lower:
+            for interactant in interactants:
+                if interactant in current_meds:
+                    warnings.append({
+                        "type": "interaction",
+                        "severity": "medium",
+                        "message": f"Interaction: {medication_name} + {interactant} - {warning}"
+                    })
+    
+    return {
+        "encounter_id": encounter_id,
+        "medication_name": medication_name,
+        "has_warnings": len(warnings) > 0,
+        "warnings": warnings,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.post("/{encounter_id}/create-appointment", name="create_appointment_from_encounter")
 def create_appointment_from_encounter(
     request: Request,
     encounter_id: int,
@@ -445,7 +778,9 @@ def create_appointment_from_encounter(
     """
     Create a follow-up appointment from an encounter (for doctors).
     This allows doctors to schedule return visits for patients.
+    Returns JSON with appointment details on success.
     """
+    from fastapi.responses import JSONResponse
     from app.models.scheduled_appointment_models import AppointmentType
     from app.services.sms_onlinegh_service import send_personalized_sms_notification
     
@@ -474,6 +809,7 @@ def create_appointment_from_encounter(
     new_appointment = appointment_crud.create_appointment(db, appointment_data)
     
     # Send SMS notification to patient
+    sms_sent = False
     try:
         patient = encounter.patient
         if patient and patient.phone_number:
@@ -488,12 +824,21 @@ def create_appointment_from_encounter(
                 ]
             }]
             send_personalized_sms_notification(message_template, destinations)
+            sms_sent = True
     except Exception as sms_error:
         print(f"Warning: Unable to send appointment SMS: {sms_error}")
     
-    return RedirectResponse(
-        url=f"/api/v1/encounters/{encounter_id}?appointment_created={new_appointment.id}",
-        status_code=status.HTTP_302_FOUND
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content={
+            "success": True,
+            "message": "Appointment created successfully",
+            "appointment_id": new_appointment.id,
+            "appointment_type": new_appointment.appointment_type.value if hasattr(new_appointment.appointment_type, 'value') else str(new_appointment.appointment_type),
+            "scheduled_date": new_appointment.scheduled_date.isoformat() if new_appointment.scheduled_date else None,
+            "department": new_appointment.department,
+            "sms_sent": sms_sent
+        }
     )
 
 
@@ -651,7 +996,7 @@ def save_differentials(
 
 
 # Lab Order Endpoints
-@router.post("/{encounter_id}/lab-orders", response_model=LabOrder, status_code=status.HTTP_201_CREATED)
+@router.post("/{encounter_id}/lab-orders", response_model=LabOrder, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("lab_create"))])
 def create_lab_order_endpoint(
     encounter_id: int,
     lab_order: LabOrderCreate,
@@ -663,6 +1008,19 @@ def create_lab_order_endpoint(
     encounter = encounter_crud.get_encounter(db, encounter_id)
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # lab_test_id is required - validate and get test details from Lab Test Catalog
+    if not lab_order.lab_test_id:
+        raise HTTPException(status_code=400, detail="lab_test_id is required. Select a test from the Lab Test Catalog.")
+    
+    from app.models.lab_catalog_models import LabTest
+    lab_test = db.query(LabTest).filter(LabTest.id == lab_order.lab_test_id, LabTest.is_active == True).first()
+    if not lab_test:
+        raise HTTPException(status_code=400, detail="Selected lab test not found in catalog.")
+    
+    # Override with catalog details
+    lab_order.test_name = lab_test.test_name
+    lab_order.test_code = lab_order.test_code or lab_test.test_code
     
     # Override encounter_id, patient_id, and ordered_by_id
     lab_order.encounter_id = encounter_id
@@ -676,66 +1034,148 @@ def create_lab_order_endpoint(
     except Exception as billing_error:
         print(f"Warning: Unable to create lab charge for order {new_order.id}: {billing_error}")
     
+    # Auto-create sample for the lab order
+    try:
+        sample = create_sample_if_not_exists(db, new_order.id, current_user.id)
+        if sample:
+            print(f"Auto-created sample {sample.barcode} for lab order {new_order.id}")
+    except Exception as sample_error:
+        print(f"Warning: Unable to auto-create sample for order {new_order.id}: {sample_error}")
+    
     return new_order
 
 
-@router.post("/{encounter_id}/lab-orders/create", name="create_lab_order_form", status_code=status.HTTP_302_FOUND)
-def create_lab_order_form(
+@router.post("/{encounter_id}/lab-orders/create", name="create_lab_order_form", status_code=status.HTTP_302_FOUND, dependencies=[Depends(permission_required("lab_create"))])
+async def create_lab_order_form(
     request: Request,
     encounter_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"])),
-    service_pricing_id: Optional[int] = Form(None),
-    test_name: Optional[str] = Form(None),
-    test_code: Optional[str] = Form(None),
-    instructions: Optional[str] = Form(None),
-    priority: str = Form("routine"),
 ):
-    """Handle HTML form submission for creating a lab order."""
+    """Handle HTML form submission or JSON for creating a lab order."""
+    # Support both form data and JSON body
+    content_type = request.headers.get("content-type", "")
+    
+    if "application/json" in content_type:
+        # Parse JSON body
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        
+        # Support both lab_test_id (single) and test_ids (comma-separated)
+        lab_test_ids = body.get("lab_test_id")
+        if not lab_test_ids:
+            test_ids_str = body.get("test_ids")
+            if test_ids_str:
+                lab_test_ids = [tid.strip() for tid in test_ids_str.split(",") if tid.strip()]
+            else:
+                lab_test_ids = []
+        else:
+            lab_test_ids = [str(lab_test_ids)]
+        test_name = body.get("test_name")
+        test_code = body.get("test_code")
+        instructions = body.get("instructions")
+        priority = body.get("priority", "routine")
+    else:
+        # Parse form data
+        form_data = await request.form()
+        # Support both lab_test_id (single) and test_ids (comma-separated)
+        lab_test_ids = form_data.get("lab_test_id")
+        if not lab_test_ids:
+            test_ids_str = form_data.get("test_ids")
+            if test_ids_str:
+                lab_test_ids = [tid.strip() for tid in test_ids_str.split(",") if tid.strip()]
+            else:
+                lab_test_ids = []
+        else:
+            lab_test_ids = [str(lab_test_ids)]
+        test_name = form_data.get("test_name")
+        test_code = form_data.get("test_code")
+        instructions = form_data.get("instructions")
+        priority = form_data.get("priority", "routine")
+    
+    # Validate at least one test is selected
+    if not lab_test_ids:
+        raise HTTPException(status_code=422, detail="lab_test_id is required")
+    
+    # Convert to integers and validate
+    try:
+        lab_test_ids = [int(tid) for tid in lab_test_ids]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="Invalid lab_test_id: must be an integer")
     try:
         # Verify encounter exists
         encounter = encounter_crud.get_encounter(db, encounter_id)
         if not encounter:
             raise HTTPException(status_code=404, detail="Encounter not found")
         
-        resolved_test_name = test_name
-        resolved_test_code = test_code
-
-        if service_pricing_id:
-            service = service_pricing_crud.get_service_pricing(db, service_pricing_id)
-            if not service or service.charge_type != ChargeType.LAB_TEST.value:
-                raise HTTPException(status_code=400, detail="Invalid lab service selected.")
-            resolved_test_name = service.service_name
-            resolved_test_code = service.service_code or test_code
-
-        if not resolved_test_name:
-            raise HTTPException(status_code=400, detail="Lab test name is required.")
-
-        # Create lab order data
-        lab_order_data = LabOrderCreate(
-            encounter_id=encounter_id,
-            patient_id=encounter.patient_id,  # Set patient_id from encounter
-            ordered_by_id=current_user.id,
-            test_name=resolved_test_name,
-            test_code=resolved_test_code if resolved_test_code else None,
-            instructions=instructions if instructions else None,
-            priority=priority,
-            is_walk_in=False
-        )
+        # Get test details from Lab Test Catalog (required)
+        from app.models.lab_catalog_models import LabTest
         
-        # Create lab order
-        new_order = encounter_crud.create_lab_order(db, lab_order_data)
+        # Create orders for all selected tests
+        created_orders = []
+        errors = []
         
-        try:
-            create_charge_for_lab_order(db, new_order, current_user.id)
-        except Exception as billing_error:
-            print(f"Warning: Unable to create lab charge for order {new_order.id}: {billing_error}")
+        for lab_test_id in lab_test_ids:
+            lab_test = db.query(LabTest).filter(LabTest.id == lab_test_id, LabTest.is_active == True).first()
+            if not lab_test:
+                errors.append(f"Invalid lab test ID: {lab_test_id}")
+                continue
+            
+            resolved_test_name = lab_test.test_name
+            resolved_test_code = lab_test.test_code
+
+            if not resolved_test_name:
+                errors.append(f"Lab test name is required for ID: {lab_test_id}")
+                continue
+
+            # Create lab order data
+            lab_order_data = LabOrderCreate(
+                encounter_id=encounter_id,
+                patient_id=encounter.patient_id,  # Set patient_id from encounter
+                ordered_by_id=current_user.id,
+                test_name=resolved_test_name,
+                test_code=resolved_test_code if resolved_test_code else None,
+                lab_test_id=lab_test.id,
+                instructions=instructions if instructions else None,
+                priority=priority,
+                is_walk_in=False
+            )
+            
+            # Create lab order
+            new_order = encounter_crud.create_lab_order(db, lab_order_data)
+            created_orders.append(new_order.id)
+            
+            try:
+                create_charge_for_lab_order(db, new_order, current_user.id)
+            except Exception as billing_error:
+                print(f"Warning: Unable to create lab charge for order {new_order.id}: {billing_error}")
+            
+            # Auto-create sample for the lab order
+            try:
+                sample = create_sample_if_not_exists(db, new_order.id, current_user.id)
+                if sample:
+                    print(f"Auto-created sample {sample.barcode} for lab order {new_order.id}")
+            except Exception as sample_error:
+                print(f"Warning: Unable to auto-create sample for order {new_order.id}: {sample_error}")
+        
+        # Check if any orders were created
+        if not created_orders:
+            error_msg = errors[0] if errors else "No valid lab tests selected"
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Build response message
+        if len(created_orders) == 1:
+            message = "Lab order added."
+        else:
+            message = f"{len(created_orders)} lab orders added."
         
         # AJAX (e.g. from IPD admission modal): return JSON so page can reload instead of redirect
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return JSONResponse(
                 status_code=201,
-                content={"success": True, "message": "Lab order added.", "order_id": new_order.id}
+                content={"success": True, "message": message, "order_ids": created_orders}
             )
         return RedirectResponse(
             url=f"/encounters/{encounter_id}?status=lab_order_added",
@@ -785,7 +1225,7 @@ def update_lab_order_endpoint(
 
 
 # Radiology Order Endpoints
-@router.post("/{encounter_id}/radiology-orders", response_model=RadiologyOrder, status_code=status.HTTP_201_CREATED)
+@router.post("/{encounter_id}/radiology-orders", response_model=RadiologyOrder, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("radiology_create"))])
 def create_radiology_order_endpoint(
     encounter_id: int,
     radiology_order: RadiologyOrderCreate,
@@ -813,7 +1253,7 @@ def create_radiology_order_endpoint(
     return new_order
 
 
-@router.post("/{encounter_id}/radiology-orders/create", name="create_radiology_order_form", status_code=status.HTTP_302_FOUND)
+@router.post("/{encounter_id}/radiology-orders/create", name="create_radiology_order_form", status_code=status.HTTP_302_FOUND, dependencies=[Depends(permission_required("radiology_create"))])
 def create_radiology_order_form(
     request: Request,
     encounter_id: int,
@@ -923,7 +1363,7 @@ def update_radiology_order_endpoint(
 
 
 # Prescription Endpoints
-@router.post("/{encounter_id}/prescriptions", response_model=Prescription, status_code=status.HTTP_201_CREATED)
+@router.post("/{encounter_id}/prescriptions", response_model=Prescription, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("pharmacy_dispense"))])
 def create_prescription_endpoint(
     encounter_id: int,
     prescription: PrescriptionCreate,
@@ -931,24 +1371,138 @@ def create_prescription_endpoint(
     current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
 ):
     """Create a new prescription for an encounter (JSON API)."""
+    from uuid import UUID
+    from datetime import date
+    from fastapi.responses import JSONResponse
+    
     # Verify encounter exists
     encounter = encounter_crud.get_encounter(db, encounter_id)
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
     
+    # STOCK CHECK: Verify medication is available in pharmacy inventory
+    stock_warning = None
+    pharmacy_drug_uuid = None
+    
+    # Ghana: Require pharmacy_drug_id - must select a specific formulation
+    if prescription.pharmacy_drug_id:
+        try:
+            pharmacy_drug_uuid = UUID(prescription.pharmacy_drug_id)
+            
+            # Fetch pharmacy drug for snapshot fields
+            from app.models.pharmacy_models import PharmacyDrug, PharmacyBatch, PharmacyStore
+            from sqlalchemy.orm import joinedload
+            drug = db.query(PharmacyDrug).options(joinedload(PharmacyDrug.dosage_form)).filter(
+                PharmacyDrug.id == pharmacy_drug_uuid, PharmacyDrug.is_active == True
+            ).first()
+            if drug:
+                # Build medication name from drug components if not provided
+                if not prescription.medication_name:
+                    # Handle Decimal types from database properly
+                    strength_val = float(drug.strength_value) if drug.strength_value else None
+                    conc_val = float(drug.concentration_value) if drug.concentration_value else None
+                    
+                    strength = f"{strength_val} {drug.strength_unit or ''}" if strength_val else ""
+                    if conc_val:
+                        strength = f"{conc_val} {drug.concentration_unit or ''}"
+                    prescription.medication_name = f"{drug.generic_name} {strength} {drug.dosage_form.name if drug.dosage_form else ''}".strip()
+                
+                # Capture snapshot fields for when drug is deleted
+                prescription.dosage_form_name = drug.dosage_form.name if drug.dosage_form else None
+                try:
+                    prescription.strength_value = float(drug.strength_value) if drug.strength_value else None
+                except (TypeError, ValueError):
+                    prescription.strength_value = None
+                prescription.strength_unit = drug.strength_unit
+                prescription.route = drug.route
+                try:
+                    prescription.concentration_value = float(drug.concentration_value) if drug.concentration_value else None
+                except (TypeError, ValueError):
+                    prescription.concentration_value = None
+                prescription.concentration_unit = drug.concentration_unit
+                
+                # Check stock availability
+                store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+                if store:
+                    batches = db.query(PharmacyBatch).filter(
+                        PharmacyBatch.store_id == store.id,
+                        PharmacyBatch.drug_id == pharmacy_drug_uuid,
+                        PharmacyBatch.status == "ACTIVE",
+                        PharmacyBatch.expiry_date >= date.today(),
+                    ).all()
+                    
+                    required_qty = prescription.quantity if prescription.quantity else 1
+                    total_available = sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0)
+                    
+                    if total_available == 0:
+                        stock_warning = {
+                            "message": f"WARNING: {prescription.medication_name} is currently OUT OF STOCK.",
+                            "available_quantity": 0,
+                            "requested_quantity": required_qty,
+                            "is_out_of_stock": True
+                        }
+                    elif total_available < required_qty:
+                        stock_warning = {
+                            "message": f"WARNING: Insufficient stock. Requested: {required_qty}, Available: {total_available}",
+                            "available_quantity": total_available,
+                            "requested_quantity": required_qty,
+                            "is_out_of_stock": False,
+                            "is_partial": True
+                        }
+        except (ValueError, TypeError):
+            pass  # Invalid UUID, ignore
+    
     # Override encounter_id and prescribed_by_id
     prescription.encounter_id = encounter_id
     prescription.prescribed_by_id = current_user.id
-    return encounter_crud.create_prescription(db, prescription)
+    
+    # Create prescription
+    created_prescription = encounter_crud.create_prescription(db, prescription)
+    
+    # Automatically create charge for the prescription (so patient can see bill immediately)
+    # SKIP billing if medication is out of stock or has insufficient stock
+    try:
+        from app.services import create_charge_for_prescription
+        skip_billing = False
+        if stock_warning:
+            if stock_warning.get("is_out_of_stock") or stock_warning.get("is_partial"):
+                skip_billing = True
+        
+        if not skip_billing:
+            create_charge_for_prescription(db, created_prescription, current_user.id, check_payment_required=True)
+        else:
+            print(f"Note: Skipping charge for prescription {created_prescription.id} - out of stock/insufficient stock")
+    except Exception as e:
+        print(f"Note: Could not create charge for prescription {created_prescription.id}: {e}")
+    
+    # Build response
+    response_data = {
+        "id": created_prescription.id,
+        "medication_name": created_prescription.medication_name,
+        "dosage": created_prescription.dosage,
+        "frequency": created_prescription.frequency,
+        "duration": created_prescription.duration,
+        "quantity": created_prescription.quantity,
+        "instructions": created_prescription.instructions,
+        "status": created_prescription.status.value,
+        "prescribed_at": created_prescription.prescribed_at.isoformat() if created_prescription.prescribed_at else None
+    }
+    
+    # Include stock warning in response (but still return success)
+    if stock_warning:
+        response_data["stock_warning"] = stock_warning
+    
+    return JSONResponse(content=response_data, status_code=201)
 
 
-@router.post("/{encounter_id}/prescriptions/create", name="create_prescription_form", status_code=status.HTTP_302_FOUND)
+@router.post("/{encounter_id}/prescriptions/create", name="create_prescription_form", status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("pharmacy_dispense"))])
 def create_prescription_form(
     request: Request,
     encounter_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"])),
     medication_id: Optional[str] = Form(None),
+    pharmacy_drug_id: Optional[str] = Form(None),
     medication_name: str = Form(...),
     medication_code: Optional[str] = Form(None),
     dosage: str = Form(...),
@@ -957,14 +1511,32 @@ def create_prescription_form(
     quantity: Optional[str] = Form(None),
     instructions: Optional[str] = Form(None),
 ):
-    """Handle HTML form submission for creating a prescription."""
+    """Handle HTML form submission for creating a prescription. Ghana: requires pharmacy_drug_id (formulation selection)."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
+        logger.info(f"Creating prescription for encounter {encounter_id}, user {current_user.id}")
+        logger.info(f"Form data: medication_name={medication_name}, pharmacy_drug_id={pharmacy_drug_id}, dosage={dosage}, frequency={frequency}, duration={duration}")
+        
         # Verify encounter exists
         encounter = encounter_crud.get_encounter(db, encounter_id)
+        logger.info(f"Encounter found: {encounter is not None}")
         if not encounter:
             raise HTTPException(status_code=404, detail="Encounter not found")
         
-        # Convert medication_id from string to int, handling empty strings
+        # Ghana: Require pharmacy_drug_id - doctor MUST select a specific formulation
+        pharmacy_drug_uuid = None
+        if pharmacy_drug_id and pharmacy_drug_id.strip():
+            try:
+                from uuid import UUID
+                pharmacy_drug_uuid = UUID(pharmacy_drug_id.strip())
+            except (ValueError, TypeError):
+                pass
+        if not pharmacy_drug_uuid:
+            raise HTTPException(status_code=422, detail="Please select a medication from the formulary (specific formulation with strength and dosage form). Free text is not allowed.")
+        
+        # Convert medication_id from string to int, handling empty strings (legacy)
         medication_id_int = None
         if medication_id and medication_id.strip():
             try:
@@ -990,23 +1562,174 @@ def create_prescription_form(
         if not duration or not duration.strip():
             raise HTTPException(status_code=422, detail="Duration is required")
         
-        # If medication_id is provided, fetch medication details to populate name/code
+        # Fetch pharmacy drug for name/code and snapshot fields (Ghana formulation)
         medication_name_final = medication_name.strip()
         medication_code_final = medication_code.strip() if medication_code else None
-        if medication_id_int:
+        
+        # Initialize stock warnings
+        stock_warnings = []
+        
+        # Snapshot fields from pharmacy_drug
+        dosage_form_name_final = None
+        strength_value_final = None
+        strength_unit_final = None
+        route_final = None
+        concentration_value_final = None
+        concentration_unit_final = None
+        
+        if pharmacy_drug_uuid:
+            from app.models.pharmacy_models import PharmacyDrug, PharmacyBatch
+            from sqlalchemy.orm import joinedload
+            drug = db.query(PharmacyDrug).options(joinedload(PharmacyDrug.dosage_form)).filter(
+                PharmacyDrug.id == pharmacy_drug_uuid, PharmacyDrug.is_active == True
+            ).first()
+            if drug:
+                # Build medication name from drug components
+                # Handle Decimal types from database properly
+                strength_val = float(drug.strength_value) if drug.strength_value else None
+                conc_val = float(drug.concentration_value) if drug.concentration_value else None
+                
+                strength = f"{strength_val} {drug.strength_unit or ''}" if strength_val else ""
+                if conc_val:
+                    strength = f"{conc_val} {drug.concentration_unit or ''}"
+                medication_name_final = f"{drug.generic_name} {strength} {drug.dosage_form.name if drug.dosage_form else ''}".strip()
+                medication_code_final = drug.item_code or medication_code_final
+                
+                # Capture snapshot fields for when drug is deleted
+                dosage_form_name_final = drug.dosage_form.name if drug.dosage_form else None
+                try:
+                    strength_value_final = float(drug.strength_value) if drug.strength_value else None
+                except (TypeError, ValueError):
+                    strength_value_final = None
+                strength_unit_final = drug.strength_unit
+                route_final = drug.route
+                try:
+                    concentration_value_final = float(drug.concentration_value) if drug.concentration_value else None
+                except (TypeError, ValueError):
+                    concentration_value_final = None
+                concentration_unit_final = drug.concentration_unit
+                
+                # STOCK CHECK: Verify medication is available in pharmacy inventory
+                required_qty = quantity_int if quantity_int else 1
+                
+                # Get active pharmacy store
+                from app.models.pharmacy_models import PharmacyStore
+                store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+                
+                if store:
+                    # Check available batches for this drug using FEFO logic
+                    from datetime import date
+                    batches = db.query(PharmacyBatch).filter(
+                        PharmacyBatch.store_id == store.id,
+                        PharmacyBatch.drug_id == pharmacy_drug_uuid,
+                        PharmacyBatch.status == "ACTIVE",
+                        PharmacyBatch.expiry_date >= date.today(),
+                    ).all()
+                    
+                    total_available = sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0)
+                    
+                    if total_available == 0:
+                        stock_warnings.append({
+                            "message": f"{medication_name_final} is currently OUT OF STOCK. Patient will need to obtain from another pharmacy.",
+                            "is_out_of_stock": True,
+                            "available_quantity": 0,
+                            "requested_quantity": required_qty
+                        })
+                    elif total_available < required_qty:
+                        stock_warnings.append({
+                            "message": f"{medication_name_final} has insufficient stock. Requested: {required_qty}, Available: {total_available}. Partial fill only.",
+                            "is_out_of_stock": False,
+                            "is_partial": True,
+                            "available_quantity": total_available,
+                            "requested_quantity": required_qty
+                        })
+        elif medication_id_int:
             from app.crud import inventory_crud
             medication = inventory_crud.get_medication(db, medication_id_int)
             if medication:
                 medication_name_final = medication.name
                 medication_code_final = medication.medication_code or medication_code_final
         
+        # Drug-Allergy Interaction Check
+        allergy_warnings = []
+        
+        # Get patient allergies from encounter
+        patient_allergies = encounter.allergies or ""
+        patient_allergies_lower = patient_allergies.lower()
+        
+        # Check against known drug classes (simplified - in production, use a drug interaction database)
+        # Common drug class prefixes to check
+        drug_class_keywords = {
+            'penicillin': ['penicillin', 'amoxicillin', 'ampicillin', 'amoxil', 'cloxacillin'],
+            'sulfa': ['sulfonamide', 'sulfamethoxazole', 'co-trimoxazole', 'bactrim', 'septrin'],
+            'nsaid': ['ibuprofen', 'diclofenac', 'naproxen', 'aspirin', 'paracetamol', 'acetaminophen'],
+            'cephalosporin': ['cephalexin', 'ceftriaxone', 'cefuroxime', 'cefixime'],
+            'macrolide': ['erythromycin', 'azithromycin', 'clarithromycin'],
+            'fluoroquinolone': ['ciprofloxacin', 'levofloxacin', 'ofloxacin'],
+            'ACE inhibitor': ['lisinopril', 'enalapril', 'captopril', 'ramipril'],
+        }
+        
+        medication_name_lower = medication_name_final.lower()
+        
+        # Check if medication matches any known drug class
+        for allergy_class, class_drugs in drug_class_keywords.items():
+            for drug in class_drugs:
+                if drug in medication_name_lower:
+                    # Check if patient has this allergy recorded
+                    if allergy_class in patient_allergies_lower:
+                        allergy_warnings.append(f"Warning: Patient is allergic to {allergy_class} drugs (e.g., {drug})")
+        
+        # Check current medications for potential interactions
+        current_meds = encounter.medications or ""
+        current_meds_lower = current_meds.lower()
+        
+        # Simple drug interaction checks
+        interaction_checks = [
+            ('warfarin', ['aspirin', 'ibuprofen', 'nsaid'], 'Increased bleeding risk'),
+            ('metformin', ['contrast'], 'Risk of lactic acidosis with contrast'),
+            ('lisinopril', ['potassium'], 'Risk of hyperkalemia'),
+            ('sildenafil', ['nitrate'], 'Dangerous blood pressure drop'),
+        ]
+        
+        for med, interactants, warning in interaction_checks:
+            if med in medication_name_lower:
+                for interactant in interactants:
+                    if interactant in current_meds_lower:
+                        allergy_warnings.append(f"Potential interaction: {medication_name_final} + {interactant} - {warning}")
+        
+        # If there are allergy warnings, return them for clinician review
+        if allergy_warnings:
+            # Return warnings but still allow prescription (clinician override)
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", ""):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "success": True,
+                        "warning": True,
+                        "messages": allergy_warnings,
+                        "prescription": None
+                    }
+                )
+            else:
+                # For form submission, add warning to session and continue
+                from fastapi import Request
+                # Warnings will be shown after creation
+        
         # Create prescription data
         prescription_data = PrescriptionCreate(
             encounter_id=encounter_id,
             prescribed_by_id=current_user.id,
             medication_id=medication_id_int,
+            pharmacy_drug_id=str(pharmacy_drug_uuid),
             medication_name=medication_name_final,
             medication_code=medication_code_final if medication_code_final else None,
+            dosage_form_name=dosage_form_name_final,
+            strength_value=strength_value_final,
+            strength_unit=strength_unit_final,
+            route=route_final,
+            concentration_value=concentration_value_final,
+            concentration_unit=concentration_unit_final,
             dosage=dosage.strip(),
             frequency=frequency.strip(),
             duration=duration.strip(),
@@ -1015,11 +1738,63 @@ def create_prescription_form(
         )
         
         # Create prescription
+        logger.info("Creating prescription in database...")
         prescription = encounter_crud.create_prescription(db, prescription_data)
+        logger.info(f"Prescription created with ID: {prescription.id}")
+        
+        # Automatically create charge for the prescription (so patient can see bill immediately)
+        # SKIP billing if medication is out of stock or has insufficient stock
+        try:
+            from app.services import create_charge_for_prescription
+            # Check if there's a stock warning before creating charge
+            skip_billing = False
+            if stock_warnings:
+                for sw in stock_warnings:
+                    if sw.get("is_out_of_stock"):
+                        skip_billing = True
+                        break
+                    if sw.get("is_partial"):
+                        # Also skip billing for insufficient stock (can't fulfill full quantity)
+                        skip_billing = True
+                        break
+            
+            if not skip_billing:
+                # Create charge with check_payment_required=True to properly handle OPD vs IPD
+                # For OPD cash: requires payment before dispense
+                # For IPD cash: payment deferred to discharge
+                # For NHIS: accumulate for claims
+                create_charge_for_prescription(db, prescription, current_user.id, check_payment_required=True)
+            else:
+                print(f"Note: Skipping charge creation for prescription {prescription.id} due to stock issues")
+        except Exception as e:
+            # Log error but don't fail prescription creation if charge creation fails
+            # This could happen if medication pricing is not set up
+            print(f"Note: Could not create charge for prescription {prescription.id}: {e}")
         
         # Check if this is an AJAX request
         if request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", ""):
             from fastapi.responses import JSONResponse
+            
+            # Get stock info for response - ALWAYS show available quantity
+            stock_info = {"available_quantity": 0, "is_out_of_stock": False}
+            if pharmacy_drug_uuid:
+                from app.models.pharmacy_models import PharmacyBatch, PharmacyStore
+                from datetime import date
+                store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+                if store:
+                    batches = db.query(PharmacyBatch).filter(
+                        PharmacyBatch.store_id == store.id,
+                        PharmacyBatch.drug_id == pharmacy_drug_uuid,
+                        PharmacyBatch.status == "ACTIVE",
+                        PharmacyBatch.expiry_date >= date.today(),
+                    ).all()
+                    total_available = sum(float(b.qty_on_hand or 0) - float(b.qty_reserved or 0) for b in batches if (float(b.qty_on_hand or 0) - float(b.qty_reserved or 0)) > 0)
+                    stock_info = {
+                        "available_quantity": total_available, 
+                        "is_out_of_stock": total_available == 0,
+                        "has_stock": total_available > 0
+                    }
+            
             return JSONResponse(
                 status_code=201,
                 content={
@@ -1034,7 +1809,9 @@ def create_prescription_form(
                         "quantity": prescription.quantity,
                         "instructions": prescription.instructions,
                         "status": prescription.status.value
-                    }
+                    },
+                    "stock_info": stock_info,
+                    "stock_warnings": stock_warnings if stock_warnings else None
                 }
             )
         
@@ -1059,6 +1836,7 @@ def create_prescription_form(
         )
     except Exception as e:
         # Check if this is an AJAX request
+        logger.error(f"Error creating prescription: {str(e)}", exc_info=True)
         if request.headers.get("X-Requested-With") == "XMLHttpRequest" or "application/json" in request.headers.get("Accept", ""):
             from fastapi.responses import JSONResponse
             import traceback
@@ -1091,6 +1869,7 @@ def create_procedure_form(
     procedure_name: str = Form(...),
     procedure_code: Optional[str] = Form(None),
     procedure_type: str = Form(...),
+    procedure_catalog_id: Optional[int] = Form(None),
     description: Optional[str] = Form(None),
     indication: Optional[str] = Form(None),
     location: Optional[str] = Form(None),
@@ -1119,6 +1898,7 @@ def create_procedure_form(
             ordered_by_id=current_user.id,
             procedure_name=procedure_name.strip(),
             procedure_code=procedure_code.strip() if procedure_code else None,
+            procedure_catalog_id=procedure_catalog_id,  # Link to procedure catalog
             procedure_type=proc_type,
             description=description.strip() if description else None,
             indication=indication.strip() if indication else None,
@@ -1309,6 +2089,12 @@ def delete_lab_order(
         for charge in associated_charges:
             billing_crud.delete_charge(db, charge.id)
     
+    # Delete associated lab samples first (required because of NOT NULL constraint on lab_order_id)
+    from app.models.lab_models import LabSample
+    associated_samples = db.query(LabSample).filter(LabSample.lab_order_id == lab_order_id).all()
+    for sample in associated_samples:
+        db.delete(sample)
+    
     # Delete the lab order
     db.delete(lab_order)
     db.commit()
@@ -1433,7 +2219,7 @@ def delete_procedure(
     current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
 ):
     """Delete a procedure. Only pending/in_progress procedures can be deleted."""
-    from app.models.encounter_models import Procedure as ProcedureModel
+    from app.models.procedure_models import Procedure as ProcedureModel
     
     procedure = db.query(ProcedureModel).filter(ProcedureModel.id == procedure_id).first()
     if not procedure:
@@ -1444,7 +2230,7 @@ def delete_procedure(
         raise HTTPException(status_code=400, detail="Procedure does not belong to this encounter")
     
     # Only allow deletion of pending or in_progress procedures
-    if procedure.status.value in [OrderStatus.COMPLETED.value]:
+    if procedure.status.value in [ProcedureStatus.COMPLETED.value]:
         raise HTTPException(
             status_code=400,
             detail="Cannot delete completed procedures. Only pending or in-progress procedures can be removed."
@@ -1536,3 +2322,73 @@ def delete_antenatal_charge(
         content={"message": "Antenatal charge deleted successfully", "charge_id": charge_id}
     )
 
+
+# Addendum Endpoints
+@router.post("/{encounter_id}/addendums", response_model=Addendum, status_code=status.HTTP_201_CREATED)
+def create_addendum_endpoint(
+    encounter_id: int,
+    addendum: AddendumCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """Create a new addendum for an encounter."""
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # Create the addendum
+    created_addendum = encounter_crud.create_addendum(db, addendum, encounter_id, current_user.id)
+    return created_addendum
+
+
+@router.get("/{encounter_id}/addendums", response_model=List[Addendum])
+def get_encounter_addendums(
+    encounter_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get all addendums for an encounter."""
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    return encounter_crud.get_addendums_by_encounter(db, encounter_id)
+
+
+# Auto-Close Endpoints
+@router.post("/auto-close", name="auto_close_encounters")
+def auto_close_encounters(
+    db: Session = Depends(get_db),
+    current_user = Depends(permission_required("encounter_edit"))
+):
+    """
+    Manually trigger the auto-close of stale encounters.
+    
+    This endpoint will close all OPD encounters that have been in progress
+    for more than 24 hours and have no pending lab or radiology orders.
+    
+    Requires encounter_edit permission.
+    """
+    from app.services.encounter_auto_close_service import auto_close_stale_encounters
+    
+    result = auto_close_stale_encounters(db)
+    return result
+
+
+@router.get("/auto-close/preview", name="preview_stale_encounters")
+def preview_stale_encounters(
+    db: Session = Depends(get_db),
+    current_user = Depends(permission_required("encounter_view"))
+):
+    """
+    Preview which encounters would be closed without actually closing them.
+    
+    This is useful for admins to review before running the auto-close.
+    
+    Requires encounter_view permission.
+    """
+    from app.services.encounter_auto_close_service import get_stale_encounters_preview
+    
+    result = get_stale_encounters_preview(db)
+    return result

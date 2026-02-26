@@ -1,7 +1,7 @@
 """
 API routes for OPD queue management
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -63,7 +63,7 @@ def add_to_queue(
         db.commit()
         
         return RedirectResponse(
-            url=f"/patients/{patient_id}/triage?success=queued&queue_id={queue_entry.id}",
+            url=f"/?success=queued&patient_id={patient_id}&queue_id={queue_entry.id}",
             status_code=status.HTTP_302_FOUND
         )
         
@@ -213,10 +213,11 @@ def cancel_queue_entry(
 @router.post("/{queue_id}/check-in")
 def check_in_patient(
     queue_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Front Office", "Admin", "Nurse"]))
 ):
-    """Check in patient (vitals completed)"""
+    """Check in patient (vitals completed) and mark as in_progress"""
     queue_entry = db.query(OPDQueue).filter(
         OPDQueue.id == queue_id,
         OPDQueue.is_active == True
@@ -228,12 +229,20 @@ def check_in_patient(
             detail="Queue entry not found"
         )
     
-    queue_entry.checked_in_at = datetime.now()
+    # Update status to in_progress
+    queue_entry.status = QueueStatus.IN_PROGRESS
+    queue_entry.started_at = datetime.now()
     
     db.commit()
     db.refresh(queue_entry)
     
-    return queue_entry
+    # Redirect back to queue page
+    from urllib.parse import urlencode
+    query_params = urlencode({"status": "updated"})
+    return RedirectResponse(
+        url=f"/api/v1/appointments/queue?{query_params}",
+        status_code=status.HTTP_302_FOUND
+    )
 
 
 @router.get("/department/{department}/stats")

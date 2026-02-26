@@ -31,6 +31,40 @@
                 </div>
                 {% endif %}
 
+                {% if request.query_params.get('warning') %}
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-triangle"></i> {{ request.query_params.get('warning') }}
+                    {% if request.query_params.get('admission_id') %}
+                    <br><br>
+                    <a href="{{ url_for('ipd_admission_detail', admission_id=request.query_params.get('admission_id')) }}" class="btn btn-sm btn-info">
+                        <i class="fas fa-eye"></i> View Current Admission
+                    </a>
+                    <a href="{{ url_for('ipd_discharge_form', admission_id=request.query_params.get('admission_id')) }}" class="btn btn-sm btn-danger">
+                        <i class="fas fa-sign-out-alt"></i> Discharge Patient
+                    </a>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {% if current_admission_warning %}
+                <div class="alert alert-warning alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert">&times;</button>
+                    <i class="fas fa-exclamation-triangle"></i> <strong>Warning:</strong> This patient is already admitted!
+                    <br><strong>Admission #:</strong> {{ current_admission_warning.admission_number }}
+                    <br><strong>Ward:</strong> {{ current_admission_warning.ward_name }}
+                    <br><strong>Bed:</strong> {{ current_admission_warning.bed_number }}
+                    <br><strong>Admitted on:</strong> {{ current_admission_warning.admission_date }}
+                    <br><br>
+                    <a href="{{ url_for('ipd_admission_detail', admission_id=current_admission_warning.admission_id) }}" class="btn btn-sm btn-info">
+                        <i class="fas fa-eye"></i> View Current Admission
+                    </a>
+                    <a href="{{ url_for('ipd_discharge_form', admission_id=current_admission_warning.admission_id) }}" class="btn btn-sm btn-danger">
+                        <i class="fas fa-sign-out-alt"></i> Discharge Patient
+                    </a>
+                </div>
+                {% endif %}
+
                 <div class="card card-primary card-outline">
                     <div class="card-header">
                         <h3 class="card-title"><i class="fas fa-user-injured mr-1"></i> Admission Information</h3>
@@ -155,6 +189,58 @@
                             <div class="form-group">
                                 <label for="notes">Notes</label>
                                 <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Additional notes"></textarea>
+                            </div>
+
+                            <!-- Allergies - Critical for Patient Safety -->
+                            <div class="form-group">
+                                <label for="allergies">Known Allergies</label>
+                                <textarea class="form-control" id="allergies" name="allergies" rows="2" placeholder="List any known allergies (e.g., Penicillin, Peanuts)"></textarea>
+                                <small class="form-text text-muted">Important for medication safety during inpatient stay</small>
+                            </div>
+
+                            <!-- Guardian/Attendant Information -->
+                            <div class="card card-secondary mt-3">
+                                <div class="card-header">
+                                    <h3 class="card-title"><i class="fas fa-user-friends mr-1"></i> Guardian/Attendant Information</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="guardian_name">Guardian/Attendant Name</label>
+                                                <input type="text" class="form-control" id="guardian_name" name="guardian_name" placeholder="Full name">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="guardian_phone">Phone Number</label>
+                                                <input type="text" class="form-control" id="guardian_phone" name="guardian_phone" placeholder="Phone number">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="guardian_relationship">Relationship</label>
+                                                <select class="form-control" id="guardian_relationship" name="guardian_relationship">
+                                                    <option value="">Select Relationship</option>
+                                                    <option value="Spouse">Spouse</option>
+                                                    <option value="Parent">Parent</option>
+                                                    <option value="Child">Child</option>
+                                                    <option value="Sibling">Sibling</option>
+                                                    <option value="Friend">Friend</option>
+                                                    <option value="Other">Other</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="guardian_address">Address</label>
+                                                <input type="text" class="form-control" id="guardian_address" name="guardian_address" placeholder="Address">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="card-footer">

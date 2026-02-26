@@ -4,7 +4,7 @@ Handles all OPD-related user interface routes.
 """
 from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, or_
 from typing import Optional
@@ -21,7 +21,6 @@ from app.models.billing_models import Invoice, InvoiceStatus, Payment, PaymentSt
 from app.crud import opd_crud
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/opd/dashboard", name="opd_dashboard")

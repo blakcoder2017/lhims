@@ -222,8 +222,9 @@ def get_admission(db: Session, admission_id: int) -> Optional[Admission]:
         joinedload(Admission.patient),
         joinedload(Admission.ward),
         joinedload(Admission.bed),
-        joinedload(Admission.initial_encounter),
+        joinedload(Admission.initial_encounter).joinedload(Encounter.clinician),
         joinedload(Admission.admitted_by),
+        joinedload(Admission.discharged_by),
         joinedload(Admission.transferred_from_ward),
         joinedload(Admission.transferred_to_ward),
         joinedload(Admission.invoice)
@@ -503,6 +504,149 @@ def delete_doctor_duty(db: Session, duty_id: int) -> bool:
         return False
     
     db_duty.is_active = False
+    db.commit()
+    return True
+
+
+# Diagnosis CRUD Operations
+from app.models.ipd_models import AdmissionDiagnosis, DiagnosisType
+
+def create_diagnosis(db: Session, admission_id: int, diagnosis: str, diagnosis_type: DiagnosisType, 
+                     diagnosed_by_id: int, icd_code: Optional[str] = None) -> AdmissionDiagnosis:
+    """Create a new diagnosis for an admission"""
+    db_diagnosis = AdmissionDiagnosis(
+        admission_id=admission_id,
+        diagnosis=diagnosis,
+        diagnosis_type=diagnosis_type,
+        diagnosed_by_id=diagnosed_by_id,
+        icd_code=icd_code
+    )
+    db.add(db_diagnosis)
+    db.commit()
+    db.refresh(db_diagnosis)
+    return db_diagnosis
+
+
+def get_diagnosis(db: Session, diagnosis_id: int) -> Optional[AdmissionDiagnosis]:
+    """Get a diagnosis by ID"""
+    return db.query(AdmissionDiagnosis).filter(
+        AdmissionDiagnosis.id == diagnosis_id,
+        AdmissionDiagnosis.is_active == True
+    ).first()
+
+
+def get_diagnoses_by_admission(db: Session, admission_id: int) -> List[AdmissionDiagnosis]:
+    """Get all diagnoses for an admission"""
+    return db.query(AdmissionDiagnosis).filter(
+        AdmissionDiagnosis.admission_id == admission_id,
+        AdmissionDiagnosis.is_active == True
+    ).order_by(AdmissionDiagnosis.diagnosed_at.desc()).all()
+
+
+def update_diagnosis(db: Session, diagnosis_id: int, diagnosis: Optional[str] = None,
+                    diagnosis_type: Optional[DiagnosisType] = None, 
+                    icd_code: Optional[str] = None) -> Optional[AdmissionDiagnosis]:
+    """Update a diagnosis"""
+    db_diagnosis = get_diagnosis(db, diagnosis_id)
+    if not db_diagnosis:
+        return None
+    
+    if diagnosis:
+        db_diagnosis.diagnosis = diagnosis
+    if diagnosis_type:
+        db_diagnosis.diagnosis_type = diagnosis_type
+    if icd_code is not None:
+        db_diagnosis.icd_code = icd_code
+    
+    db.commit()
+    db.refresh(db_diagnosis)
+    return db_diagnosis
+
+
+def delete_diagnosis(db: Session, diagnosis_id: int) -> bool:
+    """Soft delete a diagnosis"""
+    db_diagnosis = get_diagnosis(db, diagnosis_id)
+    if not db_diagnosis:
+        return False
+    
+    db_diagnosis.is_active = False
+    db.commit()
+    return True
+
+
+# Wound Care CRUD Operations
+from app.models.ipd_models import WoundCare, WoundCareType, WoundCondition
+
+def create_wound_care(db: Session, admission_id: int, wound_location: str, wound_type: WoundCareType,
+                     performed_by_id: int, wound_description: Optional[str] = None,
+                     dressing_type: Optional[str] = None, wound_condition: Optional[WoundCondition] = None,
+                     length_cm: Optional[float] = None, width_cm: Optional[float] = None,
+                     depth_cm: Optional[float] = None, exudate_type: Optional[str] = None,
+                     exudate_amount: Optional[str] = None, notes: Optional[str] = None,
+                     next_dressing_date: Optional[datetime] = None) -> WoundCare:
+    """Create a new wound care record"""
+    db_wound = WoundCare(
+        admission_id=admission_id,
+        wound_location=wound_location,
+        wound_type=wound_type,
+        performed_by_id=performed_by_id,
+        wound_description=wound_description,
+        dressing_type=dressing_type,
+        wound_condition=wound_condition,
+        length_cm=length_cm,
+        width_cm=width_cm,
+        depth_cm=depth_cm,
+        exudate_type=exudate_type,
+        exudate_amount=exudate_amount,
+        notes=notes,
+        next_dressing_date=next_dressing_date
+    )
+    db.add(db_wound)
+    db.commit()
+    db.refresh(db_wound)
+    return db_wound
+
+
+def get_wound_care(db: Session, wound_care_id: int) -> Optional[WoundCare]:
+    """Get a wound care record by ID"""
+    return db.query(WoundCare).filter(
+        WoundCare.id == wound_care_id,
+        WoundCare.is_active == True
+    ).first()
+
+
+def get_wound_care_by_admission(db: Session, admission_id: int) -> List[WoundCare]:
+    """Get all wound care records for an admission"""
+    return db.query(WoundCare).options(
+        joinedload(WoundCare.performed_by)
+    ).filter(
+        WoundCare.admission_id == admission_id,
+        WoundCare.is_active == True
+    ).order_by(WoundCare.dressing_date.desc()).all()
+
+
+def update_wound_care(db: Session, wound_care_id: int, **kwargs) -> Optional[WoundCare]:
+    """Update a wound care record"""
+    db_wound = get_wound_care(db, wound_care_id)
+    if not db_wound:
+        return None
+    
+    for field, value in kwargs.items():
+        if value is not None and hasattr(db_wound, field):
+            setattr(db_wound, field, value)
+    
+    db.commit()
+    db.refresh(db_wound)
+    return db_wound
+
+
+def delete_wound_care(db: Session, wound_care_id: int) -> bool:
+    """Soft delete a wound care record"""
+    db_wound = get_wound_care(db, wound_care_id)
+    if not db_wound:
+        return False
+    
+    db_wound.is_active = False
     db.commit()
     return True
 

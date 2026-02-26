@@ -3,7 +3,7 @@ API routes for Department management.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Query, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional
 from decimal import Decimal
@@ -15,7 +15,6 @@ from app.crud import department_crud
 from app.schemas.department_schemas import DepartmentCreate, DepartmentUpdate
 
 router = APIRouter(tags=["Departments"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/admin/departments", name="departments_list")
@@ -68,14 +67,17 @@ def department_create(
     name: str = Form(...),
     code: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    consultation_price: Optional[float] = Form(None),
     is_active: bool = Form(True)
 ):
     """Create a new department"""
     try:
+        from decimal import Decimal
         department_data = DepartmentCreate(
             name=name,
             code=code if code and code.strip() else None,
             description=description if description and description.strip() else None,
+            consultation_price=Decimal(str(consultation_price)) if consultation_price is not None else None,
             is_active=is_active
         )
         department = department_crud.create_department(db, department_data)
@@ -143,10 +145,12 @@ def department_update(
     name: Optional[str] = Form(None),
     code: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    consultation_price: Optional[float] = Form(None),
     is_active: Optional[str] = Form(None)
 ):
     """Update a department"""
     try:
+        from decimal import Decimal
         # Convert checkbox to boolean (HTML checkbox sends "on" when checked, nothing when unchecked)
         is_active_bool = True if is_active else False
         
@@ -154,6 +158,7 @@ def department_update(
             name=name if name and name.strip() else None,
             code=code if code and code.strip() else None,
             description=description if description and description.strip() else None,
+            consultation_price=Decimal(str(consultation_price)) if consultation_price is not None else None,
             is_active=is_active_bool
         )
         department = department_crud.update_department(db, department_id, update_data)

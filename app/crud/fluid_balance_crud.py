@@ -14,6 +14,7 @@ def create_fluid_entry(
     volume_ml: int,
     recorded_at: Optional[datetime] = None,
     notes: Optional[str] = None,
+    color: Optional[str] = None,
 ) -> Optional[FluidBalance]:
     """Create a fluid intake or output entry. entry_type must be 'intake' or 'output'."""
     if entry_type not in ("intake", "output"):
@@ -27,6 +28,7 @@ def create_fluid_entry(
         volume_ml=volume_ml,
         recorded_at=recorded_at or datetime.now(),
         notes=notes,
+        color=color,
     )
     db.add(entry)
     db.commit()

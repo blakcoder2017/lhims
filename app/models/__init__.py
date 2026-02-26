@@ -16,7 +16,10 @@ from app.models.encounter_models import (
 from app.models.billing_models import (
     Invoice, InvoiceStatus,
     Charge, ChargeType,
-    Payment, PaymentMethod, PaymentStatus
+    Payment, PaymentMethod, PaymentStatus,
+    Refund, RefundStatus,
+    RefundPolicy,
+    ChargePayment
 )
 from app.models.inventory_models import (
     Medication, StockItem, StockStatus,
@@ -27,6 +30,10 @@ from app.models.lab_models import (
     LabSample, SampleStatus,
     QCRecord, QCStatus,
     ReferenceRange
+)
+from app.models.lab_template_models import (
+    LabTemplate, LabTemplateVersion,
+    LabOptionSet, LabReferenceRange, LabAuditEvent
 )
 from app.models.lab_catalog_models import LabTest
 from app.models.supplier_models import Supplier
@@ -59,3 +66,20 @@ from app.models.fluid_balance_models import FluidBalance
 from app.models.disease_models import Disease, EncounterDisease
 from app.models.antenatal_models import AntenatalVisit
 from app.models.birth_models import BirthRecord, DeliveryType, BirthOutcome
+from app.models.pharmacy_models import (
+    PharmacyDosageForm, PharmacyDrug, PharmacySupplier, PharmacyStore,
+    PharmacyBatch, PharmacyStockLedger, PharmacyDispense, PharmacyDispenseItem,
+    PharmacyDispenseAllocation, PharmacyDrugInteraction, PharmacyRolePolicy,
+    PatientActiveMedication
+)
+from app.models.dhims2_models import (
+    DHIMS2Instance,
+    DHIMS2Mapping,
+    DHIMS2OrgUnitMapping,
+    DHIMS2SubmissionRun,
+    DHIMS2SubmissionItem,
+    DHIMS2AuditLog,
+    DHIMS2InstanceStatus,
+    SubmissionRunStatus,
+    ValidationStatus
+)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Numeric
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Numeric, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base # Assuming Base is defined here
@@ -49,6 +49,9 @@ class TriageVitals(Base):
     triage_category = Column(String(50), nullable=True)  # Critical, Urgent, Routine
     triage_assigned_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     triage_assigned_at = Column(DateTime, nullable=True)  # When triage level was assigned
+    
+    # Nurse Notes - observations recorded during triage
+    notes = Column(Text, nullable=True)  # Nurse observations/notes
     
     # Timestamps
     recorded_at = Column(DateTime, default=func.now())

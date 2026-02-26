@@ -3,7 +3,7 @@ API routes for Shift Type management.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Query, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -14,7 +14,6 @@ from app.crud import shift_type_crud
 from app.schemas.shift_type_schemas import ShiftTypeCreate, ShiftTypeUpdate
 
 router = APIRouter(tags=["Shift Types"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/admin/shift-types", name="shift_types_list")

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1>{{ template.name }} — Versions</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('lab_templates_list') }}">Result Templates</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('lab_template_builder', template_id=template.id) }}">{{ template.name }}</a></li>
+                            <li class="breadcrumb-item active">Versions</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Template Versions</h3>
+                        <div class="card-tools">
+                            <a href="{{ url_for('lab_template_builder', template_id=template.id) }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-edit mr-1"></i> Edit Template
+                            </a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        {% if versions %}
+                        <table class="table table-bordered table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Version</th>
+                                    <th>Status</th>
+                                    <th>Change Note</th>
+                                    <th>Created</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for v in versions %}
+                                <tr>
+                                    <td><strong>v{{ v.version }}</strong></td>
+                                    <td>
+                                        {% if v.status == 'PUBLISHED' %}
+                                            <span class="badge badge-success">Published</span>
+                                        {% else %}
+                                            <span class="badge badge-warning">Draft</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ v.change_note or '-' }}</td>
+                                    <td>{{ v.created_at.strftime('%Y-%m-%d %H:%M') if v.created_at else '-' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p class="text-muted">No versions yet.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+{% endblock %}

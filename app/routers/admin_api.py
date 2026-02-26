@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query, UploadFile, File
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -23,7 +23,6 @@ from app.schemas.hospital_settings_schemas import HospitalSettingsUpdate
 from app.schemas.service_pricing_schemas import ServicePricingCreate, ServicePricingUpdate
 
 router = APIRouter(tags=["Admin"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/admin/users", name="users_management")
@@ -632,10 +631,17 @@ def update_hospital_settings(
     hospital_address: Optional[str] = Form(None),
     hospital_phone: Optional[str] = Form(None),
     hospital_email: Optional[str] = Form(None),
-    hospital_website: Optional[str] = Form(None)
+    hospital_website: Optional[str] = Form(None),
+    revisit_follow_up_percentage: Optional[float] = Form(None),
+    nhis_enabled: Optional[str] = Form(None),
+    private_insurance_enabled: Optional[str] = Form(None)
 ):
     """Update hospital settings"""
     from app.crud.hospital_settings_crud import update_hospital_settings
+    
+    # Convert checkbox values (checkbox returns "on" if checked, None if unchecked)
+    nhis_enabled_bool = nhis_enabled == "on"
+    private_insurance_enabled_bool = private_insurance_enabled == "on"
     
     try:
         settings = update_hospital_settings(
@@ -644,7 +650,10 @@ def update_hospital_settings(
             hospital_address=hospital_address.strip() if hospital_address else None,
             hospital_phone=hospital_phone.strip() if hospital_phone else None,
             hospital_email=hospital_email.strip() if hospital_email else None,
-            hospital_website=hospital_website.strip() if hospital_website else None
+            hospital_website=hospital_website.strip() if hospital_website else None,
+            revisit_follow_up_percentage=revisit_follow_up_percentage,
+            nhis_enabled=nhis_enabled_bool,
+            private_insurance_enabled=private_insurance_enabled_bool
         )
         
         # Log audit
@@ -711,9 +720,9 @@ async def upload_hospital_logo(
             redirect_url = f"{base_url}?{query_params}"
             return RedirectResponse(url=redirect_url, status_code=302)
         
-        # Create uploads directory if it doesn't exist
-        BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        uploads_dir = os.path.join(BASE_DIR, "app", "static", "uploads", "logos")
+        # Create uploads directory (uses ./uploads for Docker volume persistence)
+        PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        uploads_dir = os.path.join(PROJECT_ROOT, "uploads", "logos")
         Path(uploads_dir).mkdir(parents=True, exist_ok=True)
         
         # Generate filename
@@ -734,9 +743,9 @@ async def upload_hospital_logo(
         with open(file_path, "wb") as f:
             f.write(contents)
         
-        # Update settings
+        # Update settings (use /uploads for persistence in Docker)
         logo_path = f"uploads/logos/{filename}"
-        logo_url = f"/static/{logo_path}"
+        logo_url = f"/uploads/logos/{filename}"
         
         update_hospital_settings(
             db,
@@ -774,4 +783,165 @@ async def upload_hospital_logo(
             "error": f"Error uploading logo: {str(e)}"
         }
         return templates.TemplateResponse("admin/hospital_settings.html", context)
+
+
+# ============================================
+# Charge Types Management
+# ============================================
+
+DEFAULT_CHARGE_TYPES = [
+    "consultation",
+    "lab_test",
+    "radiology",
+    "pharmacy",
+    "procedure",
+    "admission",
+    "antenatal",
+    "other"
+]
+
+
+@router.get("/admin/charge-types", name="charge_types_management")
+def charge_types_management(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin"]))
+):
+    """Charge types management dashboard"""
+    from app.models.billing_models import ChargeType
+    
+    # Force refresh to get latest data from database
+    db.expire_all()
+    
+    # Get settings
+    settings = hospital_settings_crud.get_hospital_settings(db)
+    
+    # Use configured charge types or default
+    configured_types = settings.charge_types_config if settings and settings.charge_types_config else DEFAULT_CHARGE_TYPES
+    
+    # Get all available types from enum for reference
+    all_available_types = [ct.value for ct in ChargeType]
+    
+    context = {
+        "request": request,
+        "title": "Charge Types Management",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "configured_types": configured_types,
+        "all_available_types": all_available_types,
+    }
+    return templates.TemplateResponse("admin/charge_types.html", context)
+
+
+@router.post("/admin/charge-types/add", name="add_charge_type")
+def add_charge_type(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin"])),
+    charge_type: str = Form(...)
+):
+    """Add a new charge type"""
+    charge_type = charge_type.strip().lower()
+    
+    if not charge_type:
+        return RedirectResponse(url="/admin/charge-types?error=Charge+type+cannot+be+empty", status_code=302)
+    
+    # Get current settings
+    settings = hospital_settings_crud.get_hospital_settings(db)
+    
+    # Get current charge types
+    current_types = settings.charge_types_config if settings and settings.charge_types_config else DEFAULT_CHARGE_TYPES.copy()
+    
+    # Check if already exists
+    if charge_type in current_types:
+        return RedirectResponse(url="/admin/charge-types?error=Charge+type+already+exists", status_code=302)
+    
+    # Add new charge type
+    current_types.append(charge_type)
+    
+    # Update settings
+    hospital_settings_crud.update_charge_types(db, current_types)
+    
+    return RedirectResponse(url="/admin/charge-types?success=Charge+type+added+successfully", status_code=302)
+
+
+@router.post("/admin/charge-types/remove", name="remove_charge_type")
+def remove_charge_type(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin"])),
+    charge_type: str = Form(...)
+):
+    """Remove a charge type"""
+    charge_type = charge_type.strip().lower()
+    
+    # Get current settings
+    settings = hospital_settings_crud.get_hospital_settings(db)
+    
+    # Get current charge types
+    current_types = settings.charge_types_config if settings and settings.charge_types_config else DEFAULT_CHARGE_TYPES.copy()
+    
+    # Check if it exists
+    if charge_type not in current_types:
+        return RedirectResponse(url="/admin/charge-types?error=Charge+type+not+found", status_code=302)
+    
+    # Remove charge type
+    current_types.remove(charge_type)
+    
+    # Update settings
+    hospital_settings_crud.update_charge_types(db, current_types)
+    
+    return RedirectResponse(url="/admin/charge-types?success=Charge+type+removed+successfully", status_code=302)
+
+
+@router.post("/admin/charge-types/reset", name="reset_charge_types")
+def reset_charge_types(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin"]))
+):
+    """Reset charge types to default"""
+    # Reset to default charge types
+    hospital_settings_crud.update_charge_types(db, DEFAULT_CHARGE_TYPES.copy())
+    
+    return RedirectResponse(url="/admin/charge-types?success=Charge+types+reset+to+default", status_code=302)
+
+
+@router.post("/admin/charge-types/edit", name="edit_charge_type")
+def edit_charge_type(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin"])),
+    old_charge_type: str = Form(...),
+    new_charge_type: str = Form(...)
+):
+    """Edit an existing charge type"""
+    old_charge_type = old_charge_type.strip().lower()
+    new_charge_type = new_charge_type.strip().lower()
+    
+    if not new_charge_type:
+        return RedirectResponse(url="/admin/charge-types?error=New+charge+type+cannot+be+empty", status_code=302)
+    
+    # Get current settings
+    settings = hospital_settings_crud.get_hospital_settings(db)
+    
+    # Get current charge types
+    current_types = settings.charge_types_config if settings and settings.charge_types_config else DEFAULT_CHARGE_TYPES.copy()
+    
+    # Check if old charge type exists
+    if old_charge_type not in current_types:
+        return RedirectResponse(url="/admin/charge-types?error=Original+charge+type+not+found", status_code=302)
+    
+    # Check if new charge type already exists (and it's not the same as old)
+    if new_charge_type in current_types and new_charge_type != old_charge_type:
+        return RedirectResponse(url="/admin/charge-types?error=Charge+type+already+exists", status_code=302)
+    
+    # Replace the charge type
+    index = current_types.index(old_charge_type)
+    current_types[index] = new_charge_type
+    
+    # Update settings
+    hospital_settings_crud.update_charge_types(db, current_types)
+    
+    return RedirectResponse(url="/admin/charge-types?success=Charge+type+updated+successfully", status_code=302)
 

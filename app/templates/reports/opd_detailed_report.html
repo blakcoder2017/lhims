@@ -203,6 +203,44 @@
                     </div>
                 </div>
 
+                <!-- New vs Revisit Consultation Revenue -->
+                {% if consultation_breakdown %}
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card card-success card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-user-md mr-1"></i> New vs Revisit Consultation Revenue</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="info-box bg-info">
+                                            <span class="info-box-icon"><i class="fas fa-user-plus"></i></span>
+                                            <div class="info-box-content">
+                                                <span class="info-box-text">New Patients</span>
+                                                <span class="info-box-number">{{ consultation_breakdown.new.count }} visits</span>
+                                                <span class="info-box-number">GHS {{ "%.2f"|format(consultation_breakdown.new.revenue) }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="info-box bg-success">
+                                            <span class="info-box-icon"><i class="fas fa-sync-alt"></i></span>
+                                            <div class="info-box-content">
+                                                <span class="info-box-text">Revisit (Follow-up)</span>
+                                                <span class="info-box-number">{{ consultation_breakdown.revisit.count }} visits</span>
+                                                <span class="info-box-number">GHS {{ "%.2f"|format(consultation_breakdown.revisit.revenue) }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p class="text-muted small mb-0"><i class="fas fa-info-circle"></i> New = routine, walk-in, emergency; Revisit = follow_up visit type.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
                 <!-- Detailed Visits Table -->
                 <div class="card">
                     <div class="card-header">

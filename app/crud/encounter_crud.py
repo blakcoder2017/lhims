@@ -3,12 +3,14 @@ from typing import List, Optional
 from datetime import datetime
 import json
 
-from app.models.encounter_models import Encounter, LabOrder, RadiologyOrder, Prescription, EncounterStatus, OrderStatus
+from app.models.encounter_models import Encounter, LabOrder, RadiologyOrder, Prescription, EncounterStatus, OrderStatus, EncounterAddendum
+from app.models.disease_models import EncounterDisease
 from app.schemas.encounter_schemas import (
     EncounterCreate, EncounterUpdate,
     LabOrderCreate, LabOrderUpdate,
     RadiologyOrderCreate, RadiologyOrderUpdate,
-    PrescriptionCreate, PrescriptionUpdate
+    PrescriptionCreate, PrescriptionUpdate,
+    AddendumCreate
 )
 
 
@@ -18,8 +20,17 @@ def create_encounter(db: Session, encounter: EncounterCreate):
     Creates a new clinical encounter in the database.
     Validates OPD/IPD linkage before creation.
     Auto-creates OPD visit if needed for OPD encounters.
+    Handles diagnoses by creating EncounterDisease records.
     """
     from app.services.opd_validation import validate_encounter_creation, auto_link_opd_visit
+    from app.models.scheduled_appointment_models import ScheduledAppointment
+    
+    # Validate appointment_id if provided
+    if encounter.appointment_id:
+        existing = db.query(ScheduledAppointment).filter(ScheduledAppointment.id == encounter.appointment_id).first()
+        if not existing:
+            # Invalid appointment_id, set to None
+            encounter.appointment_id = None
     
     # Auto-link or create OPD visit if not provided and this is an OPD encounter (not IPD)
     if not encounter.opd_visit_id and not encounter.admission_id:
@@ -39,8 +50,25 @@ def create_encounter(db: Session, encounter: EncounterCreate):
     if not is_valid:
         raise ValueError(error_message)
     
-    db_encounter = Encounter(**encounter.model_dump())
+    # Extract diagnoses before creating encounter
+    diagnoses = encounter.diagnoses
+    
+    # Create encounter without diagnoses field
+    encounter_data = encounter.model_dump(exclude={'diagnoses'})
+    db_encounter = Encounter(**encounter_data)
     db.add(db_encounter)
+    db.flush()  # Get the encounter ID
+    
+    # Create EncounterDisease records for each diagnosis
+    if diagnoses:
+        for disease_id in diagnoses:
+            encounter_disease = EncounterDisease(
+                encounter_id=db_encounter.id,
+                disease_id=disease_id,
+                is_primary=False  # Can be updated later if needed
+            )
+            db.add(encounter_disease)
+    
     db.commit()
     db.refresh(db_encounter)
     return db_encounter
@@ -48,7 +76,11 @@ def create_encounter(db: Session, encounter: EncounterCreate):
 
 def get_encounter(db: Session, encounter_id: int):
     """Retrieves a single encounter by ID."""
-    return db.query(Encounter).filter(Encounter.id == encounter_id, Encounter.is_active == True).first()
+    from sqlalchemy.orm import joinedload
+    return db.query(Encounter).options(
+        joinedload(Encounter.clinician),
+        joinedload(Encounter.addendum_by)
+    ).filter(Encounter.id == encounter_id, Encounter.is_active == True).first()
 
 
 def get_encounters_by_patient(db: Session, patient_id: int, skip: int = 0, limit: int = 100):
@@ -73,10 +105,14 @@ def get_encounter_with_orders(db: Session, encounter_id: int):
     return db.query(Encounter).options(
         joinedload(Encounter.lab_orders),
         joinedload(Encounter.radiology_orders).joinedload(RadiologyOrder.images),
-        joinedload(Encounter.prescriptions),
+        joinedload(Encounter.prescriptions).joinedload(Prescription.prescribed_by),
+        joinedload(Encounter.prescriptions).joinedload(Prescription.pharmacy_drug),
+        joinedload(Encounter.procedures),
         joinedload(Encounter.patient),
         joinedload(Encounter.appointment),
-        joinedload(Encounter.clinician)
+        joinedload(Encounter.clinician),
+        joinedload(Encounter.admission),
+        joinedload(Encounter.diseases)
     ).filter(
         Encounter.id == encounter_id,
         Encounter.is_active == True
@@ -91,12 +127,32 @@ def update_encounter(db: Session, encounter_id: int, encounter_update: Encounter
     
     update_data = encounter_update.model_dump(exclude_unset=True)
     
+    # Handle diagnoses update - extract before setting other fields
+    diagnoses = update_data.pop('diagnoses', None)
+    
     # Handle status change to completed
     if update_data.get("status") == EncounterStatus.COMPLETED and not db_encounter.completed_at:
         update_data["completed_at"] = datetime.now()
     
     for field, value in update_data.items():
         setattr(db_encounter, field, value)
+    
+    # Update diagnoses if provided
+    if diagnoses is not None:
+        # Remove existing diagnosis associations
+        db.query(EncounterDisease).filter(
+            EncounterDisease.encounter_id == encounter_id
+        ).delete()
+        
+        # Add new diagnosis associations
+        if diagnoses:
+            for disease_id in diagnoses:
+                encounter_disease = EncounterDisease(
+                    encounter_id=encounter_id,
+                    disease_id=disease_id,
+                    is_primary=False
+                )
+                db.add(encounter_disease)
     
     db.commit()
     db.refresh(db_encounter)
@@ -137,6 +193,24 @@ def create_lab_order(db: Session, lab_order: LabOrderCreate):
                 order_data["opd_visit_id"] = encounter.opd_visit_id
             if encounter.admission_id:
                 order_data["admission_id"] = encounter.admission_id
+    
+    # Auto-link template from test catalog
+    test_code = order_data.get('test_code')
+    test_name = order_data.get('test_name')
+    if test_code or test_name:
+        from app.models.lab_catalog_models import LabTest
+        from sqlalchemy import or_
+        conditions = []
+        if test_code:
+            conditions.append(LabTest.test_code == test_code)
+        if test_name:
+            conditions.append(LabTest.test_name.ilike(f"%{test_name}%"))
+        if conditions:
+            lab_test = db.query(LabTest).filter(or_(*conditions), LabTest.template_id.isnot(None)).first()
+            if lab_test:
+                order_data['lab_test_id'] = lab_test.id
+                order_data['template_id'] = lab_test.template_id
+                order_data['template_version_used'] = lab_test.template_version or 1
     
     db_lab_order = LabOrder(**order_data)
     db.add(db_lab_order)
@@ -241,6 +315,19 @@ def create_prescription(db: Session, prescription: PrescriptionCreate):
     """Creates a new prescription."""
     prescription_data = prescription.model_dump()
     
+    # Convert pharmacy_drug_id from str to UUID if present (Ghana formulation)
+    if prescription_data.get("pharmacy_drug_id"):
+        from uuid import UUID
+        try:
+            pid = prescription_data["pharmacy_drug_id"]
+            # Handle already-converted UUID objects
+            if isinstance(pid, UUID):
+                prescription_data["pharmacy_drug_id"] = pid
+            else:
+                prescription_data["pharmacy_drug_id"] = UUID(str(pid))
+        except (ValueError, TypeError, AttributeError):
+            prescription_data["pharmacy_drug_id"] = None
+    
     # Auto-link opd_visit_id and admission_id from encounter if not provided
     if prescription_data.get("encounter_id") and not prescription_data.get("opd_visit_id") and not prescription_data.get("admission_id"):
         encounter = get_encounter(db, prescription_data["encounter_id"])
@@ -327,4 +414,28 @@ def update_prescription(db: Session, prescription_id: int, prescription_update: 
     db.commit()
     db.refresh(db_prescription)
     return db_prescription
+
+
+# Addendum CRUD Operations
+def create_addendum(db: Session, addendum: AddendumCreate, encounter_id: int, added_by_id: int):
+    """Creates a new addendum for an encounter."""
+    db_addendum = EncounterAddendum(
+        encounter_id=encounter_id,
+        added_by_id=added_by_id,
+        content=addendum.content
+    )
+    db.add(db_addendum)
+    db.commit()
+    db.refresh(db_addendum)
+    return db_addendum
+
+
+def get_addendums_by_encounter(db: Session, encounter_id: int):
+    """Retrieves all addendums for an encounter, ordered by creation date (newest first)."""
+    return db.query(EncounterAddendum).options(
+        joinedload(EncounterAddendum.added_by)
+    ).filter(
+        EncounterAddendum.encounter_id == encounter_id,
+        EncounterAddendum.is_active == True
+    ).order_by(EncounterAddendum.created_at.desc()).all()
 

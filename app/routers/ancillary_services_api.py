@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, status, HTTPException, Form, Request, Query, File, UploadFile
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 from typing import Optional, List
@@ -10,13 +9,13 @@ import uuid
 
 from app.db.database import get_db
 from app.core.deps import get_current_user, role_required
+from app.core.templates import templates
 from app.models.encounter_models import LabOrder, RadiologyOrder, Prescription, OrderStatus, Encounter
 from app.models.patient_models import Patient
 from app.crud import encounter_crud
 from app.schemas.encounter_schemas import LabOrderUpdate, RadiologyOrderUpdate, PrescriptionUpdate
 
 router = APIRouter(tags=["Ancillary Services"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 # Laboratory Information System (LIS) Routes
@@ -32,6 +31,14 @@ def lab_dashboard(
     Laboratory dashboard showing pending and completed lab orders.
     """
     from sqlalchemy import or_
+    
+    # Get counts for statistics cards
+    counts = {}
+    base_query = db.query(LabOrder)
+    counts['pending'] = base_query.filter(LabOrder.status == OrderStatus.PENDING.value).count()
+    counts['in_progress'] = base_query.filter(LabOrder.status == OrderStatus.IN_PROGRESS.value).count()
+    counts['completed'] = base_query.filter(LabOrder.status == OrderStatus.COMPLETED.value).count()
+    counts['total'] = base_query.count()
     
     # Query for lab orders
     query = db.query(LabOrder).options(
@@ -131,7 +138,8 @@ def lab_dashboard(
         "lab_orders": lab_orders,
         "lab_order_payment_status": lab_order_payment_status,
         "status_filter": status_filter,
-        "search": search
+        "search": search,
+        "counts": counts
     }
     return templates.TemplateResponse("ancillary/lab_dashboard.html", context)
 
@@ -209,6 +217,60 @@ def view_lab_order(
         LabSample.is_active == True
     ).all()
     
+    # Resolve template schema for result entry
+    schema_json = None
+    template_version_used = None
+    ref_ranges = {}
+    option_sets = {}
+    has_critical_fields = False
+    try:
+        from app.services.lab_template_resolution import resolve_template_for_order, TemplateResolutionError
+        try:
+            resolved = resolve_template_for_order(db, lab_order, persist=True)
+            schema_json = resolved.schema_json
+            template_version_used = resolved.template_version
+            db.commit()  # Persist template_id and version to lab_order
+            
+            # Load reference ranges for numeric fields
+            if schema_json and patient:
+                from app.services.reference_range_engine import get_field_reference_range
+                patient_age_days = None
+                if patient.date_of_birth:
+                    from datetime import date
+                    today = date.today()
+                    patient_age_days = (today - patient.date_of_birth).days
+                
+                for fcode, fdef in (schema_json.get("fields") or {}).items():
+                    # Check for critical fields
+                    if fdef.get("critical"):
+                        has_critical_fields = True
+                    
+                    # Get reference ranges for numeric fields
+                    if fdef.get("type") == "numeric":
+                        range_result = get_field_reference_range(
+                            db, fcode, 
+                            patient_age_days=patient_age_days,
+                            patient_sex=patient.gender
+                        )
+                        if range_result:
+                            ref_ranges[fcode] = {
+                                "low": float(range_result.low) if range_result.low is not None else None,
+                                "high": float(range_result.high) if range_result.high is not None else None,
+                                "unit": fdef.get("unit", "")
+                            }
+                    
+                    # Get option sets for choice fields
+                    if fdef.get("optionSet"):
+                        from app.models.lab_template_models import LabOptionSet
+                        os_obj = db.query(LabOptionSet).filter(LabOptionSet.name == fdef["optionSet"]).first()
+                        if os_obj and os_obj.options_json:
+                            option_sets[fdef["optionSet"]] = os_obj.options_json
+        except TemplateResolutionError as e:
+            # No template configured - will show plain text field
+            print(f"Template resolution warning for order {order_id}: {e}")
+    except Exception as e:
+        print(f"Error resolving template for order {order_id}: {e}")
+    
     context = {
         "request": request,
         "title": f"Lab Order #{order_id}",
@@ -223,6 +285,12 @@ def view_lab_order(
         "unpaid_invoice": unpaid_invoice,
         "paid_invoice": paid_invoice,
         "is_admitted": is_admitted,
+        "schema_json": schema_json,
+        "ref_ranges": ref_ranges,
+        "flags_json": {},
+        "option_sets": option_sets,
+        "has_critical_fields": has_critical_fields,
+        "result_json": lab_order.result_json or {},
     }
     return templates.TemplateResponse("ancillary/lab_order_detail.html", context)
 
@@ -366,6 +434,29 @@ def enter_lab_result(
     
     return RedirectResponse(
         url=redirect_url,
+        status_code=status.HTTP_302_FOUND
+    )
+
+
+@router.post("/lab/orders/{order_id}/amend-result", name="amend_lab_result", status_code=status.HTTP_302_FOUND)
+def amend_lab_result(
+    request: Request,
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Lab Staff", "Admin"])),
+    amend_reason: str = Form(...)
+):
+    """
+    Amend a lab result - creates a new result version for audit purposes.
+    This is a stub implementation that redirects back to the order detail page.
+    """
+    lab_order = db.query(LabOrder).filter(LabOrder.id == order_id).first()
+    if not lab_order:
+        raise HTTPException(status_code=404, detail="Lab order not found")
+    
+    # Stub: Redirect back with a message that amendment is not yet implemented
+    return RedirectResponse(
+        url=f"/lab/orders/{order_id}?status=amend_not_available",
         status_code=status.HTTP_302_FOUND
     )
 

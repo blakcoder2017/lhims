@@ -50,7 +50,23 @@ class AntenatalVisit(Base):
     urine_protein = Column(String(20), nullable=True)
     blood_group = Column(String(10), nullable=True)
     rhesus_factor = Column(String(5), nullable=True)
-
+    
+    # ANC Lab Tests (DHIMS2 Required)
+    hiv_tested = Column(Boolean, nullable=True)
+    hiv_result = Column(String(20), nullable=True)  # Positive/Negative/Pending
+    hiv_test_date = Column(Date, nullable=True)
+    syphilis_tested = Column(Boolean, nullable=True)
+    syphilis_result = Column(String(20), nullable=True)  # Positive/Negative/Pending
+    syphilis_test_date = Column(Date, nullable=True)
+    hepatitis_b_tested = Column(Boolean, nullable=True)
+    hepatitis_b_result = Column(String(20), nullable=True)  # Positive/Negative/Pending
+    hepatitis_b_test_date = Column(Date, nullable=True)
+    hepatitis_c_tested = Column(Boolean, nullable=True)
+    hepatitis_c_result = Column(String(20), nullable=True)  # Positive/Negative/Pending
+    hepatitis_c_test_date = Column(Date, nullable=True)
+    urinalysis_done = Column(Boolean, nullable=True)
+    urinalysis_result = Column(String(50), nullable=True)
+    
     # Risk Assessment
     risk_factors = Column(Text, nullable=True)
     complications = Column(Text, nullable=True)
@@ -72,3 +88,4 @@ class AntenatalVisit(Base):
     patient = relationship("Patient", back_populates="antenatal_visits")
     encounter = relationship("Encounter", back_populates="antenatal_visits")
     recorded_by = relationship("User", foreign_keys=[recorded_by_id])
+    birth_records = relationship("BirthRecord", back_populates="antenatal_visit")

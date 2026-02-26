@@ -79,9 +79,9 @@
         <!-- Hospital Header -->
         <div class="text-center section">
             {% if hospital_settings and hospital_settings.logo_url %}
-            <img src="{{ hospital_settings.logo_url }}" alt="Logo" style="max-height: 30px; margin-bottom: 3px;">
+            <img src="{{ hospital_settings.logo_url|normalize_logo_url }}" alt="Logo" style="max-height: 30px; margin-bottom: 3px;">
             {% endif %}
-            <p class="bold" style="font-size: 13px;">{{ hospital_settings.hospital_name if hospital_settings else 'LHIMS' }}</p>
+            <p class="bold" style="font-size: 13px;">{{ hospital_settings.hospital_name if hospital_settings else 'MedFlow' }}</p>
             {% if hospital_settings and hospital_settings.hospital_address %}
             <p style="font-size: 9px;">{{ hospital_settings.hospital_address }}</p>
             {% endif %}

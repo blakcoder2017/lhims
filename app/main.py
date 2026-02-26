@@ -1,11 +1,33 @@
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from fastapi.exceptions import RequestValidationError, HTTPException as StarletteHTTPException
 from jinja2.exceptions import TemplateNotFound
+from urllib.parse import urlparse, parse_qs, urlencode, urljoin
+from datetime import date
 import os
+
+
+def calculate_age(dob):
+    """Calculate age from date of birth."""
+    if not dob:
+        return None
+    if isinstance(dob, str):
+        dob = date.fromisoformat(dob)
+    today = date.today()
+    age = today.year - dob.year
+    if (today.month, today.day) < (dob.month, dob.day):
+        age -= 1
+    return age
+
+
+app = FastAPI(title=f"{settings.app_title}")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Use shared templates from app.core.templates (includes age filter registration)
+from app.core.templates import templates
 
 # --- ROUTER IMPORTS ---
 # 1. Auth/API Token Routers (Includes /api/v1/auth/token)
@@ -37,13 +59,26 @@ from app.routers import bed_type_api
 from app.routers import bed_type_ui_routes
 
 
-app = FastAPI(title=f"{settings.app_title}")
+# Uploads directory - persists in Docker via ./uploads volume
+PROJECT_ROOT = os.path.dirname(BASE_DIR)
+UPLOADS_DIR = os.path.join(PROJECT_ROOT, "uploads")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+# Serve legacy logo URLs (/static/uploads/logos/...) from uploads dir for backward compatibility
+from fastapi.responses import FileResponse
+@app.get("/static/uploads/logos/{filename:path}")
+def serve_legacy_logo(filename: str):
+    filepath = os.path.join(UPLOADS_DIR, "logos", filename)
+    if os.path.isfile(filepath):
+        return FileResponse(filepath)
+    raise HTTPException(status_code=404, detail="Not found")
 
-# Mount static files (CSS, JS, images)
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+# Mount static files directory
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# Mount uploads directory (hospital logos, etc.)
+if os.path.isdir(UPLOADS_DIR):
+    app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 
 # =======================================================
@@ -279,16 +314,33 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Enhanced handler for Pydantic Validation Errors (Status 422)"""
+    from typing import List, Dict, Any
     from app.core.validation import create_error_response, format_validation_errors
+    
+    def sanitize_errors(errors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert bytes to strings in error details for JSON serialization"""
+        sanitized = []
+        for error in errors:
+            clean = {}
+            for key, value in error.items():
+                if isinstance(value, bytes):
+                    clean[key] = value.decode('utf-8', errors='replace')
+                elif isinstance(value, (list, tuple)):
+                    clean[key] = [v.decode('utf-8', errors='replace') if isinstance(v, bytes) else v for v in value]
+                else:
+                    clean[key] = value
+            sanitized.append(clean)
+        return sanitized
     
     # For API requests, return JSON
     if request.url.path.startswith("/api/"):
+        sanitized_errors = sanitize_errors(exc.errors())
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={
                 "detail": "Validation error",
-                "errors": exc.errors(),
-                "message": format_validation_errors(exc.errors())
+                "errors": sanitized_errors,
+                "message": format_validation_errors(sanitized_errors)
             }, 
         )
     
@@ -299,9 +351,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     
     # If referer is a form page, redirect back with error
     if any(path in referer for path in ["/register", "/create", "/add", "/update"]):
-        from urllib.parse import quote
+        from urllib.parse import quote, urlparse, parse_qs, urlencode, urljoin
         encoded_error = quote(error_message[:200])  # Limit length
-        redirect_url = f"{referer}?error={encoded_error}"
+        
+        # Parse the referer URL to properly handle query parameters
+        parsed = urlparse(referer)
+        query_params = parse_qs(parsed.query)
+        query_params['error'] = [encoded_error]
+        
+        # Reconstruct URL with proper query string
+        new_query = urlencode(query_params, doseq=True)
+        redirect_url = urljoin(referer, f"{parsed.path}?{new_query}")
+        
         return RedirectResponse(url=redirect_url, status_code=302)
     
     # Otherwise, show error page
@@ -371,6 +432,8 @@ from app.routers import emergency_ui_routes
 app.include_router(emergency_ui_routes.router, prefix="", tags=["Emergency UI"])  # /emergency/* UI routes
 from app.routers import midwife_antenatal_ui_routes
 app.include_router(midwife_antenatal_ui_routes.router, prefix="", tags=["Midwife/Antenatal"])  # /midwife/* UI routes
+from app.routers import antenatal_api
+app.include_router(antenatal_api.router, prefix="", tags=["Antenatal API"])  # /api/v1/antenatal/* routes
 from app.routers import birth_ui_routes
 app.include_router(birth_ui_routes.router, prefix="", tags=["Births/Delivery"])  # /births/* UI routes
 app.include_router(ipd_api.router, prefix="", tags=["IPD"])  # /api/v1/wards, /api/v1/beds, /api/v1/admissions, /api/v1/doctor-duties routes
@@ -387,7 +450,7 @@ app.include_router(ward_type_ui_routes.router, prefix="", tags=["Ward Types UI"]
 
 # 6. Ancillary Services Routers (Lab, Radiology, Pharmacy)
 from app.routers import ancillary_services_api
-app.include_router(ancillary_services_api.router, prefix="", tags=["Ancillary Services"])  # /lab, /radiology, /pharmacy routes
+app.include_router(ancillary_services_api.router, prefix="/api/v1/ancillary", tags=["Ancillary Services"])  # /api/v1/ancillary/lab, /api/v1/ancillary/radiology, /api/v1/ancillary/pharmacy routes
 
 # 7. Billing & Payment Routers
 from app.routers import billing_api
@@ -435,9 +498,33 @@ app.include_router(lab_tracking_api.router, prefix="", tags=["Lab Tracking"])  #
 from app.routers import formulary_api
 app.include_router(formulary_api.router, prefix="", tags=["Formulary"])  # /pharmacy/formulary, /pharmacy/drug-interactions routes
 
+# 11a. Pharmacy Ghana-Ready API (formulary search, stock-in, FEFO, interactions)
+from app.routers import pharmacy_ghana_api
+app.include_router(pharmacy_ghana_api.router, prefix="/api/v1", tags=["Pharmacy Ghana"])  # /api/v1/pharmacy/formulary/search, etc.
+
+# 11b. Pharmacy Ghana UI (drug catalogue, batches, reports)
+from app.routers import pharmacy_ghana_ui_routes
+app.include_router(pharmacy_ghana_ui_routes.router, prefix="", tags=["Pharmacy Ghana UI"])
+
 # 12. Lab Test Catalog Routers
 from app.routers import lab_catalog_api
 app.include_router(lab_catalog_api.router, prefix="", tags=["Lab Catalog"])  # /lab/tests, /lab/reference-ranges routes
+
+# 12a. Lab Template Management (Admin)
+from app.routers import lab_template_api
+app.include_router(lab_template_api.router, prefix="", tags=["Lab Templates"])  # /lab/templates routes
+
+# 12b. Lab Demo (Development Testing)
+from app.routers import lab_demo_api
+app.include_router(lab_demo_api.router, prefix="", tags=["Lab Demo"])  # /lab/demo routes
+
+# 12c. Lab Inventory Management (Equipment & Reagents)
+from app.routers import lab_inventory_api
+app.include_router(lab_inventory_api.router, prefix="", tags=["Lab Inventory"])  # /lab/inventory routes
+
+# 12d. Lab Unified Operations (Reference Range Engine, Result Interpretation)
+from app.routers import lab_merge_api
+app.include_router(lab_merge_api.router, prefix="", tags=["Lab - Unified Operations"])  # /lab/reference-ranges/lookup, /lab/results/interpret, /lab/tests/merge routes
 
 # 13. Supplier Management Routers
 from app.routers import supplier_api
@@ -498,3 +585,31 @@ app.include_router(walk_in_orders_api.router, prefix="", tags=["Walk-in Orders"]
 # 22. Direct Service Requests from Patient Profile
 from app.routers import direct_service_requests_api
 app.include_router(direct_service_requests_api.router, prefix="", tags=["Direct Service Requests"])  # /patients/{id}/direct-requests routes
+
+# Debug Router for testing permissions
+from app.routers import debug_permissions_api
+app.include_router(debug_permissions_api.router, prefix="", tags=["Debug"])  # /debug/my-permissions
+
+# =======================================================
+# DHIMS2 Integration Router
+# =======================================================
+from app.integrations.dhims2 import router as dhims2_router
+app.include_router(dhims2_router.router, prefix="", tags=["DHIMS2 Integration"])  # /api/dhims2 routes
+# =======================================================
+# === Health Check Endpoint (for Docker) ===
+# =======================================================
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Avoid 404 for favicon requests - return 204 No Content."""
+    from fastapi.responses import Response
+    return Response(status_code=204)
+
+@app.get("/health", tags=["Health"])
+def health_check():
+    """Health check endpoint for Docker and load balancer health checks."""
+    return {
+        "status": "healthy",
+        "app": settings.app_title,
+        "version": settings.version
+    }

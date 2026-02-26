@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+{% block content %}
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-boxes mr-2"></i>Batches - {{ store.name }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_ghana_dashboard') }}">Pharmacy Ghana</a></li>
+                            <li class="breadcrumb-item active">{{ store.name }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Summary Dashboard -->
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ summary.total_batches }}</h3>
+                                <p>Total Batches</p>
+                            </div>
+                            <div class="icon"><i class="fas fa-boxes"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>₵{{ "%.2f"|format(summary.total_stock_value) }}</h3>
+                                <p>Stock Value</p>
+                            </div>
+                            <div class="icon"><i class="fas fa-dollar-sign"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ summary.near_expiry_count }}</h3>
+                                <p>Near Expiry (90 days)</p>
+                            </div>
+                            <div class="icon"><i class="fas fa-exclamation-triangle"></i></div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="small-box {% if summary.expired_count > 0 %}bg-danger{% else %}bg-secondary{% endif %}">
+                            <div class="inner">
+                                <h3>{{ summary.expired_count }}</h3>
+                                <p>Expired</p>
+                            </div>
+                            <div class="icon"><i class="fas fa-times-circle"></i></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Multi-Line Stock In Form -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Stock In (Multiple Items)</h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- Drug Search Datalist (hidden, used for search functionality) -->
+                        <datalist id="drugs-list">
+                            {% for d in drugs %}
+                            <option value="{{ d.generic_name }} {{ d.strength_value or '' }} {{ d.dosage_form.name if d.dosage_form else '' }}" data-id="{{ d.id }}"></option>
+                            {% endfor %}
+                        </datalist>
+                        
+                        <form id="multiStockInForm">
+                            <input type="hidden" name="store_id" value="{{ store.id }}">
+                            <table class="table table-sm" id="stockInTable" data-show-cost="{{ 'true' if can_view_cost else 'false' }}">
+                                <thead>
+                                    <tr>
+                                        <th>Drug</th>
+                                        <th>Batch No</th>
+                                        <th>Expiry Date</th>
+                                        <th>Qty</th>
+                                        {% if can_view_cost %}<th>Unit Cost</th><th>Selling Price</th>{% endif %}
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stockInBody">
+                                    <tr class="stock-row">
+                                        <td>
+                                            <input type="text" name="drug_search" class="form-control form-control-sm drug-search-input" list="drugs-list" placeholder="Search drug name..." autocomplete="off" required>
+                                            <input type="hidden" name="drug_id" class="drug-id-hidden">
+                                        </td>
+                                        <td><input type="text" name="batch_no" class="form-control form-control-sm batch-no-input" placeholder="Auto-generate if empty"></td>
+                                        <td><input type="date" name="expiry_date" class="form-control form-control-sm expiry-input" required></td>
+                                        <td><input type="number" name="qty" class="form-control form-control-sm" min="0.01" step="0.01" required style="width:80px;"></td>
+                                        {% if can_view_cost %}
+                                        <td><input type="number" name="unit_cost" class="form-control form-control-sm" min="0" step="0.01" placeholder="0" style="width:80px;"></td>
+                                        <td><input type="number" name="selling_price" class="form-control form-control-sm" min="0" step="0.01" placeholder="0" style="width:80px;"></td>
+                                        {% endif %}
+                                        <td><button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)"><i class="fas fa-times"></i></button></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="addStockRow()">
+                                    <i class="fas fa-plus"></i> Add Row
+                                </button>
+                                <button type="submit" class="btn btn-primary btn-sm ml-2">
+                                    <i class="fas fa-save"></i> Stock In All
+                                </button>
+                            </div>
+                        </form>
+                        <div id="multiStockInAlert" class="alert mt-2" style="display:none;"></div>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h3 class="card-title">Batches ({{ batches|length }})</h3>
+                        <form method="GET" class="float-right form-inline">
+                            <input type="hidden" name="store_id" value="{{ store.id }}">
+                            <select name="drug_id" class="form-control form-control-sm mr-1" onchange="this.form.submit()">
+                                <option value="">All drugs</option>
+                                {% for d in drugs %}
+                                <option value="{{ d.id }}" {% if drug_id == d.id|string %}selected{% endif %}>{{ d.generic_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </form>
+                    </div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Drug</th>
+                                    <th>Batch No</th>
+                                    <th>Expiry</th>
+                                    <th>Qty On Hand</th>
+                                    {% if can_view_cost %}<th>Unit Cost</th><th>Selling Price</th>{% endif %}
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for b in batches %}
+                                <tr>
+                                    <td>{{ b.drug.generic_name if b.drug else 'N/A' }}</td>
+                                    <td>{{ b.batch_no }}</td>
+                                    <td><span class="badge {% if b.expiry_date < today %}badge-danger{% elif b.expiry_date <= today_plus_90 %}badge-warning{% else %}badge-success{% endif %}">{{ b.expiry_date }}</span></td>
+                                    <td>{{ b.qty_on_hand }}</td>
+                                    {% if can_view_cost %}<td>{{ b.unit_cost or '–' }}</td><td>{{ b.selling_price or '–' }}</td>{% endif %}
+                                    <td>
+                                        <button type="button" class="btn btn-xs btn-outline-info" 
+                                                data-toggle="modal" data-target="#historyModal"
+                                                data-batch-id="{{ b.id }}"
+                                                data-batch-no="{{ b.batch_no }}"
+                                                data-drug-name="{{ b.drug.generic_name if b.drug else '' }}">
+                                            <i class="fas fa-history"></i> History
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="7" class="text-center text-muted">No batches</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Stock History Modal -->
+    <div class="modal fade" id="historyModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Stock History - <span id="historyBatchNo"></span></h5>
+                    <button type="button" class="close" data-dismiss="modal">
+                        <span>&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Drug:</strong> <span id="historyDrugName"></span></p>
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Movement</th>
+                                <th>Qty In</th>
+                                <th>Qty Out</th>
+                                <th>Reference</th>
+                                <th>Note</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr><td colspan="6" class="text-center">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Add row to multi-stock-in form
+    function addStockRow() {
+        const tbody = document.getElementById('stockInBody');
+        const row = document.createElement('tr');
+        row.className = 'stock-row';
+        const table = document.getElementById('stockInTable');
+        const showCost = table.dataset.showCost === 'true';
+        let html = `
+            <td>
+                <input type="text" name="drug_search" class="form-control form-control-sm drug-search-input" list="drugs-list" placeholder="Search drug name..." autocomplete="off" required>
+                <input type="hidden" name="drug_id" class="drug-id-hidden">
+            </td>
+            <td><input type="text" name="batch_no" class="form-control form-control-sm batch-no-input" placeholder="Auto-generate if empty"></td>
+            <td><input type="date" name="expiry_date" class="form-control form-control-sm expiry-input" required></td>
+            <td><input type="number" name="qty" class="form-control form-control-sm" min="0.01" step="0.01" required style="width:80px;"></td>
+        `;
+        if (showCost) {
+            html += `
+            <td><input type="number" name="unit_cost" class="form-control form-control-sm" min="0" step="0.01" placeholder="0" style="width:80px;"></td>
+            <td><input type="number" name="selling_price" class="form-control form-control-sm" min="0" step="0.01" placeholder="0" style="width:80px;"></td>
+            `;
+        }
+        html += `<td><button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)"><i class="fas fa-times"></i></button></td>`;
+        row.innerHTML = html;
+        tbody.appendChild(row);
+    }
+
+    function removeRow(btn) {
+        const tbody = document.getElementById('stockInBody');
+        if (tbody.rows.length > 1) {
+            btn.closest('tr').remove();
+        }
+    }
+
+    // Handle drug search datalist selection - populate hidden drug_id field
+    document.addEventListener('input', function(e) {
+        if (e.target.name === 'drug_search') {
+            const row = e.target.closest('tr');
+            const hiddenInput = row.querySelector('input[name="drug_id"]');
+            const datalist = document.getElementById('drugs-list');
+            
+            if (hiddenInput && datalist) {
+                const inputValue = e.target.value;
+                // Find matching option in datalist by comparing the display value
+                for (const option of datalist.options) {
+                    if (option.value === inputValue) {
+                        // Get the drug ID from data-id attribute
+                        const drugId = option.getAttribute('data-id');
+                        if (drugId) {
+                            hiddenInput.value = drugId;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    // Pre-Stock-In Expiry Warning (delegated)
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('expiry-input') && e.target.value) {
+            // Debug: show what date was entered
+            console.log('Date input changed:', e.target.value);
+            
+            // Simple validation - just check if date is valid format
+            const dateRegex = /^\d{4}-\d{1,2}-\d{1,2}$/;
+            if (!dateRegex.test(e.target.value)) {
+                console.log('Invalid date format:', e.target.value);
+                return;
+            }
+            
+            // Parse the date parts
+            const parts = e.target.value.split('-');
+            const year = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10);
+            const day = parseInt(parts[2], 10);
+            
+            // Validate the date is reasonable
+            if (year < 2020 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+                console.log('Invalid date values:', year, month, day);
+                return;
+            }
+            
+            // Create dates at noon to avoid timezone issues
+            const expiryDate = new Date(year, month - 1, day, 12, 0, 0);
+            const today = new Date();
+            today.setHours(12, 0, 0, 0);
+            
+            // Calculate days difference
+            const diffTime = expiryDate.getTime() - today.getTime();
+            const daysUntilExpiry = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            
+            console.log('Today:', today.toISOString(), 'Expiry:', expiryDate.toISOString(), 'Days:', daysUntilExpiry);
+            
+            // Warning for near expiry (within 3 months = 90 days)
+            if (daysUntilExpiry >= 0 && daysUntilExpiry < 90) {
+                alert('⚠️ Warning: This batch will expire within 3 months!');
+            }
+            // Note: Removed the "past date" error - server will handle expired batches
+        }
+    });
+
+    // Multi-Line Stock In Form Submit
+    document.getElementById('multiStockInForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const storeId = '{{ store.id }}';
+        const rows = document.querySelectorAll('.stock-row');
+        let successCount = 0;
+        let errorCount = 0;
+        const alertDiv = document.getElementById('multiStockInAlert');
+        
+        for (const row of rows) {
+            // Get drug_id from hidden field or search input
+            const drugSearchInput = row.querySelector('input[name="drug_search"]');
+            const drugIdHidden = row.querySelector('input[name="drug_id"]');
+            
+            // Get drug ID - first check hidden field, then try to get from datalist
+            let drugId = drugIdHidden ? drugIdHidden.value : '';
+            if (!drugId && drugSearchInput) {
+                const searchValue = drugSearchInput.value;
+                const datalist = document.getElementById('drugs-list');
+                if (datalist && searchValue) {
+                    for (const option of datalist.options) {
+                        if (option.value === searchValue) {
+                            drugId = option.getAttribute('data-id');
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (!drugId) {
+                alert('Please select a valid drug from the list');
+                errorCount++;
+                continue;
+            }
+            
+            // Auto-generate batch number if not provided
+            let batchNo = row.querySelector('input[name="batch_no"]').value;
+            if (!batchNo || batchNo.trim() === '') {
+                // Generate shorter batch number: BN-{DATE}-{RANDOM}
+                const now = new Date();
+                const dateStr = now.toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD format
+                const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+                batchNo = `BN-${dateStr}-${random}`;
+            }
+            
+            const expiryDate = row.querySelector('input[name="expiry_date"]').value;
+            const qty = row.querySelector('input[name="qty"]').value;
+            const unitCost = row.querySelector('input[name="unit_cost"]')?.value;
+            const sellingPrice = row.querySelector('input[name="selling_price"]')?.value;
+            
+            const params = new URLSearchParams();
+            params.append('drug_id', drugId);
+            params.append('batch_no', batchNo);
+            params.append('expiry_date', expiryDate);
+            params.append('qty', qty);
+            if (unitCost) params.append('unit_cost', unitCost);
+            if (sellingPrice) params.append('selling_price', sellingPrice);
+            
+            try {
+                const r = await fetch('/api/v1/pharmacy/stores/' + storeId + '/stock-in?' + params, { method: 'POST', credentials: 'include' });
+                if (r.ok) {
+                    successCount++;
+                } else {
+                    errorCount++;
+                }
+            } catch (err) {
+                errorCount++;
+            }
+        }
+        
+        if (errorCount === 0) {
+            alertDiv.className = 'alert alert-success mt-2';
+            alertDiv.textContent = `Successfully stocked in ${successCount} item(s)!`;
+            alertDiv.style.display = 'block';
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            alertDiv.className = 'alert alert-warning mt-2';
+            alertDiv.textContent = `Stocked in ${successCount} item(s), ${errorCount} failed`;
+            alertDiv.style.display = 'block';
+        }
+    });
+
+    // Stock History Modal
+    $('#historyModal').on('show.bs.modal', function(event) {
+        console.log('Modal show event triggered');
+        const button = $(event.relatedTarget);
+        const batchId = button.data('batch-id');
+        console.log('Batch ID:', batchId);
+        
+        if (!batchId) {
+            alert('No batch ID found');
+            return;
+        }
+        
+        document.getElementById('historyBatchNo').textContent = button.data('batch-no');
+        document.getElementById('historyDrugName').textContent = button.data('drug-name');
+        
+        const tbody = document.getElementById('historyTableBody');
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center">Loading...</td></tr>';
+        
+        const url = '/api/v1/pharmacy/stores/{{ store.id }}/batches/' + batchId + '/history';
+        console.log('Fetching history from:', url);
+        
+        fetch(url, { credentials: 'include' })
+            .then(r => {
+                console.log('Response status:', r.status);
+                if (!r.ok) {
+                    throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+                }
+                return r.json();
+            })
+            .then(data => {
+                console.log('History data received:', data);
+                if (data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No history found for this batch</td></tr>';
+                } else {
+                    tbody.innerHTML = data.map(e => `
+                        <tr>
+                            <td>${e.date}</td>
+                            <td>${e.movement_type}</td>
+                            <td class="text-success">${e.qty_in > 0 ? '+' + e.qty_in : '-'}</td>
+                            <td class="text-danger">${e.qty_out > 0 ? '-' + e.qty_out : '-'}</td>
+                            <td>${e.reference || '-'}</td>
+                            <td>${e.note || '-'}</td>
+                        </tr>
+                    `).join('');
+                }
+            })
+            .catch(err => {
+                console.error('History fetch error:', err);
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error: ' + err.message + '</td></tr>';
+            });
+    });
+    
+    console.log('Batches page JavaScript loaded');
+    </script>
+{% endblock %}

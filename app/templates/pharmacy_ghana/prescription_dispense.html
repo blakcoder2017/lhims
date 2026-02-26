@@ -1,0 +1,432 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    {% if not prescription %}
+    <div class="content-wrapper">
+        <div class="alert alert-danger m-3">
+            <i class="fas fa-exclamation-triangle mr-2"></i>Prescription not found
+        </div>
+    </div>
+    {% else %}
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-prescription-bottle-medical mr-2"></i>Dispense Prescription</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_ghana_dashboard') }}">Pharmacy</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pending_prescriptions') }}">Pending Prescriptions</a></li>
+                            <li class="breadcrumb-item active">Dispense #{{ prescription.id }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Status Messages -->
+                {% if request.query_params.get('status') == 'dispensed' %}
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle mr-2"></i> Prescription has been dispensed successfully!
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('status') == 'quantity_set' %}
+                <div class="alert alert-success">
+                    <i class="fas fa-check-circle mr-2"></i> Quantity set to {{ request.query_params.get('qty') }}! Patient can now proceed to pay at Billing.
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>{{ request.query_params.get('error') }}
+                </div>
+                {% endif %}
+
+                {% if payment_notice %}
+                <div class="alert alert-{{ 'success' if payment_required and payment_paid else 'warning' }}">
+                    <i class="fas fa-info-circle mr-2"></i>{{ payment_notice }}
+                </div>
+                {% endif %}
+
+                <!-- Step 1: Set Quantity for Billing -->
+                <div class="card card-warning">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-calculator mr-2"></i>Step 1: Set Quantity for Billing</h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted mb-3">Enter the quantity to dispense. This creates the billing charge for the patient.</p>
+                        <form method="POST" action="/pharmacy/ghana/prescriptions/{{ prescription.id }}/set-quantity">
+                            <div class="form-group">
+                                <label>Quantity to Dispense</label>
+                                <input type="number" name="quantity" class="form-control" 
+                                       value="{{ prescription.quantity if prescription.quantity else 1 }}" min="1" required>
+                            </div>
+                            <button type="submit" class="btn btn-warning">
+                                <i class="fas fa-calculator mr-2"></i>Set Quantity & Create Bill
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <!-- Left Column: Prescription & Patient Info -->
+                    <div class="col-md-8">
+                        <!-- Patient Information -->
+                        <div class="card card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-user mr-2"></i>Patient Information</h3>
+                            </div>
+                            <div class="card-body">
+                                {% if patient %}
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <p><strong>Patient Name:</strong> {{ patient.first_name }} {{ patient.last_name }}</p>
+                                        <p><strong>Patient Number:</strong> {{ patient.patient_number or 'N/A' }}</p>
+                                        <p><strong>Age:</strong> {{ patient.age or 'N/A' }}</p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <p><strong>Gender:</strong> {{ patient.gender or 'N/A' }}</p>
+                                        <p><strong>Phone:</strong> {{ patient.phone or 'N/A' }}</p>
+                                        <p><strong>Address:</strong> {{ patient.address or 'N/A' }}</p>
+                                        <p><strong>Payment Mechanism:</strong> 
+                                            {% if patient.payment_mechanism %}{{ patient.payment_mechanism.value }}{% else %}CASH{% endif %}
+                                        </p>
+                                        {% if is_admitted %}
+                                        <p><span class="badge badge-info">IPD Patient (Payment at Discharge)</span></p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% else %}
+                                <div class="alert alert-warning">
+                                    <i class="fas fa-exclamation-triangle mr-2"></i>Patient information not available
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Prescription Details -->
+                        <div class="card card-info">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-prescription mr-2"></i>Prescription Details</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <tr>
+                                        <th style="width: 200px;">Medication</th>
+                                        <td>
+                                            <strong>{{ prescription.medication_name }}</strong>
+                                            {% if prescription.pharmacy_drug %}
+                                                <span class="badge badge-success ml-2">Formulary Drug</span>
+                                            {% else %}
+                                                <span class="badge badge-warning ml-2">Free Text</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <th>Dosage Form</th>
+                                        <td>
+                                            {% if prescription.dosage_form_name %}
+                                                {{ prescription.dosage_form_name }}
+                                            {% elif prescription.pharmacy_drug and prescription.pharmacy_drug.dosage_form %}
+                                                {{ prescription.pharmacy_drug.dosage_form.name }}
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <th>Strength</th>
+                                        <td>
+                                            {% if prescription.strength_value %}
+                                                {{ prescription.strength_value }} {{ prescription.strength_unit or '' }}
+                                            {% elif prescription.pharmacy_drug %}
+                                                {% if prescription.pharmacy_drug.strength_value %}
+                                                    {{ prescription.pharmacy_drug.strength_value }} {{ prescription.pharmacy_drug.strength_unit or '' }}
+                                                {% else %}
+                                                    N/A
+                                                {% endif %}
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <th>Dosage</th>
+                                        <td>{{ prescription.dosage }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Frequency</th>
+                                        <td>{{ prescription.frequency }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Duration</th>
+                                        <td>{{ prescription.duration }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Quantity</th>
+                                        <td>{{ prescription.quantity if prescription.quantity else 'As directed (pharmacy will decide)' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Instructions</th>
+                                        <td>{{ prescription.instructions or 'As directed' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Prescribed By</th>
+                                        <td>{{ prescription.prescribed_by.full_name if prescription.prescribed_by else 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Prescribed At</th>
+                                        <td>{{ prescription.prescribed_at.strftime('%Y-%m-%d %H:%M') if prescription.prescribed_at else 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Status</th>
+                                        <td>
+                                            {% if prescription.status and prescription.status.value %}
+                                            <span class="badge badge-{{ 
+                                                'success' if prescription.status.value == 'COMPLETED' else 
+                                                'warning' if prescription.status.value == 'PENDING' else 
+                                                'info' if prescription.status.value == 'IN_PROGRESS' else 
+                                                'secondary' 
+                                            }}">{{ prescription.status.value }}</span>
+                                            {% else %}
+                                            <span class="badge badge-secondary">UNKNOWN</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Drug Interaction Warnings -->
+                        {% if drug_interactions %}
+                        <div class="card card-danger">
+                            <div class="card-header bg-danger">
+                                <h3 class="card-title"><i class="fas fa-exclamation-triangle mr-2"></i>Drug Interactions Detected</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-sm table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Severity</th>
+                                            <th>Drug</th>
+                                            <th>Interaction</th>
+                                            <th>Recommendation</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for interaction in drug_interactions %}
+                                        <tr>
+                                            <td>
+                                                <span class="badge badge-{{ 
+                                                    'danger' if interaction.severity == 'MAJOR' else 
+                                                    'warning' if interaction.severity == 'MODERATE' else 
+                                                    'info' 
+                                                }}">{{ interaction.severity }}</span>
+                                            </td>
+                                            <td>{{ interaction.other_drug }}</td>
+                                            <td>{{ interaction.description }}</td>
+                                            <td>{{ interaction.recommendation or 'Monitor closely' }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Stock Availability -->
+                        {% if stock_check and stock_check.available is defined %}
+                        <div class="card {{ 'card-success' if stock_check.available >= (prescription.quantity or 1) else 'card-danger' }}">
+                            <div class="card-header {{ 'bg-success' if stock_check.available >= (prescription.quantity or 1) else 'bg-danger' }}">
+                                <h3 class="card-title"><i class="fas fa-boxes mr-2"></i>Stock Availability</h3>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>Required Quantity:</strong> {{ prescription.quantity or 1 }}</p>
+                                <p><strong>Available Quantity:</strong> {{ stock_check.available }}</p>
+                                <p><strong>Status:</strong> 
+                                    {% if stock_check.available >= (prescription.quantity or 1) %}
+                                        <span class="badge badge-success">In Stock</span>
+                                    {% else %}
+                                        <span class="badge badge-danger">Out of Stock</span>
+                                    {% endif %}
+                                </p>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Right Column: Dispensing Actions -->
+                    <div class="col-md-4">
+                        <!-- Dispensing Form -->
+                        <div class="card card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-dispensing mr-2"></i>Step 2: Dispense After Payment</h3>
+                            </div>
+                            <div class="card-body">
+                                {% if prescription.status and prescription.status.value == 'COMPLETED' %}
+                                    <div class="alert alert-success">
+                                        <i class="fas fa-check-circle mr-2"></i>This prescription has already been dispensed.
+                                    </div>
+                                {% elif prescription.status and prescription.status.value == 'CANCELLED' %}
+                                    <div class="alert alert-secondary">
+                                        <i class="fas fa-times-circle mr-2"></i>This prescription has been cancelled.
+                                    </div>
+                                {% else %}
+                                    <!-- Payment Check -->
+                                    {% if payment_required and not payment_paid %}
+                                        <div class="alert alert-warning">
+                                            <i class="fas fa-money-bill-wave mr-2"></i>
+                                            <strong>Payment Required!</strong><br>
+                                            Patient must pay at the Billing department before medication can be dispensed.
+                                        </div>
+                                        {% if unpaid_invoice %}
+                                        <p><strong>Invoice #:</strong> {{ unpaid_invoice.invoice_number }}</p>
+                                        <p><strong>Balance:</strong> GHS {{ unpaid_invoice.balance }}</p>
+                                        {% endif %}
+                                        <div class="alert alert-info">
+                                            <i class="fas fa-info-circle mr-2"></i>
+                                            <strong>Please direct patient to Billing to make payment.</strong><br>
+                                            <small>Pharmacy cannot process payments. Payment must be made at Billing counter.</small>
+                                        </div>
+                                    {% else %}
+                                        {% if payment_required and payment_paid %}
+                                        <div class="alert alert-success">
+                                            <i class="fas fa-check-circle mr-2"></i>
+                                            <strong>Payment Verified</strong><br>
+                                            Patient has paid. Ready to dispense.
+                                        </div>
+                                        {% endif %}
+                                        
+                                        {% if stock_check and stock_check.available >= (prescription.quantity or 1) %}
+                                            <form method="POST" action="{{ url_for('dispense_prescription_ghana', prescription_id=prescription.id) }}">
+                                                
+                                                <!-- Batch Selection (FEFO) -->
+                                                {% if fefo_batches %}
+                                                <div class="form-group">
+                                                    <label>Select Batch (FEFO - First Expired First Out)</label>
+                                                    <select name="batch_id" class="form-control" required>
+                                                        <option value="">Select Batch</option>
+                                                        {% for batch in fefo_batches %}
+                                                        <option value="{{ batch.id }}">
+                                                            Batch: {{ batch.batch_no }} | 
+                                                            Exp: {{ batch.expiry_date.strftime('%Y-%m') }} | 
+                                                            Avail: {{ batch.qty_on_hand }} | 
+                                                            Price: GHS {{ batch.selling_price or 0 }}
+                                                        </option>
+                                                        {% endfor %}
+                                                    </select>
+                                                    <small class="text-muted">System auto-selects oldest expiry first</small>
+                                                </div>
+                                                {% endif %}
+                                                
+                                                <!-- Quantity -->
+                                                <div class="form-group">
+                                                    <label>Quantity to Dispense</label>
+                                                    <input type="number" name="qty_dispensed" class="form-control" 
+                                                           value="{{ prescription.quantity or 1 }}" min="1" required>
+                                                </div>
+                                                
+                                                <!-- Selling Price Override -->
+                                                {% if can_edit_price %}
+                                                <div class="form-group">
+                                                    <label>Selling Price (per unit)</label>
+                                                    <input type="number" name="selling_price" class="form-control" 
+                                                           step="0.01" min="0" value="{{ default_price }}">
+                                                </div>
+                                                {% endif %}
+                                                
+                                                <!-- Instructions -->
+                                                <div class="form-group">
+                                                    <label>Dispensing Instructions</label>
+                                                    <textarea name="dispense_instructions" class="form-control" rows="2"
+                                                    placeholder="e.g., Take with food">{{ prescription.instructions }}</textarea>
+                                                </div>
+                                                
+                                                <button type="submit" class="btn btn-primary btn-block">
+                                                    <i class="fas fa-check mr-2"></i>Confirm Dispense
+                                                </button>
+                                            </form>
+                                        {% else %}
+                                            <div class="alert alert-danger">
+                                                <i class="fas fa-exclamation-circle mr-2"></i>
+                                                Medication is not available in stock.
+                                            </div>
+                                            <form method="POST" action="{{ url_for('cancel_prescription_ghana', prescription_id=prescription.id) }}">
+                                                <div class="form-group">
+                                                    <label>Cancellation Reason</label>
+                                                    <textarea name="reason" class="form-control" rows="2" 
+                                                    placeholder="Reason for cancellation" required></textarea>
+                                                </div>
+                                                <button type="submit" class="btn btn-danger btn-block">
+                                                    <i class="fas fa-times mr-2"></i>Cancel Prescription
+                                                </button>
+                                            </form>
+                                        {% endif %}
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Other Active Medications -->
+                        {% if other_active_prescriptions %}
+                        <div class="card card-secondary">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-pills mr-2"></i>Other Active Medications</h3>
+                            </div>
+                            <div class="card-body p-0">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Medication</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for other in other_active_prescriptions %}
+                                        <tr>
+                                            <td>{{ other.medication_name }}</td>
+                                            <td>
+                                                {% if other.status and other.status.value %}
+                                                <span class="badge badge-{{ 'success' if other.status.value == 'COMPLETED' else 'warning' }}">{{ other.status.value }}</span>
+                                                {% else %}
+                                                <span class="badge badge-secondary">UNKNOWN</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Print Options -->
+                        {% if prescription.status and prescription.status.value == 'COMPLETED' %}
+                        <div class="card card-info">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-print mr-2"></i>Print Options</h3>
+                            </div>
+                            <div class="card-body">
+                                <a href="{{ url_for('print_dispense_receipt', prescription_id=prescription.id) }}" 
+                                   class="btn btn-info btn-block" target="_blank">
+                                    <i class="fas fa-print mr-2"></i>Print Dispense Receipt
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    {% endif %}
+
+{% endblock %}

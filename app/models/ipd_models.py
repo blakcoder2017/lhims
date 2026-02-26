@@ -162,6 +162,15 @@ class Admission(Base):
     diagnosis = Column(Text, nullable=True)  # Diagnosis at admission
     notes = Column(Text, nullable=True)  # Additional notes
     
+    # Allergies - Critical for patient safety during medication administration
+    allergies = Column(Text, nullable=True)  # Known allergies (e.g., "Penicillin, Peanut")
+    
+    # Guardian/Attendant Information
+    guardian_name = Column(String(200), nullable=True)  # Name of guardian/attendant
+    guardian_phone = Column(String(20), nullable=True)  # Phone number of guardian/attendant
+    guardian_relationship = Column(String(50), nullable=True)  # Relationship to patient (e.g., "Father", "Spouse")
+    guardian_address = Column(Text, nullable=True)  # Address of guardian/attendant
+    
     # Discharge Information
     discharge_status = Column(postgresql.ENUM(DischargeStatus, values_callable=lambda x: [e.value for e in x], name='dischargestatus', create_type=False), nullable=True)  # Discharge status: normal, death, referral
     discharge_diagnosis = Column(Text, nullable=True)  # Final diagnosis at discharge
@@ -200,6 +209,9 @@ class Admission(Base):
     transferred_from_ward = relationship("Ward", foreign_keys=[transferred_from_ward_id])
     transferred_to_ward = relationship("Ward", foreign_keys=[transferred_to_ward_id])
     admission_notes = relationship("AdmissionNote", back_populates="admission", cascade="all, delete-orphan")
+    diagnoses = relationship("AdmissionDiagnosis", back_populates="admission", cascade="all, delete-orphan")
+    wound_care_records = relationship("WoundCare", back_populates="admission", cascade="all, delete-orphan")
+    procedure_records = relationship("Procedure", back_populates="admission", cascade="all, delete-orphan")
     drug_administrations = relationship("DrugAdministration", back_populates="admission")
     fluid_balance_entries = relationship("FluidBalance", back_populates="admission", cascade="all, delete-orphan")
     
@@ -280,4 +292,115 @@ class AdmissionNote(Base):
     
     def __repr__(self):
         return f"<AdmissionNote(id={self.id}, admission_id={self.admission_id}, created_by_id={self.created_by_id}, parent_note_id={self.parent_note_id}, created_at={self.created_at})>"
+
+
+class DiagnosisType(str, enum.Enum):
+    """Diagnosis type enumeration for tracking diagnosis progression"""
+    ADMISSION = "admission"  # Diagnosis at time of admission
+    WORKING = "working"      # Working diagnosis during stay
+    DISCHARGE = "discharge"  # Final diagnosis at discharge
+    COMPLICATING = "complicating"  # Complicating conditions
+
+
+class AdmissionDiagnosis(Base):
+    """
+    SQLAlchemy Model for tracking diagnoses throughout patient admission.
+    Allows structured tracking from admission diagnosis through working diagnosis to discharge diagnosis.
+    """
+    __tablename__ = "admission_diagnoses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=False)
+    diagnosed_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Doctor who diagnosed
+    
+    # Diagnosis Details
+    diagnosis = Column(Text, nullable=False)  # The diagnosis description
+    icd_code = Column(String(20), nullable=True)  # ICD-10 code (optional)
+    diagnosis_type = Column(Enum(DiagnosisType), nullable=False, default=DiagnosisType.ADMISSION)
+    
+    # Timestamps
+    diagnosed_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Soft deletion
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    admission = relationship("Admission", back_populates="diagnoses")
+    diagnosed_by = relationship("User", foreign_keys=[diagnosed_by_id])
+    
+    def __repr__(self):
+        return f"<AdmissionDiagnosis(id={self.id}, admission_id={self.admission_id}, diagnosis='{self.diagnosis[:30]}...', type={self.diagnosis_type.value})>"
+
+
+class WoundCareType(str, enum.Enum):
+    """Wound care type enumeration"""
+    SURGICAL = "surgical"
+    TRAUMATIC = "traumatic"
+    PRESSURE = "pressure"
+    DIABETIC = "diabetic"
+    BURNS = "burns"
+    OTHER = "other"
+
+
+class WoundCondition(str, enum.Enum):
+    """Wound condition enumeration"""
+    CLEAN = "clean"
+    INFECTED = "infected"
+    GRANULATING = "granulating"
+    NECROTIC = "necrotic"
+    HEALED = "healed"
+
+
+class WoundCare(Base):
+    """
+    SQLAlchemy Model for tracking wound care and dressing changes during admission.
+    """
+    __tablename__ = "wound_care"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    admission_id = Column(Integer, ForeignKey("admissions.id"), nullable=False)
+    performed_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Nurse who performed wound care
+    
+    # Wound Details
+    wound_location = Column(String(200), nullable=False)  # e.g., "Left leg", "Surgical site", "Back"
+    wound_type = Column(Enum(WoundCareType), nullable=False, default=WoundCareType.OTHER)
+    wound_description = Column(Text, nullable=True)  # Detailed description of wound
+    
+    # Care Details
+    dressing_date = Column(DateTime, server_default=func.now())
+    dressing_type = Column(String(100), nullable=True)  # e.g., "Sterile gauze", "Transparent dressing"
+    wound_condition = Column(Enum(WoundCondition), nullable=True)
+    
+    # Measurements
+    length_cm = Column(Numeric(5, 2), nullable=True)
+    width_cm = Column(Numeric(5, 2), nullable=True)
+    depth_cm = Column(Numeric(5, 2), nullable=True)
+    
+    # Exudate
+    exudate_type = Column(String(50), nullable=True)  # e.g., "Serous", "Sanguineous", "Purulent"
+    exudate_amount = Column(String(20), nullable=True)  # e.g., "Minimal", "Moderate", "Heavy"
+    
+    # Notes and Observations
+    notes = Column(Text, nullable=True)
+    next_dressing_date = Column(DateTime, nullable=True)  # Scheduled next dressing change
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Soft deletion
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    admission = relationship("Admission", back_populates="wound_care_records")
+    performed_by = relationship("User", foreign_keys=[performed_by_id])
+    
+    def __repr__(self):
+        return f"<WoundCare(id={self.id}, admission_id={self.admission_id}, location='{self.wound_location}', type={self.wound_type.value})>"
 

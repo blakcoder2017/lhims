@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
@@ -18,7 +18,6 @@ from app.schemas.inventory_schemas import (
 )
 
 router = APIRouter(tags=["Inventory"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 # Medication Routes

@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Numeric, Boolean
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import func
 from app.db.database import Base
 
@@ -14,6 +15,14 @@ class HospitalSettings(Base):
     hospital_website = Column(String(255), nullable=True)
     logo_path = Column(String(500), nullable=True)  # Path to logo file in static/uploads/logos/
     logo_url = Column(String(500), nullable=True)  # Full URL to logo
+    # Revisit/follow-up consultation discount: percentage of department consultation fee (e.g. 50 = 50%)
+    revisit_follow_up_percentage = Column(Numeric(5, 2), nullable=True)
+    # Insurance activation settings - enable/disable NHIS and Private Insurance
+    nhis_enabled = Column(Boolean, nullable=True, default=True)
+    private_insurance_enabled = Column(Boolean, nullable=True, default=True)
+    # Charge Types configuration - JSON list of charge type values
+    # Default charge types will be used if this is null
+    charge_types_config = Column(postgresql.JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <div class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1 class="m-0 text-dark">Refund Requests</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Home</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('billing_dashboard') }}">Billing</a></li>
+                        <li class="breadcrumb-item active">Refunds</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <section class="content">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">All Refund Requests</h3>
+                            <div class="card-tools">
+                                <div class="input-group input-group-sm" style="width: 200px;">
+                                    <select class="form-control" id="statusFilter" onchange="filterByStatus()">
+                                        <option value="">All Status</option>
+                                        <option value="pending">Pending</option>
+                                        <option value="approved">Approved</option>
+                                        <option value="rejected">Rejected</option>
+                                        <option value="processed">Processed</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <table id="refundsTable" class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Refund #</th>
+                                        <th>Invoice #</th>
+                                        <th>Patient</th>
+                                        <th>Amount</th>
+                                        <th>Reason</th>
+                                        <th>Status</th>
+                                        <th>Request Date</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="refundsTableBody">
+                                    {% for refund in refunds %}
+                                    <tr>
+                                        <td>{{ refund.refund_number }}</td>
+                                        <td>{{ refund.invoice_id }}</td>
+                                        <td>{{ refund.patient_id }}</td>
+                                        <td>GHS {{ "%.2f"|format(refund.amount) }}</td>
+                                        <td>{{ refund.reason[:50] }}{% if refund.reason|length > 50 %}...{% endif %}</td>
+                                        <td>
+                                            {% if refund.status == 'pending' %}
+                                            <span class="badge badge-warning">Pending</span>
+                                            {% elif refund.status == 'approved' %}
+                                            <span class="badge badge-info">Approved</span>
+                                            {% elif refund.status == 'rejected' %}
+                                            <span class="badge badge-danger">Rejected</span>
+                                            {% elif refund.status == 'processed' %}
+                                            <span class="badge badge-success">Processed</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ refund.request_date.strftime('%Y-%m-%d %H:%M') if refund.request_date else '-' }}</td>
+                                        <td>
+                                            <button class="btn btn-sm btn-primary" onclick="viewRefund({{ refund.id }})">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                            {% if refund.status == 'pending' %}
+                                            <button class="btn btn-sm btn-success" onclick="approveRefund({{ refund.id }})">
+                                                <i class="fas fa-check"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-danger" onclick="rejectRefund({{ refund.id }})">
+                                                <i class="fas fa-times"></i>
+                                            </button>
+                                            {% elif refund.status == 'approved' %}
+                                            <button class="btn btn-sm btn-info" onclick="processRefund({{ refund.id }})">
+                                                <i class="fas fa-money-bill-wave"></i>
+                                            </button>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- View Refund Modal -->
+<div class="modal fade" id="viewRefundModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title">Refund Details</h4>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+            <div class="modal-body" id="refundDetails">
+                <!-- Details will be loaded here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Approve Refund Modal -->
+<div class="modal fade" id="approveRefundModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form id="approveRefundForm">
+                <div class="modal-header">
+                    <h4 class="modal-title">Approve Refund</h4>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="refund_id" id="approveRefundId">
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea name="notes" class="form-control" rows="3" placeholder="Optional approval notes..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">Approve</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Refund Modal -->
+<div class="modal fade" id="rejectRefundModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form id="rejectRefundForm">
+                <div class="modal-header">
+                    <h4 class="modal-title">Reject Refund</h4>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="refund_id" id="rejectRefundId">
+                    <div class="form-group">
+                        <label>Rejection Reason *</label>
+                        <textarea name="rejection_reason" class="form-control" rows="3" required placeholder="Reason for rejection..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea name="notes" class="form-control" rows="2" placeholder="Optional notes..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Reject</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Process Refund Modal -->
+<div class="modal fade" id="processRefundModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form id="processRefundForm">
+                <div class="modal-header">
+                    <h4 class="modal-title">Process Refund</h4>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="refund_id" id="processRefundId">
+                    <div class="form-group">
+                        <label>Refund Method *</label>
+                        <select name="refund_method" class="form-control" required>
+                            <option value="">Select Method</option>
+                            <option value="cash">Cash</option>
+                            <option value="mobile_money">Mobile Money</option>
+                            <option value="bank_transfer">Bank Transfer</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Transaction Reference</label>
+                        <input type="text" name="transaction_reference" class="form-control" placeholder="External transaction reference">
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea name="notes" class="form-control" rows="2" placeholder="Optional notes..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Process Refund</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    $('#refundsTable').DataTable({
+        "responsive": true,
+        "lengthChange": false,
+        "autoWidth": false,
+    });
+
+    // Approve form
+    $('#approveRefundForm').on('submit', function(e) {
+        e.preventDefault();
+        const refundId = $('#approveRefundId').val();
+        const formData = $(this).serialize();
+        
+        fetch(`/refunds/${refundId}/approve`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.id) {
+                Swal.fire('Success', 'Refund approved successfully', 'success').then(() => location.reload());
+            } else {
+                Swal.fire('Error', data.detail || 'Failed to approve refund', 'error');
+            }
+        });
+    });
+
+    // Reject form
+    $('#rejectRefundForm').on('submit', function(e) {
+        e.preventDefault();
+        const refundId = $('#rejectRefundId').val();
+        const formData = $(this).serialize();
+        
+        fetch(`/refunds/${refundId}/reject`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.id) {
+                Swal.fire('Success', 'Refund rejected', 'success').then(() => location.reload());
+            } else {
+                Swal.fire('Error', data.detail || 'Failed to reject refund', 'error');
+            }
+        });
+    });
+
+    // Process form
+    $('#processRefundForm').on('submit', function(e) {
+        e.preventDefault();
+        const refundId = $('#processRefundId').val();
+        const formData = $(this).serialize();
+        
+        fetch(`/refunds/${refundId}/process`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.id) {
+                Swal.fire('Success', 'Refund processed successfully', 'success').then(() => location.reload());
+            } else {
+                Swal.fire('Error', data.detail || 'Failed to process refund', 'error');
+            }
+        });
+    });
+});
+
+function viewRefund(id) {
+    fetch(`/refunds/${id}`)
+    .then(res => res.json())
+    .then(data => {
+        const details = `
+            <table class="table table-bordered">
+                <tr><th>Refund Number</th><td>${data.refund_number}</td></tr>
+                <tr><th>Invoice ID</th><td>${data.invoice_id}</td></tr>
+                <tr><th>Payment ID</th><td>${data.payment_id}</td></tr>
+                <tr><th>Amount</th><td>GHS ${data.amount.toFixed(2)}</td></tr>
+                <tr><th>Reason</th><td>${data.reason}</td></tr>
+                <tr><th>Status</th><td>${data.status}</td></tr>
+                <tr><th>Request Date</th><td>${data.request_date || '-'}</td></tr>
+                ${data.approval_date ? `<tr><th>Approval Date</th><td>${data.approval_date}</td></tr>` : ''}
+                ${data.processed_date ? `<tr><th>Processed Date</th><td>${data.processed_date}</td></tr>` : ''}
+                ${data.rejection_reason ? `<tr><th>Rejection Reason</th><td>${data.rejection_reason}</td></tr>` : ''}
+                ${data.transaction_reference ? `<tr><th>Transaction Reference</th><td>${data.transaction_reference}</td></tr>` : ''}
+            </table>
+        `;
+        $('#refundDetails').html(details);
+        $('#viewRefundModal').modal('show');
+    });
+}
+
+function approveRefund(id) {
+    $('#approveRefundId').val(id);
+    $('#approveRefundModal').modal('show');
+}
+
+function rejectRefund(id) {
+    $('#rejectRefundId').val(id);
+    $('#rejectRefundModal').modal('show');
+}
+
+function processRefund(id) {
+    $('#processRefundId').val(id);
+    $('#processRefundModal').modal('show');
+}
+
+function filterByStatus() {
+    const status = $('#statusFilter').val();
+    window.location.href = `/billing/refunds?status=${status}`;
+}
+</script>
+{% endblock %}

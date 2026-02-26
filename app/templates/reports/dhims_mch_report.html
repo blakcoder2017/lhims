@@ -1,0 +1,544 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-baby-carriage mr-2"></i>DHIMS2 MCH Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">DHIMS2 MCH</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Filters -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Report Period</h3>
+                        <div class="card-tools">
+                            <button onclick="window.print()" class="btn btn-sm btn-info mr-2">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                            <a href="{{ url_for('dhims_mch_report') }}?start_date={{ start_date }}&end_date={{ end_date }}&format=pdf" class="btn btn-sm btn-danger mr-2">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </a>
+                            <a href="{{ url_for('dhims_mch_report') }}?start_date={{ start_date }}&end_date={{ end_date }}&format=excel" class="btn btn-sm btn-success">
+                                <i class="fas fa-file-excel"></i> Excel
+                            </a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('dhims_mch_report') }}">
+                            <div class="row">
+                                <div class="col-md-12 mb-3">
+                                    <label>Quick Filters</label>
+                                    <div class="btn-group w-100">
+                                        <a href="{{ url_for('dhims_mch_report') }}?period=this_month" class="btn {{ 'btn-primary' if period == 'this_month' else 'btn-outline-primary' }}">This Month</a>
+                                        <a href="{{ url_for('dhims_mch_report') }}?period=last_month" class="btn {{ 'btn-primary' if period == 'last_month' else 'btn-outline-primary' }}">Last Month</a>
+                                        <a href="{{ url_for('dhims_mch_report') }}?period=this_quarter" class="btn {{ 'btn-primary' if period == 'this_quarter' else 'btn-outline-primary' }}">This Quarter</a>
+                                        <a href="{{ url_for('dhims_mch_report') }}?period=this_year" class="btn {{ 'btn-primary' if period == 'this_year' else 'btn-outline-primary' }}">This Year</a>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search mr-1"></i> Generate Report
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- DHIMS2 Header -->
+                <div class="card card-dark">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-file-medical-alt mr-2"></i>
+                            GHANA HEALTH SERVICE - DHIMS2 MATERNAL & CHILD HEALTH REPORT
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <p><strong>Facility:</strong> {{ hospital_settings.name if hospital_settings else 'N/A' }}</p>
+                            </div>
+                            <div class="col-md-4">
+                                <p><strong>Period:</strong> {{ start_date }} to {{ end_date }}</p>
+                            </div>
+                            <div class="col-md-4">
+                                <p><strong>Report Date:</strong> {{ report_date.strftime('%Y-%m-%d') if report_date else 'N/A' }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ANC Section Header -->
+                <div class="card card-info mt-3">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-female mr-2"></i>
+                            ANTENATAL CARE (ANC)
+                        </h3>
+                    </div>
+                </div>
+
+                <!-- ANC Summary -->
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ total_anc_visits }}</h3>
+                                <p>Total ANC Visits</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-user-nurse"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-primary">
+                            <div class="inner">
+                                <h3>{{ unique_anc_patients }}</h3>
+                                <p>Unique ANC Patients</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ anc1_visits }}</h3>
+                                <p>ANC 1st Visit</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-1"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ anc4_visits }}</h3>
+                                <p>ANC 4th Visit</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-4"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ANC Visit Numbers (DHIMS2 Required) -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-outline card-info">
+                            <div class="card-header">
+                                <h3 class="card-title">ANC Visits by Visit Number (DHIMS2 Required)</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>ANC 1</th>
+                                            <th>ANC 2</th>
+                                            <th>ANC 3</th>
+                                            <th>ANC 4</th>
+                                            <th>ANC 5+</th>
+                                            <th>Total Visits</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td><strong>{{ anc1_visits }}</strong></td>
+                                            <td><strong>{{ anc2_visits }}</strong></td>
+                                            <td><strong>{{ anc3_visits }}</strong></td>
+                                            <td><strong>{{ anc4_visits }}</strong></td>
+                                            <td><strong>{{ anc5_plus_visits }}</strong></td>
+                                            <td><strong>{{ total_anc_visits }}</strong></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Delivery Section Header -->
+                <div class="card card-success mt-3">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <i class="fas fa-baby mr-2"></i>
+                            DELIVERY & BIRTHS
+                        </h3>
+                    </div>
+                </div>
+
+                <!-- Delivery Summary -->
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ total_births }}</h3>
+                                <p>Total Births</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-baby"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-primary">
+                            <div class="inner">
+                                <h3>{{ live_births }}</h3>
+                                <p>Live Births</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-heart"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-danger">
+                            <div class="inner">
+                                <h3>{{ stillbirths }}</h3>
+                                <p>Stillbirths</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-skull"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ cesarean_delivery }}</h3>
+                                <p>Cesarean Sections</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-procedures"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Birth Outcomes & Delivery Types -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card card-outline card-success">
+                            <div class="card-header">
+                                <h3 class="card-title">Birth Outcomes (DHIMS2 Required)</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Outcome</th>
+                                            <th>Count</th>
+                                            <th>Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set total_outcome = live_births + stillbirths %}
+                                        <tr>
+                                            <td>Live Births</td>
+                                            <td><strong>{{ live_births }}</strong></td>
+                                            <td>{{ "%.1f"|format((live_births / total_outcome * 100) if total_outcome > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr class="table-danger">
+                                            <td>Stillbirths</td>
+                                            <td><strong>{{ stillbirths }}</strong></td>
+                                            <td>{{ "%.1f"|format((stillbirths / total_outcome * 100) if total_outcome > 0 else 0) }}%</td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <th>Total</th>
+                                            <th>{{ total_outcome }}</th>
+                                            <th>100%</th>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card card-outline card-warning">
+                            <div class="card-header">
+                                <h3 class="card-title">Delivery Types (DHIMS2 Required)</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Type</th>
+                                            <th>Count</th>
+                                            <th>Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set total_delivery = vaginal_delivery + cesarean_delivery + assisted_delivery %}
+                                        <tr>
+                                            <td>Vaginal Delivery</td>
+                                            <td><strong>{{ vaginal_delivery }}</strong></td>
+                                            <td>{{ "%.1f"|format((vaginal_delivery / total_delivery * 100) if total_delivery > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr class="table-warning">
+                                            <td>Cesarean Section</td>
+                                            <td><strong>{{ cesarean_delivery }}</strong></td>
+                                            <td>{{ "%.1f"|format((cesarean_delivery / total_delivery * 100) if total_delivery > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Assisted Delivery</td>
+                                            <td><strong>{{ assisted_delivery }}</strong></td>
+                                            <td>{{ "%.1f"|format((assisted_delivery / total_delivery * 100) if total_delivery > 0 else 0) }}%</td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <th>Total</th>
+                                            <th>{{ total_delivery }}</th>
+                                            <th>100%</th>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Birth Weight (DHIMS2 Required) -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-outline card-danger">
+                            <div class="card-header">
+                                <h3 class="card-title">Birth Weight (DHIMS2 Required)</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Category</th>
+                                            <th>Count</th>
+                                            <th>Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set total_weight = very_low_birth_weight + low_birth_weight + normal_birth_weight + unknown_weight %}
+                                        <tr class="table-danger">
+                                            <td>Very Low Birth Weight (<1.5kg)</td>
+                                            <td><strong>{{ very_low_birth_weight }}</strong></td>
+                                            <td>{{ "%.1f"|format((very_low_birth_weight / total_weight * 100) if total_weight > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr class="table-warning">
+                                            <td>Low Birth Weight (<2.5kg)</td>
+                                            <td><strong>{{ low_birth_weight }}</strong></td>
+                                            <td>{{ "%.1f"|format((low_birth_weight / total_weight * 100) if total_weight > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr class="table-success">
+                                            <td>Normal Birth Weight (≥2.5kg)</td>
+                                            <td><strong>{{ normal_birth_weight }}</strong></td>
+                                            <td>{{ "%.1f"|format((normal_birth_weight / total_weight * 100) if total_weight > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Unknown Weight</td>
+                                            <td><strong>{{ unknown_weight }}</strong></td>
+                                            <td>{{ "%.1f"|format((unknown_weight / total_weight * 100) if total_weight > 0 else 0) }}%</td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <th>Total</th>
+                                            <th>{{ total_weight }}</th>
+                                            <th>100%</th>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Newborn Care -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card card-outline card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title">Newborn Care (DHIMS2)</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Intervention</th>
+                                            <th>Count</th>
+                                            <th>Coverage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set total = total_births if total_births > 0 else 1 %}
+                                        <tr>
+                                            <td>BCG Vaccination</td>
+                                            <td><strong>{{ bcg_vaccinated }}</strong></td>
+                                            <td>{{ "%.1f"|format((bcg_vaccinated / total * 100)) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Polio Vaccination</td>
+                                            <td><strong>{{ polio_vaccinated }}</strong></td>
+                                            <td>{{ "%.1f"|format((polio_vaccinated / total * 100)) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Vitamin K Given</td>
+                                            <td><strong>{{ vitamin_k_given }}</strong></td>
+                                            <td>{{ "%.1f"|format((vitamin_k_given / total * 100)) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Skin-to-Skin Contact</td>
+                                            <td><strong>{{ skin_to_skin }}</strong></td>
+                                            <td>{{ "%.1f"|format((skin_to_skin / total * 100)) }}%</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card card-outline card-info">
+                            <div class="card-header">
+                                <h3 class="card-title">Birth Attendant (DHIMS2 Required)</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Attendant</th>
+                                            <th>Count</th>
+                                            <th>Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set total_attendant = births_by_doctor + births_by_midwife + births_by_nurse + births_by_tba %}
+                                        <tr>
+                                            <td>Doctor</td>
+                                            <td><strong>{{ births_by_doctor }}</strong></td>
+                                            <td>{{ "%.1f"|format((births_by_doctor / total_attendant * 100) if total_attendant > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Midwife</td>
+                                            <td><strong>{{ births_by_midwife }}</strong></td>
+                                            <td>{{ "%.1f"|format((births_by_midwife / total_attendant * 100) if total_attendant > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Nurse</td>
+                                            <td><strong>{{ births_by_nurse }}</strong></td>
+                                            <td>{{ "%.1f"|format((births_by_nurse / total_attendant * 100) if total_attendant > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr>
+                                            <td>TBA</td>
+                                            <td><strong>{{ births_by_tba }}</strong></td>
+                                            <td>{{ "%.1f"|format((births_by_tba / total_attendant * 100) if total_attendant > 0 else 0) }}%</td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <th>Total</th>
+                                            <th>{{ total_attendant }}</th>
+                                            <th>100%</th>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gestational Age -->
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card card-outline card-secondary">
+                            <div class="card-header">
+                                <h3 class="card-title">Gestational Age</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Category</th>
+                                            <th>Count</th>
+                                            <th>Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set total_ga = preterm_births + term_births %}
+                                        <tr class="table-warning">
+                                            <td>Preterm (<37 weeks)</td>
+                                            <td><strong>{{ preterm_births }}</strong></td>
+                                            <td>{{ "%.1f"|format((preterm_births / total_ga * 100) if total_ga > 0 else 0) }}%</td>
+                                        </tr>
+                                        <tr class="table-success">
+                                            <td>Term (≥37 weeks)</td>
+                                            <td><strong>{{ term_births }}</strong></td>
+                                            <td>{{ "%.1f"|format((term_births / total_ga * 100) if total_ga > 0 else 0) }}%</td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <th>Total</th>
+                                            <th>{{ total_ga }}</th>
+                                            <th>100%</th>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notes Section -->
+                <div class="card card-secondary mt-3">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Report Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Report Period:</strong> {{ start_date }} to {{ end_date }}</p>
+                        <p><strong>Generated:</strong> {{ report_date.strftime('%Y-%m-%d %H:%M:%S') if report_date else 'N/A' }}</p>
+                        <p><strong>Generated By:</strong> {{ current_user.full_name or current_user.username }}</p>
+                        <p><strong>Facility:</strong> {{ hospital_settings.name if hospital_settings else 'N/A' }}</p>
+                        <hr>
+                        <p class="text-muted"><small><i class="fas fa-file-medical-alt"></i> This report follows Ghana Health Service DHIMS2 Maternal & Child Health reporting standards. Data extracted from MedFlow for the reporting period.</small></p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

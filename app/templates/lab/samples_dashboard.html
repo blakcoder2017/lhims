@@ -66,8 +66,14 @@
                                     {% for sample in samples %}
                                     <tr>
                                         <td><strong>{{ sample.barcode }}</strong></td>
+                                    {% if sample.lab_order and sample.lab_order.encounter and sample.lab_order.encounter.patient %}
                                         <td>{{ sample.lab_order.encounter.patient.first_name }} {{ sample.lab_order.encounter.patient.last_name }}</td>
-                                        <td>{{ sample.lab_order.test_name }}</td>
+                                    {% elif sample.lab_order %}
+                                        <td>{{ sample.lab_order.patient_name|default('Walk-in/N/A') }}</td>
+                                    {% else %}
+                                        <td>N/A</td>
+                                    {% endif %}
+                                        <td>{{ sample.lab_order.test_name if sample.lab_order else 'N/A' }}</td>
                                         <td>{{ sample.sample_type or 'N/A' }}</td>
                                         <td>
                                             <span class="badge badge-{{ 'success' if sample.status.value == 'completed' else 'warning' if sample.status.value == 'processing' else 'info' if sample.status.value == 'received' else 'secondary' }}">

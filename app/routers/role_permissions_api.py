@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -11,7 +11,6 @@ from app.models.permission_models import Permission
 from app.crud import permission_crud
 
 router = APIRouter(tags=["Role Permissions"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/admin/roles/permissions", name="role_permissions_management")

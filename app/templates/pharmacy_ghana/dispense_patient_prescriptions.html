@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-prescription-bottle-medical mr-2"></i>Dispense All Prescriptions</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_ghana_dashboard') }}">Pharmacy</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pending_prescriptions') }}">Prescriptions</a></li>
+                            <li class="breadcrumb-item active">Dispense All</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Patient Info -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title">Patient Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <strong>Patient Name:</strong><br>
+                                {{ patient.first_name }} {{ patient.last_name }}
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Patient ID:</strong><br>
+                                {{ patient.id }}
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Payment Status:</strong><br>
+                                <span class="badge badge-{{ 'success' if payment_notice == 'No Payment Required' else 'warning' }}">
+                                    {{ payment_notice }}
+                                </span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Admission Status:</strong><br>
+                                {% if is_admitted %}
+                                    <span class="badge badge-info">IPD Patient</span>
+                                {% else %}
+                                    <span class="badge badge-secondary">OPD Patient</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Drug Interactions Warning -->
+                {% if drug_interactions %}
+                <div class="card card-warning">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-exclamation-triangle mr-2"></i>Drug Interactions Detected</h3>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-bordered table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Severity</th>
+                                    <th>Drug A</th>
+                                    <th>Drug B</th>
+                                    <th>Description</th>
+                                    <th>Recommendation</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for interaction in drug_interactions %}
+                                <tr>
+                                    <td>
+                                        <span class="badge badge-{{ 
+                                            'danger' if interaction.severity == 'CONTRAINDICATED' else 
+                                            'warning' if interaction.severity == 'MAJOR' else 
+                                            'info' if interaction.severity == 'MODERATE' else 'secondary'
+                                        }}">{{ interaction.severity }}</span>
+                                    </td>
+                                    <td>{{ interaction.drug_a }}</td>
+                                    <td>{{ interaction.drug_b }}</td>
+                                    <td>{{ interaction.description }}</td>
+                                    <td>{{ interaction.recommendation }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Prescriptions List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Pending Prescriptions ({{ prescriptions_with_stock|length }})</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('create_dispense_for_patient', patient_id=patient.id) }}">
+                            {% if encounter_id %}
+                            <input type="hidden" name="encounter_id" value="{{ encounter_id }}">
+                            {% endif %}
+                            
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-sm btn-secondary" id="selectAllBtn" onclick="toggleAll()">
+                                    <i class="fas fa-check-square mr-1"></i> Select All
+                                </button>
+                                <button type="button" class="btn btn-sm btn-danger" id="deselectAllBtn" onclick="deselectAll()">
+                                    <i class="fas fa-square mr-1"></i> Deselect All
+                                </button>
+                            </div>
+                            
+                            <table id="prescriptionsTable" class="table table-bordered table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Select</th>
+                                        <th>Medication</th>
+                                        <th>Dosage</th>
+                                        <th>Frequency</th>
+                                        <th>Quantity</th>
+                                        <th>Stock Available</th>
+                                        <th>Unit Price</th>
+                                        <th>Prescribed By</th>
+                                        <th>Prescribed At</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in prescriptions_with_stock %}
+                                    <tr>
+                                        <td class="text-center">
+                                            <input type="checkbox" name="prescription_ids" value="{{ item.prescription.id }}" checked class="prescription-checkbox">
+                                        </td>
+                                        <td>
+                                            <strong>{{ item.prescription.pharmacy_drug.generic_name }}</strong>
+                                            {% if item.prescription.pharmacy_drug.brand_name %}
+                                            <br><small class="text-muted">{{ item.prescription.pharmacy_drug.brand_name }}</small>
+                                            {% endif %}
+                                            {% if item.prescription.pharmacy_drug.is_controlled %}
+                                            <br><span class="badge badge-danger">Controlled</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ item.prescription.dosage or 'As directed' }}</td>
+                                        <td>{{ item.prescription.frequency or 'N/A' }}</td>
+                                        <td>
+                                            <input type="number" name="qty_{{ item.prescription.id }}" 
+                                                   value="{{ item.prescription.quantity or 1 }}" 
+                                                   min="1" class="form-control form-control-sm" 
+                                                   style="width: 80px;">
+                                        </td>
+                                        <td>
+                                            {% if item.stock_check.available > 0 %}
+                                            <span class="text-success">{{ item.stock_check.available }}</span>
+                                            {% else %}
+                                            <span class="text-danger">Out of Stock</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>GHS {{ item.default_price }}</td>
+                                        <td>{{ item.prescription.prescribed_by.full_name if item.prescription.prescribed_by else 'N/A' }}</td>
+                                        <td>{{ item.prescription.prescribed_at.strftime('%Y-%m-%d %H:%M') if item.prescription.prescribed_at else 'N/A' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            
+                            <div class="mt-3">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    <i class="fas fa-dispensing mr-2"></i>Create Dispense for All Selected
+                                </button>
+                                <a href="{{ url_for('pending_prescriptions') }}" class="btn btn-secondary btn-lg ml-2">
+                                    Cancel
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(function () {
+        $("#prescriptionsTable").DataTable({
+            "responsive": true,
+            "lengthChange": false,
+            "autoWidth": false,
+            "buttons": ["copy", "csv", "excel", "pdf", "print"],
+            "order": [[8, "desc"]]
+        }).buttons().container().appendTo('#prescriptionsTable_wrapper .col-md-6:eq(0)');
+    });
+    
+    function toggleAll() {
+        $('.prescription-checkbox').prop('checked', true);
+    }
+    
+    function deselectAll() {
+        $('.prescription-checkbox').prop('checked', false);
+    }
+</script>
+{% endblock %}

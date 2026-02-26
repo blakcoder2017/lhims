@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
@@ -12,7 +12,6 @@ from app.crud import inventory_crud
 from app.schemas.inventory_schemas import FormularyRuleCreate, DrugInteractionCreate
 
 router = APIRouter(tags=["Formulary"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/pharmacy/formulary", name="formulary_dashboard")

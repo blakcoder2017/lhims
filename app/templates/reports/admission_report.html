@@ -45,7 +45,7 @@
                         <div class="row">
                             <div class="col-md-3"><strong>Patient Name:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
                             <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
-                            <div class="col-md-3"><strong>Date of Birth:</strong> {{ patient.date_of_birth }}</div>
+                            <div class="col-md-3"><strong>Date of Birth:</strong> {{ patient.date_of_birth }} (Age: {{ patient.date_of_birth | age }} years)</div>
                             <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
                         </div>
                         <div class="row mt-2">
@@ -84,6 +84,11 @@
                         {% if admission.diagnosis %}
                         <div class="row mt-2">
                             <div class="col-md-12"><strong>Diagnosis:</strong> {{ admission.diagnosis }}</div>
+                        </div>
+                        {% endif %}
+                        {% if final_diagnosis %}
+                        <div class="row mt-2">
+                            <div class="col-md-12"><strong>Final Diagnosis:</strong> {{ final_diagnosis }}</div>
                         </div>
                         {% endif %}
                     </div>
@@ -140,32 +145,85 @@
                         <h3 class="card-title"><i class="fas fa-vial mr-1"></i> Laboratory Tests ({{ lab_orders|length }})</h3>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-bordered table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Test Name</th>
-                                        <th>Ordered Date</th>
-                                        <th>Status</th>
-                                        <th>Result</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for lab in lab_orders %}
-                                    <tr>
-                                        <td><strong>{{ lab.test_name }}</strong></td>
-                                        <td>{{ lab.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                                        <td>
-                                            <span class="badge badge-{% if lab.status.value == 'completed' %}success{% elif lab.status.value == 'pending' %}warning{% else %}info{% endif %}">
-                                                {{ lab.status.value.title() }}
-                                            </span>
-                                        </td>
-                                        <td>{{ lab.result[:100] + '...' if lab.result and lab.result|length > 100 else (lab.result or 'N/A') }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
+                        {% for lab in lab_orders %}
+                        <div class="border rounded p-3 mb-3">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <strong>{{ lab.test_name }}</strong>
+                                    {% if lab.test_code %}<span class="text-muted ml-1">({{ lab.test_code }})</span>{% endif %}
+                                </div>
+                                <div>
+                                    {% if lab.result_status %}
+                                    <span class="badge badge-{{ 'warning' if lab.result_status == 'DRAFT' else 'info' if lab.result_status == 'SUBMITTED' else 'primary' if lab.result_status == 'VERIFIED' else 'success' if lab.result_status in ['RELEASED', 'AUTHORIZED'] else 'secondary' }}">{{ lab.result_status }}</span>
+                                    {% endif %}
+                                    <span class="badge badge-{{ 'success' if lab.status.value == 'completed' else 'warning' if lab.status.value == 'pending' else 'info' }}">{{ lab.status.value.title() }}</span>
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mb-2">
+                                Ordered: {{ lab.ordered_at.strftime('%Y-%m-%d %H:%M') if lab.ordered_at else 'N/A' }}
+                                {% if lab.result_entered_by %} | Entered by: {{ lab.result_entered_by.full_name }}{% endif %}
+                                {% if lab.result_entered_at %} at {{ lab.result_entered_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+                            </small>
+                            
+                            {% if lab.result_json and lab._schema_json %}
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered mb-2">
+                                    <thead class="thead-light">
+                                        <tr>
+                                            <th>Parameter</th>
+                                            <th>Result</th>
+                                            <th>Flag</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set fields = lab._schema_json.fields or {} %}
+                                        {% for field_code, field_def in fields.items() %}
+                                        {% if lab.result_json.get(field_code) is not none and lab.result_json.get(field_code) != '' %}
+                                        {% set flag = lab.flags_json.get(field_code).flag if lab.flags_json and lab.flags_json.get(field_code) else none %}
+                                        <tr class="{% if flag == 'CRITICAL' %}table-danger{% elif flag in ['H', 'L'] %}table-warning{% endif %}">
+                                            <td><strong>{{ field_def.label }}</strong></td>
+                                            <td>
+                                                {{ lab.result_json.get(field_code) }}
+                                                {% if field_def.unit %} <small>{{ field_def.unit }}</small>{% endif %}
+                                            </td>
+                                            <td>
+                                                {% if flag == 'CRITICAL' %}
+                                                <span class="badge badge-danger">CRITICAL</span>
+                                                {% elif flag == 'H' %}
+                                                <span class="badge badge-warning">HIGH</span>
+                                                {% elif flag == 'L' %}
+                                                <span class="badge badge-warning">LOW</span>
+                                                {% else %}
+                                                <span class="badge badge-success">Normal</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endif %}
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {% if lab.result_json.get('comment') %}
+                            <div class="mt-2 p-2 bg-light border rounded">
+                                <strong>Comments:</strong> {{ lab.result_json.get('comment') }}
+                            </div>
+                            {% endif %}
+                            {% elif lab.result %}
+                            <div class="p-2 bg-light border rounded">
+                                <pre class="mb-0" style="white-space: pre-wrap;">{{ lab.result }}</pre>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">No result entered yet.</span>
+                            {% endif %}
+                            
+                            {% if lab.verified_by %}
+                            <small class="text-muted d-block mt-2">Verified by: {{ lab.verified_by.full_name }}{% if lab.verified_at %} at {{ lab.verified_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</small>
+                            {% endif %}
+                            {% if lab.authorized_by %}
+                            <small class="text-muted">Authorized by: {{ lab.authorized_by.full_name }}{% if lab.authorized_at %} at {{ lab.authorized_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</small>
+                            {% endif %}
                         </div>
+                        {% endfor %}
                     </div>
                 </div>
                 {% endif %}

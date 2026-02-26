@@ -89,7 +89,14 @@
                                     <tr>
                                         <td><strong>{{ patient.patient_number or 'N/A' }}</strong></td>
                                         <td>{{ patient.id }}</td>
-                                        <td><strong>{{ patient.first_name }} {{ patient.last_name }}</strong></td>
+                                        <td><strong>{{ patient.first_name }} {{ patient.last_name }}</strong>
+                                            {% set visit_count = patient_visit_counts.get(patient.id, 0) %}
+                                            {% if visit_count == 1 %}
+                                            <span class="badge badge-primary ml-1" title="First time patient">New</span>
+                                            {% elif visit_count > 1 %}
+                                            <span class="badge badge-success ml-1" title="Returning patient – revisit discount applies">Revisit</span>
+                                            {% endif %}
+                                        </td>
                                         <td>{{ patient.date_of_birth.strftime('%Y-%m-%d') }}</td>
                                         <td>{{ patient.gender }}</td>
                                         <td>{{ patient.national_id or 'N/A' }}</td>
@@ -104,6 +111,12 @@
                                                 <a href="{{ url_for('edit_patient_form', patient_id=patient.id) }}" 
                                                    class="btn btn-warning" title="Edit Patient Biodata & Payment">
                                                     <i class="fas fa-edit"></i> Edit Patient
+                                                </a>
+                                                {% endif %}
+                                                {% if user_role in ['Admin', 'Front Office', 'Finance'] and patient.payment_mechanism and patient.payment_mechanism.value == 'cash' %}
+                                                <a href="{{ url_for('collect_payment', patient_id=patient.id) }}" 
+                                                   class="btn btn-success" title="{% if patient.id in returning_patient_ids %}Collect payment (revisit discount applies) then triage{% else %}Collect payment then send to triage{% endif %}">
+                                                    <i class="fas fa-money-bill-wave"></i> Pay &amp; to Triage
                                                 </a>
                                                 {% endif %}
                                             </div>

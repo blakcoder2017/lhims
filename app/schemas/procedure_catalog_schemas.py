@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 from decimal import Decimal
+from app.schemas.department_schemas import Department
 
 
 class ProcedureCatalogBase(BaseModel):
@@ -15,6 +16,8 @@ class ProcedureCatalogBase(BaseModel):
     procedure_code: Optional[str] = Field(None, max_length=50)
     procedure_category: Optional[str] = Field(None, max_length=100)
     procedure_type: Optional[str] = Field(None, max_length=100)
+    charge_type: str = Field(..., max_length=50)  # Charge type for billing (required)
+    department_id: Optional[int] = Field(None)  # Department (kept for reference)
     description: Optional[str] = None
     indication: Optional[str] = None
     preparation_instructions: Optional[str] = None
@@ -57,6 +60,8 @@ class ProcedureCatalogUpdate(BaseModel):
     procedure_code: Optional[str] = Field(None, max_length=50)
     procedure_category: Optional[str] = Field(None, max_length=100)
     procedure_type: Optional[str] = Field(None, max_length=100)
+    charge_type: str = Field(..., max_length=50)  # Charge type for billing (required)
+    department_id: Optional[int] = Field(None)  # Department (kept for reference)
     description: Optional[str] = None
     indication: Optional[str] = None
     preparation_instructions: Optional[str] = None
@@ -97,6 +102,7 @@ class ProcedureCatalogRead(ProcedureCatalogBase):
     updated_at: Optional[datetime] = None
     created_by_id: Optional[int] = None
     updated_by_id: Optional[int] = None
+    department: Optional[Department] = None  # Nested department information
 
     class Config:
         from_attributes = True

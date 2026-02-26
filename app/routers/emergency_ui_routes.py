@@ -7,7 +7,7 @@ Uses OPDVisit (visit_type='emergency') and OPDQueue (visit_type=EMERGENCY or dep
 """
 from fastapi import APIRouter, Request, Depends, Query, Form
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from starlette import status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, or_
@@ -24,7 +24,6 @@ from app.models.appointment_models import OPDQueue, QueueStatus, VisitType
 from app.models.billing_models import Payment, PaymentStatus
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 EMERGENCY_VISIT_TYPE = "emergency"
 EMERGENCY_DEPARTMENT = "Emergency"
@@ -184,6 +183,10 @@ def emergency_visits_list(
         .options(joinedload(OPDVisit.patient))
         .filter(OPDVisit.is_active == True, OPDVisit.visit_type == EMERGENCY_VISIT_TYPE)
     )
+    if status_filter:
+        # Normalize to lowercase to match expected values
+        status_filter = status_filter.lower()
+    
     if status_filter == "active":
         query = query.filter(OPDVisit.status == OPDVisitStatus.ACTIVE.value)
     elif status_filter == "completed":

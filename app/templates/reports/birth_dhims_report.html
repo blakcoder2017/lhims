@@ -1,0 +1,481 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "includes/sidebar_navbar.html" %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1><i class="fas fa-file-medical-alt text-success mr-2"></i> Birth & Delivery Report (DHIMS2 Format)</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                        <li class="breadcrumb-item active">Birth & Delivery</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <section class="content">
+        <div class="container-fluid">
+            <!-- Date Filter -->
+            <div class="card card-primary">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Report Period</h3>
+                    <div class="card-tools">
+                        <button onclick="window.print()" class="btn btn-sm btn-info mr-2">
+                            <i class="fas fa-print"></i> Print
+                        </button>
+                        <a href="{{ url_for('birth_dhims_report') }}?start_date={{ start_date }}&end_date={{ end_date }}&format=csv" class="btn btn-sm btn-success mr-2" target="_blank">
+                            <i class="fas fa-file-csv"></i> CSV
+                        </a>
+                        <a href="{{ url_for('birth_dhims_report') }}?start_date={{ start_date }}&end_date={{ end_date }}&format=dhims2" class="btn btn-sm btn-warning mr-2" target="_blank">
+                            <i class="fas fa-file-code"></i> DHIMS2
+                        </a>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <form method="GET" action="{{ url_for('birth_dhims_report') }}" class="form-inline">
+                        <div class="form-group mr-3">
+                            <label for="period" class="mr-2">Quick Filters:</label>
+                            <div class="btn-group">
+                                <a href="{{ url_for('birth_dhims_report') }}?period=this_month" class="btn {{ 'btn-primary' if period == 'this_month' else 'btn-outline-primary' }}">This Month</a>
+                                <a href="{{ url_for('birth_dhims_report') }}?period=last_month" class="btn {{ 'btn-primary' if period == 'last_month' else 'btn-outline-primary' }}">Last Month</a>
+                                <a href="{{ url_for('birth_dhims_report') }}?period=this_quarter" class="btn {{ 'btn-primary' if period == 'this_quarter' else 'btn-outline-primary' }}">This Quarter</a>
+                                <a href="{{ url_for('birth_dhims_report') }}?period=this_year" class="btn {{ 'btn-primary' if period == 'this_year' else 'btn-outline-primary' }}">This Year</a>
+                            </div>
+                        </div>
+                        <div class="form-group mr-3">
+                            <label for="start_date" class="mr-2">From:</label>
+                            <input type="date" name="start_date" id="start_date" class="form-control" value="{{ start_date }}">
+                        </div>
+                        <div class="form-group mr-3">
+                            <label for="end_date" class="mr-2">To:</label>
+                            <input type="date" name="end_date" id="end_date" class="form-control" value="{{ end_date }}">
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-search"></i> Generate Report
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            {% if report_data %}
+            <!-- DHIMS2 Report Header -->
+            <div class="card card-dark">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <i class="fas fa-file-medical-alt mr-2"></i>
+                        GHANA HEALTH SERVICE - DHIMS2 BIRTH & DELIVERY REPORT
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <p><strong>Facility:</strong> {{ hospital_settings.name if hospital_settings else 'N/A' }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <p><strong>Period:</strong> {{ start_date }} to {{ end_date }}</p>
+                        </div>
+                        <div class="col-md-4">
+                            <p><strong>Report Date:</strong> {{ report_date.strftime('%Y-%m-%d') if report_date else 'N/A' }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Summary Statistics -->
+            <div class="card card-success">
+                <div class="card-header">
+                    <h3 class="card-title">Summary Statistics</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-success"><i class="fas fa-baby"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Total Deliveries</span>
+                                    <span class="info-box-number">{{ report_data.summary.total_deliveries }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-primary"><i class="fas fa-heart"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Live Births</span>
+                                    <span class="info-box-number">{{ report_data.summary.live_births }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-warning"><i class="fas fa-dizzy"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Stillbirths</span>
+                                    <span class="info-box-number">{{ report_data.summary.stillbirths }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-info"><i class="fas fa-procedures"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Caesarean Section</span>
+                                    <span class="info-box-number">{{ report_data.summary.caesarean_section }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Calculated Rates -->
+            <div class="card card-info">
+                <div class="card-header">
+                    <h3 class="card-title">Key Performance Indicators</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-success"><i class="fas fa-hospital"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Institutional Delivery Rate</span>
+                                    <span class="info-box-number">{{ report_data.summary.institutional_delivery_rate }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-warning"><i class="fas fa-weight"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Low Birth Weight Rate</span>
+                                    <span class="info-box-number">{{ report_data.summary.low_birth_weight_rate }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-primary"><i class="fas fa-user-nurse"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Skilled Attendant Rate</span>
+                                    <span class="info-box-number">{{ report_data.summary.skilled_birth_attendant_rate }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-info"><i class="fas fa-calendar-check"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">PNC Coverage Rate</span>
+                                    <span class="info-box-number">{{ report_data.summary.pnc_coverage_rate }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- DHIMS2 Format Table -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">DHIMS2 Data Elements</h3>
+                </div>
+                <div class="card-body table-responsive">
+                    <table class="table table-bordered table-striped">
+                        <thead>
+                            <tr class="bg-primary">
+                                <th>Data Element</th>
+                                <th>Category</th>
+                                <th>Value</th>
+                                <th>Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Delivery Outcomes -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Delivery Outcomes</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Live Births</td>
+                                <td>Outcome</td>
+                                <td>{{ report_data.summary.live_births }}</td>
+                                <td>Babies born alive</td>
+                            </tr>
+                            <tr>
+                                <td>Stillbirths</td>
+                                <td>Outcome</td>
+                                <td>{{ report_data.summary.stillbirths }}</td>
+                                <td>Foetal death before delivery</td>
+                            </tr>
+                            
+                            <!-- Delivery Types -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Delivery Types</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Normal Delivery</td>
+                                <td>Mode</td>
+                                <td>{{ report_data.summary.normal_delivery }}</td>
+                                <td>Vaginal delivery</td>
+                            </tr>
+                            <tr>
+                                <td>Vacuum Delivery</td>
+                                <td>Mode</td>
+                                <td>{{ report_data.summary.vacuum_delivery }}</td>
+                                <td>Assisted vacuum extraction</td>
+                            </tr>
+                            <tr>
+                                <td>Caesarean Section</td>
+                                <td>Mode</td>
+                                <td>{{ report_data.summary.caesarean_section }}</td>
+                                <td>Surgical delivery</td>
+                            </tr>
+                            
+                            <!-- Birth Weight -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Birth Weight</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Low Birth Weight (<2.5kg)</td>
+                                <td>Weight</td>
+                                <td>{{ report_data.summary.low_birth_weight }}</td>
+                                <td>Including VLBW (<1.5kg): {{ report_data.summary.very_low_birth_weight }}</td>
+                            </tr>
+                            
+                            <!-- Place of Delivery -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Place of Delivery</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Facility Delivery</td>
+                                <td>Place</td>
+                                <td>{{ report_data.summary.facility_delivery }}</td>
+                                <td>Hospital/Health Center</td>
+                            </tr>
+                            <tr>
+                                <td>Community Delivery</td>
+                                <td>Place</td>
+                                <td>{{ report_data.summary.community_delivery }}</td>
+                                <td>Home/Community</td>
+                            </tr>
+                            
+                            <!-- Birth Attendant -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Birth Attendant</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Doctor</td>
+                                <td>Attendant</td>
+                                <td>{{ report_data.summary.births_by_doctor }}</td>
+                                <td>Doctor assisted delivery</td>
+                            </tr>
+                            <tr>
+                                <td>Midwife</td>
+                                <td>Attendant</td>
+                                <td>{{ report_data.summary.births_by_midwife }}</td>
+                                <td>Midwife assisted delivery</td>
+                            </tr>
+                            <tr>
+                                <td>Nurse</td>
+                                <td>Attendant</td>
+                                <td>{{ report_data.summary.births_by_nurse }}</td>
+                                <td>Nurse assisted delivery</td>
+                            </tr>
+                            
+                            <!-- Interventions -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Interventions</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Blood Transfusion</td>
+                                <td>Intervention</td>
+                                <td>{{ report_data.summary.blood_transfusion }}</td>
+                                <td>Transfusion given during delivery</td>
+                            </tr>
+                            <tr>
+                                <td>Manual Removal of Placenta</td>
+                                <td>Intervention</td>
+                                <td>{{ report_data.summary.manual_removal_placenta }}</td>
+                                <td>Retained placenta requiring manual removal</td>
+                            </tr>
+                            
+                            <!-- Newborn Care -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Newborn Care</strong></td>
+                            </tr>
+                            <tr>
+                                <td>BCG Given</td>
+                                <td>Immunisation</td>
+                                <td>{{ report_data.summary.bcg_given }}</td>
+                                <td>BCG vaccine administered</td>
+                            </tr>
+                            <tr>
+                                <td>Vitamin K Given</td>
+                                <td>Immunisation</td>
+                                <td>{{ report_data.summary.vitamin_k_given }}</td>
+                                <td>Vitamin K administered</td>
+                            </tr>
+                            <tr>
+                                <td>Skin-to-Skin</td>
+                                <td>Care</td>
+                                <td>{{ report_data.summary.skin_to_skin }}</td>
+                                <td>Baby placed skin-to-skin</td>
+                            </tr>
+                            <tr>
+                                <td>Early Breastfeeding</td>
+                                <td>Care</td>
+                                <td>{{ report_data.summary.early_breastfeeding }}</td>
+                                <td>Breastfeeding within 1 hour</td>
+                            </tr>
+                            
+                            <!-- Gestational Age -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Gestational Age</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Preterm Births (<37 weeks)</td>
+                                <td>Gestation</td>
+                                <td>{{ report_data.summary.preterm_births }}</td>
+                                <td>Preterm deliveries</td>
+                            </tr>
+                            <tr>
+                                <td>Term Births (≥37 weeks)</td>
+                                <td>Gestation</td>
+                                <td>{{ report_data.summary.term_births }}</td>
+                                <td>Term deliveries</td>
+                            </tr>
+                            
+                            <!-- Special Categories -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Special Categories</strong></td>
+                            </tr>
+                            <tr>
+                                <td>Teenage Delivery (<18 years)</td>
+                                <td>Category</td>
+                                <td>{{ report_data.summary.teenage_delivery }}</td>
+                                <td>Deliveries by mothers under 18</td>
+                            </tr>
+                            <tr>
+                                <td>Multiple Births</td>
+                                <td>Category</td>
+                                <td>{{ report_data.summary.multiple_births }}</td>
+                                <td>Twin, triplet, etc.</td>
+                            </tr>
+                            <tr>
+                                <td>Male Babies</td>
+                                <td>Sex</td>
+                                <td>{{ report_data.summary.male_babies }}</td>
+                                <td>Male infants born</td>
+                            </tr>
+                            <tr>
+                                <td>Female Babies</td>
+                                <td>Sex</td>
+                                <td>{{ report_data.summary.female_babies }}</td>
+                                <td>Female infants born</td>
+                            </tr>
+                            
+                            <!-- PNC -->
+                            <tr class="bg-light">
+                                <td colspan="4"><strong>Postnatal Care</strong></td>
+                            </tr>
+                            <tr>
+                                <td>PNC 24-48 hours</td>
+                                <td>PNC Visit</td>
+                                <td>{{ report_data.summary.pnc_48hrs }}</td>
+                                <td>First PNC visit within 48 hours</td>
+                            </tr>
+                            <tr>
+                                <td>PNC 6th-7th day</td>
+                                <td>PNC Visit</td>
+                                <td>{{ report_data.summary.pnc_6days }}</td>
+                                <td>Second PNC visit</td>
+                            </tr>
+                            <tr>
+                                <td>PNC 6 weeks</td>
+                                <td>PNC Visit</td>
+                                <td>{{ report_data.summary.pnc_6weeks }}</td>
+                                <td>Third PNC visit</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Individual Records -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Individual Birth Records ({{ report_data.records|length }})</h3>
+                </div>
+                <div class="card-body table-responsive">
+                    <table class="table table-sm table-bordered table-striped datatable">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Mother Name</th>
+                                <th>Age</th>
+                                <th>Outcome</th>
+                                <th>Delivery Type</th>
+                                <th>Sex</th>
+                                <th>Weight (kg)</th>
+                                <th>Gest. Age</th>
+                                <th>Place</th>
+                                <th>BCG</th>
+                                <th>PNC</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for record in report_data.records %}
+                            <tr>
+                                <td>{{ record.birth_date }}</td>
+                                <td>{{ record.mother_name }}</td>
+                                <td>{{ record.mother_age if record.mother_age else '-' }}</td>
+                                <td>
+                                    <span class="badge badge-{% if record.birth_outcome == 'live' %}success{% else %}warning{% endif %}">
+                                        {{ record.birth_outcome|title }}
+                                    </span>
+                                </td>
+                                <td>{{ record.delivery_type|title if record.delivery_type else '-' }}</td>
+                                <td>{{ record.gender|title if record.gender else '-' }}</td>
+                                <td>{{ record.weight_kg if record.weight_kg else '-' }}</td>
+                                <td>{{ record.gestational_age if record.gestational_age else '-' }}</td>
+                                <td>{{ record.place_of_delivery }}</td>
+                                <td>{% if record.bcg_vaccine %}<i class="fas fa-check text-success"></i>{% else %}<i class="fas fa-times text-danger"></i>{% endif %}</td>
+                                <td>{% if record.pnc1_date %}<i class="fas fa-check text-success"></i>{% else %}<i class="fas fa-times text-danger"></i>{% endif %}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> Select a date range and click "Generate Report" to view birth statistics.
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+{% if report_data %}
+<script>
+$(function() {
+    $('.datatable').DataTable({
+        "responsive": true,
+        "autoWidth": false,
+        "pageLength": 25,
+        "ordering": true
+    });
+});
+</script>
+{% endif %}
+{% endblock %}

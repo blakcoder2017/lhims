@@ -6,13 +6,13 @@ Front desk can create and check-in walk-in orders.
 """
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Form, status
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional, List, Dict
 from datetime import datetime, date
 
 from app.db.database import get_db
 from app.core.deps import get_current_user, role_required
+from app.core.templates import templates
 from app.models.user_models import User
 from app.models.patient_models import Patient, PaymentMechanism
 from app.models.encounter_models import (
@@ -82,7 +82,6 @@ def ensure_patient(
     return patient_crud.create_patient(db, walk_in_data)
 
 router = APIRouter(tags=["Walk-in Orders"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/walk-in-orders", name="walk_in_orders_dashboard")
@@ -151,6 +150,16 @@ def walk_in_orders_dashboard(
     # Load medications from pharmacy inventory database instead of service pricing
     medications = inventory_crud.get_medications(db, skip=0, limit=500, search=None)
     
+    # Load procedure catalog for dropdown
+    from app.models.procedure_catalog_models import ProcedureCatalog
+    procedure_catalogs = db.query(ProcedureCatalog).filter(
+        ProcedureCatalog.is_active == True
+    ).order_by(ProcedureCatalog.procedure_name).all()
+    procedure_catalog_list = [
+        {"id": p.id, "name": p.procedure_name, "cash_price": float(p.cash_price) if p.cash_price else 0}
+        for p in procedure_catalogs
+    ]
+    
     def build_invoice_map(query_filter) -> Dict[int, Invoice]:
         charges = db.query(Charge).options(joinedload(Charge.invoice)).filter(*query_filter).all()
         invoice_map: Dict[int, Invoice] = {}
@@ -195,6 +204,7 @@ def walk_in_orders_dashboard(
         "lab_tests": lab_tests,
         "radiology_studies": radiology_studies,
         "procedures": procedures,
+        "procedure_catalogs": procedure_catalog_list,
         "medications": medications,  # Changed from pharmacy_items to medications from inventory
         "can_check_in_orders": can_check_in_orders,
         "can_create_lab_orders": can_create_lab_orders,
@@ -432,6 +442,7 @@ def create_walk_in_procedure(
     procedure_name: str = Form(...),
     procedure_code: Optional[str] = Form(None),
     procedure_type: str = Form(...),
+    procedure_catalog_id: Optional[int] = Form(None),
     description: Optional[str] = Form(None),
     indication: Optional[str] = Form(None),
     location: Optional[str] = Form(None),
@@ -450,6 +461,7 @@ def create_walk_in_procedure(
             ordered_by_id=current_user.id,
             procedure_name=procedure_name,
             procedure_code=procedure_code if procedure_code else None,
+            procedure_catalog_id=procedure_catalog_id,
             procedure_type=ProcedureType(procedure_type),
             description=description if description else None,
             indication=indication if indication else None,

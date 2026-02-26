@@ -121,6 +121,53 @@
                                           placeholder="Enter full hospital address">{% if settings %}{{ settings.hospital_address or '' }}{% endif %}</textarea>
                             </div>
 
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="revisit_follow_up_percentage">Revisit / Follow-up Consultation (%)</label>
+                                        <input type="number" step="0.01" min="0" max="100" class="form-control" id="revisit_follow_up_percentage" name="revisit_follow_up_percentage" 
+                                               value="{% if settings and settings.revisit_follow_up_percentage is not none %}{{ settings.revisit_follow_up_percentage }}{% endif %}" 
+                                               placeholder="e.g., 50">
+                                        <small class="form-text text-muted">Percentage of department consultation fee charged for returning patients (those with a completed encounter from a previous visit). E.g. 50 = half price. Leave empty for full price.</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Insurance Activation Settings -->
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <h5 class="text-primary"><i class="fas fa-shield-alt mr-1"></i> Insurance Configuration</h5>
+                                    <hr>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <div class="custom-control custom-switch custom-switch-on">
+                                            <input type="checkbox" class="custom-control-input" id="nhis_enabled" name="nhis_enabled" 
+                                                   {% if settings and settings.nhis_enabled != false %}checked{% endif %}>
+                                            <label class="custom-control-label" for="nhis_enabled">
+                                                <strong>Enable NHIS</strong>
+                                            </label>
+                                        </div>
+                                        <small class="form-text text-muted">Allow patients to pay using National Health Insurance Scheme (NHIS)</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <div class="custom-control custom-switch custom-switch-on">
+                                            <input type="checkbox" class="custom-control-input" id="private_insurance_enabled" name="private_insurance_enabled" 
+                                                   {% if settings and settings.private_insurance_enabled != false %}checked{% endif %}>
+                                            <label class="custom-control-label" for="private_insurance_enabled">
+                                                <strong>Enable Private Insurance</strong>
+                                            </label>
+                                        </div>
+                                        <small class="form-text text-muted">Allow patients to pay using private insurance providers</small>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="form-group">
                                 <button type="submit" class="btn btn-primary">
                                     <i class="fas fa-save mr-1"></i> Save Hospital Information
@@ -140,7 +187,7 @@
                         <div class="mb-3">
                             <label>Current Logo:</label>
                             <div class="mt-2">
-                                <img src="{{ settings.logo_url }}" alt="Hospital Logo" class="img-thumbnail" style="max-height: 150px; max-width: 300px;">
+                                <img src="{{ settings.logo_url|normalize_logo_url }}" alt="Hospital Logo" class="img-thumbnail" style="max-height: 150px; max-width: 300px;">
                             </div>
                         </div>
                         {% else %}

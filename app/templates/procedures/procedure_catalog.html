@@ -45,13 +45,24 @@
                     <div class="card-body">
                         <form method="GET" action="{{ url_for('procedure_catalog_dashboard') }}">
                             <div class="row">
-                                <div class="col-md-4">
+                                <div class="col-md-3">
                                     <div class="form-group">
                                         <label>Search</label>
                                         <input type="text" name="search" class="form-control" placeholder="Search by name or code..." value="{{ search or '' }}">
                                     </div>
                                 </div>
                                 <div class="col-md-3">
+                                    <div class="form-group">
+                                        <label>Department</label>
+                                        <select name="department_id" class="form-control">
+                                            <option value="">All Departments</option>
+                                            {% for dept in departments %}
+                                            <option value="{{ dept.id }}" {{ 'selected' if department_id_filter == dept.id else '' }}>{{ dept.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
                                     <div class="form-group">
                                         <label>Category</label>
                                         <select name="category" class="form-control">
@@ -62,7 +73,7 @@
                                         </select>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-md-2">
                                     <div class="form-group">
                                         <label>Procedure Type</label>
                                         <select name="procedure_type" class="form-control">
@@ -75,11 +86,26 @@
                                 </div>
                                 <div class="col-md-2">
                                     <div class="form-group">
-                                        <label>&nbsp;</label>
-                                        <button type="submit" class="btn btn-primary btn-block">
-                                            <i class="fas fa-search"></i> Search
-                                        </button>
+                                        <label>Charge Type</label>
+                                        <select name="charge_type" class="form-control">
+                                            <option value="">All Charge Types</option>
+                                            {% for ct in charge_types %}
+                                            <option value="{{ ct }}" {{ 'selected' if charge_type_filter == ct else '' }}>{{ ct|replace('_', ' ')|title }}</option>
+                                            {% endfor %}
+                                        </select>
                                     </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-search"></i> Search
+                                    </button>
+                                    {% if search or category or procedure_type_filter or charge_type_filter or department_id_filter %}
+                                    <a href="{{ url_for('procedure_catalog_dashboard') }}" class="btn btn-secondary">
+                                        <i class="fas fa-times"></i> Clear
+                                    </a>
+                                    {% endif %}
                                 </div>
                             </div>
                         </form>
@@ -182,7 +208,7 @@
                                     <ul class="pagination justify-content-center">
                                         {% if page > 1 %}
                                         <li class="page-item">
-                                            <a class="page-link" href="{{ url_for('procedure_catalog_dashboard', search=search, category=category, procedure_type=procedure_type_filter, page=page-1, per_page=per_page) }}">Previous</a>
+                                            <a class="page-link" href="/procedures/catalog?search={{ search or '' }}&category={{ category or '' }}&procedure_type={{ procedure_type_filter or '' }}&charge_type={{ charge_type_filter or '' }}&page={{ page-1 }}&per_page={{ per_page }}">Previous</a>
                                         </li>
                                         {% else %}
                                         <li class="page-item disabled">
@@ -197,7 +223,7 @@
                                             </li>
                                             {% elif p <= 3 or p > total_pages - 3 or (p >= page - 1 and p <= page + 1) %}
                                             <li class="page-item">
-                                                <a class="page-link" href="{{ url_for('procedure_catalog_dashboard', search=search, category=category, procedure_type=procedure_type_filter, page=p, per_page=per_page) }}">{{ p }}</a>
+                                                <a class="page-link" href="/procedures/catalog?search={{ search or '' }}&category={{ category or '' }}&procedure_type={{ procedure_type_filter or '' }}&charge_type={{ charge_type_filter or '' }}&page={{ p }}&per_page={{ per_page }}">{{ p }}</a>
                                             </li>
                                             {% elif p == 4 or p == total_pages - 3 %}
                                             <li class="page-item disabled">
@@ -208,7 +234,7 @@
                                         
                                         {% if page < total_pages %}
                                         <li class="page-item">
-                                            <a class="page-link" href="{{ url_for('procedure_catalog_dashboard', search=search, category=category, procedure_type=procedure_type_filter, page=page+1, per_page=per_page) }}">Next</a>
+                                            <a class="page-link" href="/procedures/catalog?search={{ search or '' }}&category={{ category or '' }}&procedure_type={{ procedure_type_filter or '' }}&charge_type={{ charge_type_filter or '' }}&page={{ page+1 }}&per_page={{ per_page }}">Next</a>
                                         </li>
                                         {% else %}
                                         <li class="page-item disabled">
@@ -228,7 +254,7 @@
                         {% else %}
                         <div class="alert alert-info">
                             <h5><i class="icon fas fa-info"></i> No Procedures Found</h5>
-                            {% if search or category or procedure_type_filter %}
+                            {% if search or category or procedure_type_filter or charge_type_filter %}
                                 No procedures found matching your search criteria. <a href="{{ url_for('procedure_catalog_dashboard') }}">Clear filters</a>
                             {% else %}
                                 No procedure types have been created yet. 

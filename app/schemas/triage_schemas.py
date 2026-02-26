@@ -36,6 +36,9 @@ class TriageVitalsBase(BaseModel):
     triage_level: Optional[str] = Field(None, description="Triage level: P1/Critical/Red, P2/Urgent/Yellow, P3/Routine/Green")
     triage_category: Optional[str] = Field(None, description="Triage category: Critical, Urgent, Routine")
     
+    # Nurse Notes
+    notes: Optional[str] = Field(None, description="Nurse observations/notes recorded during triage")
+    
     @model_validator(mode='after')
     def validate_blood_pressure(self):
         """Validate and auto-correct blood pressure values if they appear to be swapped."""

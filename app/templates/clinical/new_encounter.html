@@ -405,7 +405,7 @@
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-3"><strong>Name:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
-                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }} (Age: {{ patient.date_of_birth | age }} years)</div>
                             <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
                             <div class="col-md-3"><strong>Patient ID:</strong> {{ patient.id }}</div>
                         </div>
@@ -417,16 +417,51 @@
                             </div>
                         </div>
                         {% endif %}
-                        {% if active_opd_visit %}
-                        <div class="row mt-2">
-                            <div class="col-md-12">
-                                <div class="alert alert-info mb-0">
-                                    <i class="fas fa-clipboard-list mr-1"></i>
-                                    <strong>OPD Visit:</strong> {{ active_opd_visit.opd_number }} 
-                                    (Status: {{ active_opd_visit.status.value.title() }}, 
-                                    Payment: {{ active_opd_visit.payment_status.title() }})
-                                </div>
-                            </div>
+                    </div>
+                </div>
+
+                <!-- Recent Vitals -->
+                <div class="card card-success card-outline mb-3">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-heartbeat mr-1"></i> Vitals</h3>
+                    </div>
+                    <div class="card-body p-0">
+                        {% if recent_vitals %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm table-striped mb-0">
+                                <thead class="thead-light">
+                                    <tr>
+                                        <th>Date/Time</th>
+                                        <th>Temp (°C)</th>
+                                        <th>BP</th>
+                                        <th>Pulse</th>
+                                        <th>SpO2</th>
+                                        <th>Weight</th>
+                                        <th>Triage</th>
+                                        <th>Recorded by</th>
+                                        <th>Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for v in recent_vitals %}
+                                    <tr>
+                                        <td>{{ v.recorded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>{% if v.temperature %}{{ "%.1f"|format(v.temperature) }}°C{% else %}—{% endif %}</td>
+                                        <td>{% if v.systolic_bp and v.diastolic_bp %}{{ v.systolic_bp }}/{{ v.diastolic_bp }}{% elif v.blood_pressure %}{{ v.blood_pressure }}{% else %}—{% endif %}</td>
+                                        <td>{% if v.pulse_rate %}{{ v.pulse_rate }}{% else %}—{% endif %}</td>
+                                        <td>{% if v.oxygen_saturation %}{{ v.oxygen_saturation }}%{% else %}—{% endif %}</td>
+                                        <td>{% if v.weight %}{{ v.weight }} kg{% else %}—{% endif %}</td>
+                                        <td>{% if v.triage_level %}{{ v.triage_level }}{% else %}—{% endif %}</td>
+                                        <td>{{ v.recorded_by.full_name if v.recorded_by else '—' }}</td>
+                                        <td>{% if v.notes %}<span class="text-info" title="{{ v.notes }}"><i class="fas fa-sticky-note"></i> View</span>{% else %}—{% endif %}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="p-3 text-muted">
+                            <i class="fas fa-info-circle"></i> No vitals recorded yet.
                         </div>
                         {% endif %}
                     </div>
@@ -435,6 +470,9 @@
                 <!-- Clinical Encounter Form -->
                 <form method="POST" action="/api/v1/encounters/create" id="encounter-form">
                     <input type="hidden" name="patient_id" value="{{ patient.id }}">
+                    {% if queue_entry_id %}
+                    <input type="hidden" name="queue_entry_id" value="{{ queue_entry_id }}">
+                    {% endif %}
                     {% if appointment %}
                     <input type="hidden" name="appointment_id" value="{{ appointment.id if appointment else '' }}">
                     {% endif %}
@@ -991,6 +1029,71 @@
                     // Force set them
                     $hiddenSelect.val(selectedDiagnoses);
                 }
+            });
+            
+            // Auto-save functionality for clinical notes (localStorage for draft recovery)
+            const autoSaveFields = [
+                'chief_complaint', 'history_of_present_illness', 'past_medical_history',
+                'allergies', 'medications', 'physical_examination', 'assessment', 'plan'
+            ];
+            const DRAFT_KEY = 'lhims_encounter_draft_' + (new URLSearchParams(window.location.search).get('patient_id') || 'new');
+            let autoSaveTimeout = null;
+            const AUTO_SAVE_DELAY = 3000; // 3 seconds
+            const $autoSaveStatus = $('<div id="autosave-status" class="text-muted small mt-1"></div>');
+            $('#encounter-form').before($autoSaveStatus);
+            
+            // Load draft on page load
+            function loadDraft() {
+                const saved = localStorage.getItem(DRAFT_KEY);
+                if (saved) {
+                    try {
+                        const draft = JSON.parse(saved);
+                        autoSaveFields.forEach(field => {
+                            const $el = $(`#${field}`);
+                            if ($el.length && draft[field]) {
+                                $el.val(draft[field]);
+                            }
+                        });
+                        $autoSaveStatus.html('<i class="fas fa-undo text-info"></i> Draft restored from previous session');
+                    } catch (e) {
+                        console.warn('Failed to load draft:', e);
+                    }
+                }
+            }
+            loadDraft();
+            
+            // Save to localStorage
+            function performAutoSave() {
+                const formData = {};
+                autoSaveFields.forEach(field => {
+                    const $el = $(`#${field}`);
+                    if ($el.length) {
+                        formData[field] = $el.val();
+                    }
+                });
+                
+                // Only save if there's data
+                const hasData = Object.values(formData).some(v => v && v.trim().length > 0);
+                if (hasData) {
+                    localStorage.setItem(DRAFT_KEY, JSON.stringify(formData));
+                    $autoSaveStatus.html('<i class="fas fa-check-circle text-success"></i> Draft saved ' + new Date().toLocaleTimeString());
+                }
+            }
+            
+            autoSaveFields.forEach(field => {
+                const $el = $(`#${field}`);
+                if ($el.length) {
+                    $el.on('input', function() {
+                        if (autoSaveTimeout) clearTimeout(autoSaveTimeout);
+                        $autoSaveStatus.html('<i class="fas fa-sync fa-spin text-muted"></i> Saving...');
+                        autoSaveTimeout = setTimeout(performAutoSave, AUTO_SAVE_DELAY);
+                    });
+                }
+            });
+            
+            // Clear draft on successful form submission
+            $('#encounter-form').on('submit', function() {
+                localStorage.removeItem(DRAFT_KEY);
             });
         });
     </script>

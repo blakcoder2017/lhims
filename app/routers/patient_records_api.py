@@ -5,7 +5,7 @@ Routes for viewing patient medical records and searching patients.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, date
@@ -19,10 +19,20 @@ from app.models.patient_models import Patient, PaymentMechanism
 from app.models.encounter_models import Encounter
 from app.models.scheduled_appointment_models import Appointment, AppointmentStatus
 from app.models.triage_models import TriageVitals
-from app.crud import patient_crud, opd_crud
+from app.crud import patient_crud, opd_crud, antenatal_crud, birth_crud
 from app.schemas.opd_schemas import OPDVisitCreate
 from app.schemas.patient_schemas import PatientUpdate
-from app.models.opd_models import OPDVisitStatus
+from app.models.opd_models import OPDVisit, OPDVisitStatus
+
+
+def _get_payment_mechanisms(nhis_enabled: bool = True, private_insurance_enabled: bool = True) -> list:
+    """Helper function to get payment mechanisms based on insurance settings."""
+    mechanisms = ["cash", "self_pay"]
+    if nhis_enabled:
+        mechanisms.append("nhis")
+    if private_insurance_enabled:
+        mechanisms.append("private_insurance")
+    return mechanisms
 from fastapi import Form
 
 router = APIRouter(
@@ -30,7 +40,19 @@ router = APIRouter(
     tags=["Patient Records"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
+# Register the age filter
+from datetime import date
+def calculate_age(dob):
+    if not dob:
+        return None
+    if isinstance(dob, str):
+        dob = date.fromisoformat(dob)
+    today = date.today()
+    age = today.year - dob.year
+    if (today.month, today.day) < (dob.month, dob.day):
+        age -= 1
+    return age
+templates.env.filters["age"] = calculate_age
 
 
 @router.get("/patients/search", name="search_patients")
@@ -51,6 +73,12 @@ def search_patients_page(
     Searches by patient_number, name, phone_number, national_id, or patient ID.
     Accessible by: All clinical staff (Admin, Clinician, Front Office, Nurses, Lab Staff, Pharmacy Staff)
     """
+    # Get hospital settings for insurance configuration
+    from app.crud import hospital_settings_crud
+    hospital_settings = hospital_settings_crud.get_hospital_settings(db)
+    nhis_enabled = hospital_settings.nhis_enabled if hospital_settings else True
+    private_insurance_enabled = hospital_settings.private_insurance_enabled if hospital_settings else True
+    
     # Calculate skip
     skip = (page - 1) * per_page
     
@@ -68,6 +96,39 @@ def search_patients_page(
     
     # Calculate pagination info
     total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1
+
+    # Batch: which patients are returning (have OPD visits) - for revisit badge
+    # Count ALL OPD visits for the patient
+    returning_patient_ids = set()
+    patient_visit_counts = {}
+    if patients:
+        from app.models.opd_models import OPDVisit
+        from sqlalchemy import func
+        pids = [p.id for p in patients]
+        
+        # Get patients who have any OPD visit
+        visits_exist = (
+            db.query(OPDVisit.patient_id)
+            .filter(
+                OPDVisit.patient_id.in_(pids),
+                OPDVisit.is_active == True,
+            )
+            .distinct()
+            .all()
+        )
+        returning_patient_ids = {r[0] for r in visits_exist}
+        
+        # Count all OPD visits per patient
+        visit_counts_query = (
+            db.query(OPDVisit.patient_id, func.count(OPDVisit.id).label("cnt"))
+            .filter(
+                OPDVisit.patient_id.in_(pids),
+                OPDVisit.is_active == True,
+            )
+            .group_by(OPDVisit.patient_id)
+            .all()
+        )
+        patient_visit_counts = {r[0]: r[1] for r in visit_counts_query}
     
     context = {
         "request": request,
@@ -75,6 +136,8 @@ def search_patients_page(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "patients": patients,
+        "returning_patient_ids": returning_patient_ids,
+        "patient_visit_counts": patient_visit_counts if patients else {},
         "search_query": query or "",
         "page": page,
         "per_page": per_page,
@@ -85,7 +148,9 @@ def search_patients_page(
         "sort_by": sort_by,
         "sort_order": sort_order,
         "genders": ["Male", "Female", "Other"],
-        "payment_mechanisms": ["cash", "nhis", "private_insurance", "self_pay"]
+        "payment_mechanisms": _get_payment_mechanisms(nhis_enabled, private_insurance_enabled),
+        "nhis_enabled": nhis_enabled,
+        "private_insurance_enabled": private_insurance_enabled
     }
     
     return templates.TemplateResponse("clinical/patient_search.html", context)
@@ -125,12 +190,62 @@ def patients_list_page(
     # Calculate pagination info
     total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1
     
+    # Batch compute: which patients are in triage or doctor's queue (Start New Visit disabled)
+    from app.models.appointment_models import OPDQueue, QueueStatus
+    patient_ids = [p.id for p in patients] if patients else []
+    start_visit_disabled_ids = set()
+    returning_patient_ids = set()
+    patient_visit_counts = {}
+    if patient_ids:
+        in_queue = db.query(OPDQueue.patient_id).filter(
+            OPDQueue.patient_id.in_(patient_ids),
+            OPDQueue.is_active == True,
+            OPDQueue.status.in_([QueueStatus.WAITING.value, QueueStatus.IN_PROGRESS.value]),
+        ).distinct().all()
+        start_visit_disabled_ids = {r[0] for r in in_queue}
+        from app.models.encounter_models import Encounter, EncounterStatus
+        from app.models.billing_models import Charge, Invoice, InvoiceStatus, ChargeType
+        from sqlalchemy import func
+        
+        # Returning patient = has at least one paid consultation charge
+        # This determines whether to show the Revisit badge
+        revisit_visits = (
+            db.query(Invoice.patient_id)
+            .join(Charge, Charge.invoice_id == Invoice.id)
+            .filter(
+                Invoice.patient_id.in_(patient_ids),
+                Invoice.is_active == True,
+                Invoice.status == InvoiceStatus.PAID.value,
+                Charge.charge_type == ChargeType.CONSULTATION,
+            )
+            .distinct()
+            .all()
+        )
+        returning_patient_ids = {r[0] for r in revisit_visits}
+
+        # Visit count = total number of OPD visits for the patient (including all statuses)
+        # This counts ALL visits regardless of payment status or visit type
+        from app.models.opd_models import OPDVisit
+        visit_counts_query = (
+            db.query(OPDVisit.patient_id, func.count(OPDVisit.id).label("cnt"))
+            .filter(
+                OPDVisit.patient_id.in_(patient_ids),
+                OPDVisit.is_active == True,
+            )
+            .group_by(OPDVisit.patient_id)
+            .all()
+        )
+        patient_visit_counts = {r[0]: r[1] for r in visit_counts_query}
+
     context = {
         "request": request,
         "title": "Patients List",
         "current_user": current_user,
         "user_role": current_user.role.name,
         "patients": patients,
+        "start_visit_disabled_ids": start_visit_disabled_ids,
+        "returning_patient_ids": returning_patient_ids,
+        "patient_visit_counts": patient_visit_counts if patient_ids else {},
         "search_query": query or "",
         "page": page,
         "per_page": per_page,
@@ -208,6 +323,45 @@ def view_patient_records(
     
     # Get all OPD visits for this patient
     opd_visits = opd_crud.get_opd_visits_by_patient(db, patient_id, skip=0, limit=50)
+    
+    # Get antenatal visits for this patient
+    from app.models.antenatal_models import AntenatalVisit
+    antenatal_visits = db.query(AntenatalVisit).options(
+        joinedload(AntenatalVisit.recorded_by)
+    ).filter(
+        AntenatalVisit.patient_id == patient_id,
+        AntenatalVisit.is_active == True
+    ).order_by(AntenatalVisit.visit_date.desc()).limit(100).all()
+    
+    # Check if patient is female (used for antenatal/birth records visibility)
+    patient_gender = patient.gender if patient else None
+    is_female = patient_gender and str(patient_gender).lower() == 'female'
+    
+    # Get birth records for this patient (as mother)
+    from app.models.birth_models import BirthRecord
+    birth_records = birth_crud.get_birth_records_by_mother(db, patient_id)
+    
+    # Get all lab orders for this patient
+    from app.models.encounter_models import LabOrder
+    lab_orders = db.query(LabOrder).filter(
+        LabOrder.patient_id == patient_id
+    ).order_by(LabOrder.ordered_at.desc()).limit(100).all()
+    
+    # Get all prescriptions for this patient
+    from app.models.encounter_models import Prescription
+    prescriptions = db.query(Prescription).filter(
+        Prescription.encounter_id.in_(
+            db.query(Encounter.id).filter(Encounter.patient_id == patient_id)
+        )
+    ).order_by(Prescription.prescribed_at.desc()).limit(100).all()
+    
+    # If no prescriptions from encounters, also check direct prescriptions via OPD/IPD visits
+    if not prescriptions:
+        prescriptions = db.query(Prescription).filter(
+            Prescription.opd_visit_id.in_(
+                db.query(OPDVisit.id).filter(OPDVisit.patient_id == patient_id)
+            )
+        ).order_by(Prescription.prescribed_at.desc()).limit(100).all()
     
     # Get active OPD visit if any
     active_opd_visit = opd_crud.get_active_opd_visit_by_patient(db, patient_id)
@@ -354,8 +508,35 @@ def view_patient_records(
             "details": opd_visit,
         })
     
+    # Add antenatal visits to timeline (only for female patients)
+    if is_female:
+        for visit in antenatal_visits:
+            bp = f"{visit.blood_pressure_systolic or '–'}/{visit.blood_pressure_diastolic or '–'}" if (visit.blood_pressure_systolic or visit.blood_pressure_diastolic) else "N/A"
+            timeline.append({
+                "date": visit.visit_date,
+                "type": "antenatal",
+                "title": f"Antenatal Visit #{visit.visit_number or visit.id}",
+                "description": f"Gestational: {visit.gestational_weeks or 'N/A'} weeks, BP: {bp}, Weight: {visit.weight_kg or 'N/A'} kg",
+                "details": visit,
+            })
+        
+        # Add birth records to timeline
+        for record in birth_records:
+            timeline.append({
+                "date": record.birth_date,
+                "type": "birth",
+                "title": f"Birth: {record.delivery_type}",
+                "description": f"Outcome: {record.birth_outcome}, Baby: {record.gender or 'N/A'}",
+                "details": record,
+            })
+    
     # Sort timeline by date (most recent first)
-    timeline.sort(key=lambda x: x["date"], reverse=True)
+    # Normalize all dates to datetime for consistent comparison
+    from datetime import datetime
+    timeline.sort(key=lambda x: (
+        x["date"] if isinstance(x["date"], datetime) else
+        datetime.combine(x["date"], datetime.min.time())
+    ), reverse=True)
     
     # Prepare comprehensive vital signs data for charts (all important vitals over time)
     vitals_chart_data = {
@@ -393,6 +574,8 @@ def view_patient_records(
     vitals_count = len(vitals_records)
     admissions_count = len(admissions)
     opd_visits_count = len(opd_visits)
+    lab_orders_count = len(lab_orders)
+    prescriptions_count = len(prescriptions)
     
     # Check workflow completion status for encounter creation
     from app.utils.payment_verification import verify_encounter_workflow
@@ -400,6 +583,33 @@ def view_patient_records(
         db, patient_id, check_vitals=True, check_checkin=True, check_payment=True
     )
     has_checked_in_appointment = appointment_record is not None
+    
+    # Disable Start New Visit when: patient is in triage or doctor's queue (in OPDQueue)
+    start_new_visit_disabled = has_checked_in_appointment
+    
+    # Get Lab Test Catalog for Direct Lab Request dropdown
+    from app.models.lab_catalog_models import LabTest
+    lab_tests_catalog = db.query(LabTest).filter(
+        LabTest.is_active == True
+    ).order_by(LabTest.test_category, LabTest.test_name).all()
+    
+    # Get unique categories for quick filters
+    from sqlalchemy import func
+    lab_test_categories = db.query(
+        LabTest.test_category,
+        func.count(LabTest.id).label('count')
+    ).filter(
+        LabTest.is_active == True,
+        LabTest.test_category.isnot(None)
+    ).group_by(LabTest.test_category).all()
+    lab_test_categories = [{"category": c[0], "count": c[1]} for c in lab_test_categories if c[0]]
+    
+    # Get Service Pricing for lab tests (includes pricing info)
+    from app.models.service_pricing_models import ServicePricing
+    lab_tests_pricing = db.query(ServicePricing).filter(
+        ServicePricing.charge_type == "lab_test",
+        ServicePricing.is_active == True
+    ).order_by(ServicePricing.service_name).all()
     
     context = {
         "request": request,
@@ -417,6 +627,11 @@ def view_patient_records(
         "opd_visits": opd_visits,
         "active_opd_visit": active_opd_visit,
         "opd_visits_count": opd_visits_count,
+        "antenatal_visits": antenatal_visits,
+        "birth_records": birth_records,
+        "is_female": is_female,
+        "lab_orders": lab_orders,
+        "prescriptions": prescriptions,
         "invoices": invoices,
         "invoice_summary": invoice_summary,
         "timeline": timeline,
@@ -425,9 +640,15 @@ def view_patient_records(
         "appointment_count": appointment_count,
         "vitals_count": vitals_count,
         "admissions_count": admissions_count,
+        "lab_orders_count": lab_orders_count,
+        "prescriptions_count": prescriptions_count,
         "workflow_complete": workflow_complete,
         "missing_step": missing_step,
-        "has_checked_in_appointment": has_checked_in_appointment
+        "has_checked_in_appointment": has_checked_in_appointment,
+        "start_new_visit_disabled": start_new_visit_disabled,
+        "lab_tests_catalog": lab_tests_catalog,
+        "lab_tests_pricing": lab_tests_pricing,
+        "lab_test_categories": lab_test_categories,
     }
     
     return templates.TemplateResponse("clinical/patient_records.html", context)
@@ -475,26 +696,181 @@ def complete_opd_visit(
         )
 
 
+@router.post("/patients/start-visit-from-registration", name="start_visit_from_registration")
+def start_visit_from_registration(
+    request: Request,
+    patient_id: int = Form(...),
+    department: str = Form(...),
+    visit_type: str = Form("new"),
+    # Optional payment method override for revisit patients
+    payment_mechanism: Optional[str] = Form(None),
+    nhis_number: Optional[str] = Form(None),
+    nhis_expiry_date: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Nurse", "Finance"])),
+):
+    """
+    Start a visit for an existing patient from the registration page.
+    Creates OPD visit and redirects to collect_payment with department and visit type.
+    Optional payment_mechanism allows updating patient payment method during revisit.
+    """
+    from urllib.parse import quote
+    from app.crud import appointment_crud
+
+    patient = patient_crud.get_patient(db, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    # Handle optional payment method update (for revisit patients who want to change payment method)
+    if payment_mechanism and payment_mechanism.strip():
+        try:
+            payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip())
+            # Build update data for patient
+            update_data = {"payment_mechanism": payment_mechanism_enum}
+            if nhis_number is not None:
+                update_data["nhis_number"] = nhis_number.strip() if nhis_number.strip() else None
+            if nhis_expiry_date is not None:
+                if nhis_expiry_date.strip():
+                    try:
+                        update_data["nhis_expiry_date"] = datetime.strptime(nhis_expiry_date.strip(), "%Y-%m-%d").date()
+                    except ValueError:
+                        pass  # Ignore invalid date format
+                else:
+                    update_data["nhis_expiry_date"] = None
+            # Update patient record
+            patient_update = PatientUpdate(**update_data)
+            patient = patient_crud.update_patient(db, patient_id, patient_update)
+        except ValueError:
+            pass  # Invalid payment mechanism, use existing
+    from urllib.parse import quote
+    from app.crud import appointment_crud
+
+    patient = patient_crud.get_patient(db, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    queue_entry = appointment_crud.get_recent_checked_in_queue_entry(db, patient_id, within_hours=24)
+    if queue_entry:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id))
+            + "?error=Patient+is+in+the+triage+queue.+Complete+this+visit+before+starting+a+new+one",
+            status_code=status.HTTP_302_FOUND
+        )
+
+    active_visit = opd_crud.get_active_opd_visit_by_patient(db, patient_id)
+    if active_visit:
+        return RedirectResponse(
+            url=str(request.url_for("collect_payment", patient_id=patient_id))
+            + f"?opd_visit_id={active_visit.id}&new_visit=true&return_to=triage"
+            + f"&department={quote((department or '').strip() or 'General Medicine')}"
+            + f"&visit_type={quote((visit_type or 'new').strip().lower())}",
+            status_code=status.HTTP_302_FOUND
+        )
+
+    dept_clean = (department or "").strip() or "General Medicine"
+    visit_type_clean = (visit_type or "new").strip().lower()
+    if visit_type_clean not in ("revisit", "follow_up"):
+        visit_type_clean = "new"
+
+    payment_status = "pending"
+    if patient.payment_mechanism and patient.payment_mechanism.value in ["nhis", "private_insurance"]:
+        payment_status = "paid"
+
+    try:
+        opd_visit_data = OPDVisitCreate(
+            visit_type="revisit" if visit_type_clean in ("revisit", "follow_up") else "walk_in",
+            payment_status=payment_status
+        )
+        opd_visit = opd_crud.create_opd_visit(db, opd_visit_data, patient_id)
+
+        if patient.payment_mechanism and patient.payment_mechanism.value == "cash":
+            vt_param = "revisit" if visit_type_clean in ("revisit", "follow_up") else "new"
+            return RedirectResponse(
+                url=str(request.url_for("collect_payment", patient_id=patient_id))
+                + f"?opd_visit_id={opd_visit.id}&new_visit=true&return_to=triage"
+                + f"&department={quote(dept_clean)}&visit_type={vt_param}",
+                status_code=status.HTTP_302_FOUND
+            )
+        return RedirectResponse(
+            url=str(request.url_for("patient_triage", patient_id=patient_id))
+            + f"?opd_visit_id={opd_visit.id}&new_visit=true",
+            status_code=status.HTTP_302_FOUND
+        )
+    except Exception as e:
+        return RedirectResponse(
+            url=str(request.url_for("register_patient")) + f"?error={str(e)}",
+            status_code=status.HTTP_302_FOUND
+        )
+
+
 @router.post("/patients/{patient_id}/start-new-visit", name="start_new_opd_visit")
 def start_new_opd_visit(
     request: Request,
     patient_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin", "Front Office", "Nurse"]))
+    current_user: User = Depends(role_required(["Admin", "Front Office", "Nurse"])),
+    # Optional payment method override for revisit patients
+    payment_mechanism: Optional[str] = Form(None),
+    nhis_number: Optional[str] = Form(None),
+    nhis_expiry_date: Optional[str] = Form(None),
 ):
     """
     Start a new OPD visit for a patient.
     Creates an OPD visit record and redirects to triage page.
+    Optional payment_mechanism allows updating patient payment method during revisit.
     """
+    from app.crud import appointment_crud
     # Verify patient exists
     patient = patient_crud.get_patient(db, patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     
+    # Handle optional payment method update (for revisit patients who want to change payment method)
+    if payment_mechanism and payment_mechanism.strip():
+        try:
+            payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip())
+            # Build update data for patient
+            update_data = {"payment_mechanism": payment_mechanism_enum}
+            if nhis_number is not None:
+                update_data["nhis_number"] = nhis_number.strip() if nhis_number.strip() else None
+            if nhis_expiry_date is not None:
+                if nhis_expiry_date.strip():
+                    try:
+                        update_data["nhis_expiry_date"] = datetime.strptime(nhis_expiry_date.strip(), "%Y-%m-%d").date()
+                    except ValueError:
+                        pass  # Ignore invalid date format
+                else:
+                    update_data["nhis_expiry_date"] = None
+            # Update patient record
+            patient_update = PatientUpdate(**update_data)
+            patient = patient_crud.update_patient(db, patient_id, patient_update)
+        except ValueError:
+            pass  # Invalid payment mechanism, use existing
+    from app.crud import appointment_crud
+    # Verify patient exists
+    patient = patient_crud.get_patient(db, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    
+    # Reject if patient is in triage or doctor's queue (must complete current visit first)
+    queue_entry = appointment_crud.get_recent_checked_in_queue_entry(db, patient_id, within_hours=24)
+    if queue_entry:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id))
+            + "?error=Patient+is+in+the+triage+queue.+Complete+this+visit+before+starting+a+new+one",
+            status_code=status.HTTP_302_FOUND
+        )
+    
     # Check if there's an active OPD visit
     active_visit = opd_crud.get_active_opd_visit_by_patient(db, patient_id)
     if active_visit:
-        # If active visit exists, redirect to triage with existing visit
+        # Cash patients: go to collect_payment to select department, then pay (department-based fee)
+        if patient.payment_mechanism and patient.payment_mechanism.value == "cash":
+            return RedirectResponse(
+                url=str(request.url_for("collect_payment", patient_id=patient_id))
+                + f"?opd_visit_id={active_visit.id}&new_visit=true&return_to=triage",
+                status_code=status.HTTP_302_FOUND
+            )
         return RedirectResponse(
             url=str(request.url_for("patient_triage", patient_id=patient_id)) + f"?opd_visit_id={active_visit.id}",
             status_code=status.HTTP_302_FOUND
@@ -519,23 +895,14 @@ def start_new_opd_visit(
         
         opd_visit = opd_crud.create_opd_visit(db, opd_visit_data, patient_id)
         
-        # For cash patients, create consultation charge
+        # For cash patients: redirect to collect_payment to select department, then pay (department-based fee)
+        # Charge is created in pay_consultation with correct department price
         if patient.payment_mechanism and patient.payment_mechanism.value == "cash":
-            from app.services.charge_automation import create_charge_for_consultation
-            try:
-                create_charge_for_consultation(
-                    db, 
-                    patient_id, 
-                    current_user.id,
-                    encounter_id=None,
-                    opd_visit_id=opd_visit.id
-                )
-                opd_crud.mark_consultation_charge_created(db, opd_visit.id)
-            except Exception as e:
-                # Log error but don't fail the visit creation
-                print(f"Error creating consultation charge: {e}")
-        
-        # Redirect to triage with OPD visit ID
+            return RedirectResponse(
+                url=str(request.url_for("collect_payment", patient_id=patient_id))
+                + f"?opd_visit_id={opd_visit.id}&new_visit=true&return_to=triage",
+                status_code=status.HTTP_302_FOUND
+            )
         return RedirectResponse(
             url=str(request.url_for("patient_triage", patient_id=patient_id)) + f"?opd_visit_id={opd_visit.id}&new_visit=true",
             status_code=status.HTTP_302_FOUND
@@ -591,6 +958,7 @@ def update_patient(
     address: Optional[str] = Form(None),
     payment_mechanism: Optional[str] = Form(None),
     nhis_number: Optional[str] = Form(None),
+    nhis_expiry_date: Optional[str] = Form(None),
     insurance_provider: Optional[str] = Form(None),
     insurance_provider_manual: Optional[str] = Form(None),
     insurance_policy_number: Optional[str] = Form(None),
@@ -659,6 +1027,14 @@ def update_patient(
             update_data["payment_mechanism"] = payment_mechanism_enum
         if nhis_number is not None:
             update_data["nhis_number"] = nhis_number.strip() if nhis_number.strip() else None
+        if nhis_expiry_date is not None:
+            if nhis_expiry_date.strip():
+                try:
+                    update_data["nhis_expiry_date"] = datetime.strptime(nhis_expiry_date.strip(), "%Y-%m-%d").date()
+                except ValueError:
+                    update_data["nhis_expiry_date"] = None
+            else:
+                update_data["nhis_expiry_date"] = None
         # Only update insurance_provider if payment mechanism is private_insurance
         if payment_mechanism_enum == PaymentMechanism.PRIVATE_INSURANCE and final_insurance_provider is not None:
             update_data["insurance_provider"] = final_insurance_provider
@@ -709,3 +1085,37 @@ def patient_detail_redirect(
         url=request.url_for("view_patient_records", patient_id=patient_id),
         status_code=status.HTTP_302_FOUND
     )
+
+
+@router.get("/clinical/allergies", name="allergies_list")
+def allergies_list_page(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Allergies Registry page - placeholder under construction.
+    """
+    context = {
+        "request": request,
+        "title": "Allergies Registry",
+        "current_user": current_user,
+        "user_role": current_user.role.name if current_user.role else ""
+    }
+    return templates.TemplateResponse("clinical/allergies_list.html", context)
+
+
+@router.get("/clinical/medical-history", name="medical_history_list")
+def medical_history_list_page(
+    request: Request,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Medical History page - placeholder under construction.
+    """
+    context = {
+        "request": request,
+        "title": "Medical History",
+        "current_user": current_user,
+        "user_role": current_user.role.name if current_user.role else ""
+    }
+    return templates.TemplateResponse("clinical/medical_history_list.html", context)

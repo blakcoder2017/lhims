@@ -4,16 +4,17 @@ Payment UI Routes
 Routes for handling pay-as-you-go payments for cash patients.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 from decimal import Decimal
 from datetime import datetime
+from urllib.parse import quote
 
 from app.db.database import get_db
 from app.core.deps import role_required, get_current_user
-from app.crud import patient_crud, billing_crud, service_pricing_crud
+from app.crud import patient_crud, billing_crud, service_pricing_crud, department_crud
 from app.models.billing_models import ChargeType, InvoiceStatus, PaymentStatus
 from app.utils.payment_verification import (
     requires_payment_before_service,
@@ -29,13 +30,21 @@ router = APIRouter(
     tags=["Payment UI"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 # Default prices if service pricing not configured
 DEFAULT_VITALS_FEE = Decimal('20.00')
 DEFAULT_CONSULTATION_FEE = Decimal('100.00')
 DEFAULT_PHARMACY_FEE = Decimal('20.00')  # Per unit/medication
 DEFAULT_LAB_TEST_FEE = Decimal('50.00')
+
+
+def _patient_return_path(patient_id: int, return_to: Optional[str]) -> Optional[str]:
+    """Resolve return path; 'dashboard' means app home (no /patients/{id}/dashboard route)."""
+    if not return_to:
+        return None
+    if return_to == "dashboard":
+        return "/"
+    return f"/patients/{patient_id}/{return_to}"
 
 
 def get_service_price(db: Session, service_name: str, charge_type: str, default_price: Decimal) -> Decimal:
@@ -50,6 +59,137 @@ def get_service_price(db: Session, service_name: str, charge_type: str, default_
         return Decimal(str(pricing_list[0].unit_price))
     
     return default_price
+
+
+def _get_revisit_info(db, patient_id: int):
+    """Determine if patient is returning and revisit discount config."""
+    from app.models.encounter_models import Encounter, EncounterStatus
+    from app.crud import hospital_settings_crud
+    has_previous = db.query(Encounter).filter(
+        Encounter.patient_id == patient_id,
+        Encounter.is_active == True,
+        Encounter.status == EncounterStatus.COMPLETED.value,
+    ).first() is not None
+    revisit_pct = None
+    try:
+        settings = hospital_settings_crud.get_hospital_settings(db)
+        if settings and getattr(settings, "revisit_follow_up_percentage", None) is not None:
+            revisit_pct = float(settings.revisit_follow_up_percentage)
+    except Exception:
+        pass
+    return has_previous, revisit_pct
+
+
+@router.get("/patients/{patient_id}/collect-payment", name="collect_payment")
+def collect_payment_page(
+    request: Request,
+    patient_id: int,
+    opd_visit_id: Optional[int] = Query(None),
+    new_visit: Optional[str] = Query(None),
+    return_to: Optional[str] = Query("triage"),
+    visit_type: Optional[str] = Query(None),
+    department: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Front Office", "Finance", "Admin"])),
+):
+    """Payment page: select department (for department-based consultation fee) then proceed to pay."""
+    patient = patient_crud.get_patient(db, patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if not is_cash_patient(db, patient_id):
+        return RedirectResponse(url=f"/patients/{patient_id}/triage", status_code=302)
+    departments, _ = department_crud.get_departments(db, limit=100, active_only=True)
+    has_previous, revisit_pct = _get_revisit_info(db, patient_id)
+    is_revisit_eligible = has_previous and revisit_pct is not None
+    # visit_type override: "revisit" or "new" from query; otherwise auto from history
+    effective_visit_type = None
+    if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
+        effective_visit_type = "revisit"
+    elif visit_type and str(visit_type).strip().lower() == "new":
+        effective_visit_type = "new"
+    elif is_revisit_eligible:
+        effective_visit_type = "revisit"
+    from app.services.charge_automation import get_consultation_price_for_department
+    from decimal import Decimal
+    departments_with_prices = []
+    for dept in departments:
+        full_price = get_consultation_price_for_department(db, department_name=dept.name, visit_type=None)
+        revisit_price = (
+            get_consultation_price_for_department(
+                db, department_name=dept.name, visit_type="revisit",
+                revisit_follow_up_percentage=Decimal(str(revisit_pct)) if revisit_pct else None
+            )
+            if is_revisit_eligible else None
+        )
+        departments_with_prices.append({
+            "id": dept.id,
+            "name": dept.name,
+            "full_price": float(full_price) if full_price else None,
+            "revisit_price": float(revisit_price) if revisit_price else None,
+        })
+    preselect_department = (department or "").strip() or None
+    context = {
+        "request": request,
+        "title": "Collect payment – Select department and pay",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "patient": patient,
+        "departments": departments_with_prices,
+        "opd_visit_id": opd_visit_id,
+        "new_visit": new_visit or "",
+        "return_to": return_to or "triage",
+        "is_revisit_eligible": is_revisit_eligible,
+        "revisit_discount_pct": revisit_pct,
+        "effective_visit_type": effective_visit_type,
+        "preselect_department": preselect_department,
+    }
+    return templates.TemplateResponse("billing/collect_payment.html", context)
+
+
+@router.get("/patients/{patient_id}/add-to-triage", name="add_to_triage_and_redirect")
+def add_to_triage_and_redirect(
+    patient_id: int,
+    department: str = Query("General Medicine"),
+    return_to: str = Query("dashboard"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Front Office", "Finance", "Admin"])),
+):
+    """Add patient to vitals queue (triage) then redirect. Called after receipt is printed."""
+    from app.crud import appointment_crud
+    from app.schemas.appointment_schemas import QueueCreate
+    from app.models.appointment_models import VisitType, OPDQueue, QueueStatus
+    from sqlalchemy import func
+    from datetime import date
+
+    department_name = (department or "").strip() or "General Medicine"
+    today = date.today()
+    existing = (
+        db.query(OPDQueue)
+        .filter(
+            OPDQueue.patient_id == patient_id,
+            OPDQueue.is_active == True,
+            OPDQueue.status.in_([QueueStatus.WAITING.value, QueueStatus.IN_PROGRESS.value]),
+        )
+        .filter(func.date(OPDQueue.created_at) == today)
+        .first()
+    )
+    if not existing:
+        queue_data = QueueCreate(
+            patient_id=patient_id,
+            department=department_name,
+            department_type="opd",
+            visit_type=VisitType.WALK_IN,
+            priority=5,
+            chief_complaint=None,
+            notes="Added to vitals queue after payment receipt printed",
+            assigned_clinician_id=None,
+            created_by_id=current_user.id,
+        )
+        appointment_crud.create_queue_entry(db, queue_data)
+
+    if return_to == "triage":
+        return RedirectResponse(url=f"/patients/{patient_id}/triage", status_code=302)
+    return RedirectResponse(url="/", status_code=302)
 
 
 @router.get("/patients/{patient_id}/pay/vitals", name="pay_vitals")
@@ -68,9 +208,7 @@ def pay_vitals_page(
     # Check if payment is required
     if not is_cash_patient(db, patient_id):
         # Not a cash patient, redirect back
-        redirect_url = f"/patients/{patient_id}/triage"
-        if return_to:
-            redirect_url = f"/patients/{patient_id}/{return_to}"
+        redirect_url = _patient_return_path(patient_id, return_to) or f"/patients/{patient_id}/triage"
         return RedirectResponse(url=redirect_url, status_code=302)
     
     # Check if already paid
@@ -80,9 +218,7 @@ def pay_vitals_page(
     
     if payment_paid:
         # Already paid, redirect back
-        redirect_url = f"/patients/{patient_id}/triage"
-        if return_to:
-            redirect_url = f"/patients/{patient_id}/{return_to}"
+        redirect_url = _patient_return_path(patient_id, return_to) or f"/patients/{patient_id}/triage"
         return RedirectResponse(url=redirect_url, status_code=302)
     
     # Get or create charge
@@ -135,10 +271,7 @@ def process_vitals_payment(
     
     payment = billing_crud.create_payment(db, payment_data, current_user.id)
     
-    redirect_url = f"/patients/{patient_id}/triage?status=payment_success"
-    if return_to:
-        redirect_url = f"/patients/{patient_id}/{return_to}?status=payment_success"
-    
+    redirect_url = (_patient_return_path(patient_id, return_to) or f"/patients/{patient_id}/triage") + "?status=payment_success"
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
@@ -152,6 +285,10 @@ def pay_consultation_page(
     return_to: Optional[str] = Query(None),
     new_visit: Optional[str] = Query(None),
     from_lab: Optional[int] = Query(None),
+    department: Optional[str] = Query(None),
+    from_registration: Optional[str] = Query(None),
+    opd_visit_id: Optional[int] = Query(None),
+    visit_type: Optional[str] = Query(None),
 ):
     """Payment page for consultation fee."""
     from datetime import datetime
@@ -160,9 +297,6 @@ def pay_consultation_page(
     from sqlalchemy import func
     from datetime import date
     
-    # Initialize opd_visit_id (not used for consultation charges from registration)
-    opd_visit_id = None
-    
     patient = patient_crud.get_patient(db, patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -170,15 +304,13 @@ def pay_consultation_page(
     # Check if payment is required
     if not is_cash_patient(db, patient_id):
         # Not a cash patient, redirect back
-        redirect_url = f"/patients/{patient_id}/encounters/new"
-        if return_to:
-            redirect_url = f"/patients/{patient_id}/{return_to}"
+        redirect_url = _patient_return_path(patient_id, return_to) or f"/patients/{patient_id}/encounters/new"
         if new_visit:
-            redirect_url += f"?new_visit={new_visit}"
+            redirect_url += f"?new_visit={new_visit}" if "?" not in redirect_url else f"&new_visit={new_visit}"
         return RedirectResponse(url=redirect_url, status_code=302)
 
     # When encounter_id is set (e.g. from lab: pay visit = consultation + lab), use that invoice
-    if encounter_id:
+    if encounter_id is not None:
         invoice = db.query(Invoice).filter(
             Invoice.patient_id == patient_id,
             Invoice.encounter_id == encounter_id,
@@ -188,7 +320,7 @@ def pay_consultation_page(
             if invoice.balance and invoice.balance <= Decimal("0"):
                 # Already paid, redirect back
                 if from_lab is not None:
-                    return RedirectResponse(url=f"/lab/orders/{from_lab}?status=payment_success", status_code=302)
+                    return RedirectResponse(url=f"/api/v1/ancillary/lab/orders/{from_lab}?status=payment_success", status_code=302)
                 return RedirectResponse(url=f"/patients/{patient_id}/encounters/new?status=payment_success", status_code=302)
             # Use first charge for template (consultation or any); amount_due = full invoice balance
             charge = db.query(Charge).filter(Charge.invoice_id == invoice.id).first()
@@ -227,12 +359,24 @@ def pay_consultation_page(
         if completed_encounters_today > 0:
             is_new_visit_flag = True
     
+    # For new visits, department is required for correct consultation fee (from Departments, not ServicePricing)
+    if is_new_visit_flag and not department:
+        params = [f"new_visit=true", f"return_to={return_to or 'triage'}"]
+        if opd_visit_id:
+            params.append(f"opd_visit_id={opd_visit_id}")
+        if visit_type:
+            params.append(f"visit_type={visit_type}")
+        return RedirectResponse(
+            url=str(request.url_for("collect_payment", patient_id=patient_id)) + "?" + "&".join(params),
+            status_code=302
+        )
+    
     # For new visits, we need to find or create a NEW charge (not use old paid charges)
     if is_new_visit_flag:
         # Check for existing UNPAID charges for this new visit
         # Don't reuse old paid charges - each visit needs its own charge
         today = date.today()
-        existing_charge = db.query(Charge).join(Invoice).filter(
+        existing_query = db.query(Charge).join(Invoice).filter(
             Invoice.patient_id == patient_id,
             Charge.charge_type == ChargeType.CONSULTATION,
             Charge.encounter_id.is_(None),
@@ -240,24 +384,98 @@ def pay_consultation_page(
             Invoice.balance > Decimal('0'),
             Invoice.status != InvoiceStatus.PAID,
             func.date(Charge.created_at) == today
-        ).order_by(Charge.created_at.desc()).first()
+        )
+        if opd_visit_id:
+            existing_query = existing_query.filter(
+                (Invoice.opd_visit_id == opd_visit_id) | (Charge.opd_visit_id == opd_visit_id)
+            )
+        existing_charge = existing_query.order_by(Charge.created_at.desc()).first()
         
         if existing_charge:
-            # Use existing unpaid charge for this visit
+            # Department is required (enforced above); ensure charge amount matches department price (with revisit discount)
+            from app.services.charge_automation import get_consultation_price_for_department
+            has_prev, revisit_pct = _get_revisit_info(db, patient_id)
+            visit_type_for_price = None
+            if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
+                visit_type_for_price = "revisit"
+            elif visit_type and str(visit_type).strip().lower() == "new":
+                visit_type_for_price = None
+            elif has_prev and revisit_pct is not None:
+                visit_type_for_price = "revisit"
+            correct_price = get_consultation_price_for_department(
+                db, department_name=department,
+                visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
+            )
+            if abs(float(existing_charge.total_amount) - float(correct_price)) > 0.01:
+                from app.crud import billing_crud
+                from app.schemas.billing_schemas import ChargeUpdate
+                updated = billing_crud.update_charge(db, existing_charge.id, ChargeUpdate(unit_price=correct_price))
+                if updated:
+                    existing_charge = updated
+                    db.refresh(existing_charge.invoice)
+            
             charge = existing_charge
             invoice = existing_charge.invoice
             payment_paid = False  # Unpaid charge requires payment
         else:
-            # Create a new charge for this new visit
-            service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
-            charge, invoice = get_or_create_service_charge(
-                db, patient_id, ChargeType.CONSULTATION,
-                "Consultation Fee (Covers Vitals & Initial Encounter)",
-                service_price,
+            # Create a new charge via create_charge_for_consultation (may return existing charge from triage etc.)
+            from app.services.charge_automation import create_charge_for_consultation
+            from app.crud import opd_crud
+            vt_param = None
+            if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
+                vt_param = "revisit"
+            elif visit_type and str(visit_type).strip().lower() == "new":
+                vt_param = "new"
+            new_charge = create_charge_for_consultation(
+                db, patient_id, current_user.id,
                 encounter_id=encounter_id,
                 opd_visit_id=opd_visit_id,
-                created_by_id=current_user.id
+                department_name=department,
+                visit_type=vt_param
             )
+            if new_charge:
+                charge = new_charge
+                invoice = new_charge.invoice
+                # Verify amount: create_charge_for_consultation may return existing charge with wrong price
+                if department:
+                    from app.services.charge_automation import get_consultation_price_for_department
+                    has_prev, revisit_pct = _get_revisit_info(db, patient_id)
+                    visit_type_for_price = vt_param if vt_param else ("revisit" if has_prev and revisit_pct else None)
+                    correct_price = get_consultation_price_for_department(
+                        db, department_name=department,
+                        visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
+                    )
+                    if abs(float(charge.total_amount) - float(correct_price)) > 0.01:
+                        from app.crud import billing_crud
+                        from app.schemas.billing_schemas import ChargeUpdate
+                        updated = billing_crud.update_charge(db, charge.id, ChargeUpdate(unit_price=correct_price))
+                        if updated:
+                            charge = updated
+                            db.refresh(charge.invoice)
+                if opd_visit_id:
+                    opd_crud.mark_consultation_charge_created(db, opd_visit_id)
+            else:
+                # Fallback to get_or_create_service_charge (uses department price with revisit discount when applicable)
+                from app.services.charge_automation import get_consultation_price_for_department
+                has_prev, revisit_pct = _get_revisit_info(db, patient_id)
+                visit_type_for_price = vt_param if vt_param else ("revisit" if has_prev and revisit_pct else None)
+                if department:
+                    service_price = get_consultation_price_for_department(
+                        db, department_name=department,
+                        visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
+                    )
+                else:
+                    service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
+                charge, invoice = get_or_create_service_charge(
+                    db, patient_id, ChargeType.CONSULTATION,
+                    "Consultation Fee (Covers Vitals & Initial Encounter)",
+                    service_price,
+                    encounter_id=encounter_id,
+                    opd_visit_id=opd_visit_id,
+                    created_by_id=current_user.id
+                )
+                if opd_visit_id:
+                    opd_crud.mark_consultation_charge_created(db, opd_visit_id)
             payment_paid = False  # New charge requires payment
     else:
         # Not a new visit - check if already paid
@@ -267,16 +485,26 @@ def pay_consultation_page(
         
         if payment_paid:
             # Already paid, redirect back
-            redirect_url = f"/patients/{patient_id}/encounters/new"
-            if return_to:
-                redirect_url = f"/patients/{patient_id}/{return_to}"
+            redirect_url = _patient_return_path(patient_id, return_to) or f"/patients/{patient_id}/encounters/new"
             if new_visit:
-                redirect_url += f"?new_visit={new_visit}"
+                redirect_url += f"?new_visit={new_visit}" if "?" not in redirect_url else f"&new_visit={new_visit}"
             return RedirectResponse(url=redirect_url, status_code=302)
         
-        # Get or create charge
+        # Get or create charge (use department-based price with revisit discount when department provided)
         if not charge:
-            service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
+            from app.services.charge_automation import get_consultation_price_for_department
+            has_prev, revisit_pct = _get_revisit_info(db, patient_id)
+            visit_type_for_price = None
+            if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
+                visit_type_for_price = "revisit"
+            elif visit_type and str(visit_type).strip().lower() != "new" and has_prev and revisit_pct:
+                visit_type_for_price = "revisit"
+                service_price = get_consultation_price_for_department(
+                    db, department_name=department,
+                    visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
+                )
+            else:
+                service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
             charge, invoice = get_or_create_service_charge(
                 db, patient_id, ChargeType.CONSULTATION,
                 "Consultation Fee (Covers Vitals & Initial Encounter)",
@@ -305,6 +533,8 @@ def pay_consultation_page(
         "new_visit": new_visit,
         "amount_due": amount_due,
         "from_lab": from_lab,
+        "from_registration": from_registration,
+        "department": department,
     }
 
     return templates.TemplateResponse("billing/pay_service.html", context)
@@ -322,9 +552,11 @@ def process_consultation_payment(
     encounter_id: Optional[int] = Form(None),
     new_visit: Optional[str] = Form(None),
     from_lab: Optional[int] = Form(None),
+    from_registration: Optional[str] = Form(None),
+    department: Optional[str] = Form(None),
 ):
     """Process payment for consultation fee (or full visit = consultation + lab)."""
-    from app.models.billing_models import Invoice
+    from app.models.billing_models import Invoice, Charge
     from app.crud import opd_crud
 
     amount_decimal = Decimal(amount)
@@ -344,7 +576,7 @@ def process_consultation_payment(
             db.commit()
             db.refresh(invoice)
 
-    # Create payment
+    # Create payment (records in paid bills at invoice level)
     payment_data = PaymentCreate(
         invoice_id=invoice_id,
         patient_id=patient_id,
@@ -353,33 +585,109 @@ def process_consultation_payment(
         status=PaymentStatus.COMPLETED,
         notes="Consultation fee payment"
     )
-    
     payment = billing_crud.create_payment(db, payment_data, current_user.id)
-    
+
+    # Allocate payment to consultation charge so it appears in paid bills / charge-level tracking
+    consultation_charge = db.query(Charge).filter(
+        Charge.invoice_id == invoice_id,
+        Charge.charge_type == ChargeType.CONSULTATION,
+    ).first()
+    if consultation_charge:
+        billing_crud.allocate_payment_to_charge(db, payment.id, consultation_charge.id, amount_decimal)
+
     # Ensure OPD visit payment status is synced immediately after payment
-    # This is critical for encounter creation validation
     if invoice.opd_visit_id:
-        from app.crud import opd_crud
         opd_crud.sync_opd_visit_payment_status(db, invoice.opd_visit_id)
     elif active_opd_visit:
-        # If we just linked the invoice, sync now
         opd_crud.sync_opd_visit_payment_status(db, active_opd_visit.id)
-    
-    # Create receipt for the payment
+
+    # Create receipt so it appears in receipts and can be printed
     try:
         receipt = billing_crud.create_receipt(db, payment.id, current_user.id)
         receipt_number = receipt.receipt_number
     except Exception as e:
-        # Log error but don't fail the payment
-        print(f"Error creating receipt for payment {payment.id}: {e}")
+        import logging
+        logging.getLogger(__name__).exception("Error creating receipt for payment %s: %s", payment.id, e)
         receipt_number = payment.receipt_number or "N/A"
+
+    # Send SMS notification to patient for consultation payment
+    try:
+        from app.services.sms_onlinegh_service import send_personalized_sms_notification
+        patient = invoice.patient
+        if patient and patient.phone_number:
+            message_template = "Hello {$name}. Payment of GHS {$amount} received. Receipt: {$receipt_number}. Invoice Balance: GHS {$balance}. Thank you!"
+            destinations = [{
+                "number": patient.phone_number,
+                "values": [
+                    f"{patient.first_name} {patient.last_name}",
+                    float(payment.amount),
+                    receipt_number,
+                    float(invoice.balance) if invoice.balance else 0.00
+                ]
+            }]
+            send_personalized_sms_notification(message_template, destinations)
+    except Exception as sms_error:
+        print(f"Warning: Unable to send consultation payment SMS: {sms_error}")
+
+    # Add patient to vitals queue immediately after payment when going to triage
+    is_from_registration = from_registration and str(from_registration).strip() in ("1", "true", "yes")
+    if is_from_registration or return_to == "triage":
+        department_name = (department or "").strip() or "General Medicine"
+        try:
+            from app.crud import appointment_crud
+            from app.schemas.appointment_schemas import QueueCreate
+            from app.models.appointment_models import VisitType, OPDQueue, QueueStatus
+            from sqlalchemy import func
+            from datetime import date
+            today = date.today()
+            existing = (
+                db.query(OPDQueue)
+                .filter(
+                    OPDQueue.patient_id == patient_id,
+                    OPDQueue.is_active == True,
+                    OPDQueue.status.in_([QueueStatus.WAITING.value, QueueStatus.IN_PROGRESS.value]),
+                )
+                .filter(func.date(OPDQueue.created_at) == today)
+                .first()
+            )
+            if not existing:
+                queue_data = QueueCreate(
+                    patient_id=patient_id,
+                    department=department_name,
+                    department_type="opd",
+                    visit_type=VisitType.WALK_IN,
+                    priority=5,
+                    chief_complaint=None,
+                    notes="Added to vitals queue after payment",
+                    assigned_clinician_id=None,
+                    created_by_id=current_user.id,
+                )
+                appointment_crud.create_queue_entry(db, queue_data)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("Failed to add patient %s to vitals queue after payment: %s", patient_id, e)
     
+    # From registration: redirect to receipt
+    if is_from_registration:
+        department_name = (department or "").strip() or "General Medicine"
+        redirect_url = f"/billing/receipt/{payment.id}?from_registration=1&patient_id={patient_id}&department={quote(department_name)}"
+        return RedirectResponse(url=redirect_url, status_code=302)
+
+    # Returning cash patient (revisit): redirect to receipt; patient already added to vitals queue
+    if return_to == "triage":
+        department_name = (department or "").strip() or "General Medicine"
+        opd_id = invoice.opd_visit_id or (active_opd_visit.id if active_opd_visit else None)
+        extra = f"&opd_visit_id={opd_id}" if opd_id else ""
+        redirect_url = f"/billing/receipt/{payment.id}?return_to=triage&patient_id={patient_id}&department={quote(department_name)}{extra}"
+        return RedirectResponse(url=redirect_url, status_code=302)
+
     # Redirect: from_lab = back to lab order; else return_to / encounter_id / default
     new_visit_param = f"&new_visit={new_visit}" if new_visit else ""
     if from_lab is not None:
-        redirect_url = f"/lab/orders/{from_lab}?status=payment_success&receipt={receipt_number}"
+        redirect_url = f"/api/v1/ancillary/lab/orders/{from_lab}?status=payment_success&receipt={receipt_number}"
     elif return_to:
-        redirect_url = f"/patients/{patient_id}/{return_to}?status=payment_success&receipt={receipt_number}{new_visit_param}"
+        base = _patient_return_path(patient_id, return_to) or f"/patients/{patient_id}/encounters/new"
+        redirect_url = f"{base}?status=payment_success&receipt={receipt_number}{new_visit_param}".rstrip("&")
     elif encounter_id:
         redirect_url = f"/encounters/{encounter_id}?status=payment_success&receipt={receipt_number}{new_visit_param}"
     else:
@@ -429,7 +737,7 @@ def pay_radiology_page(
     # Check if payment is required
     if not is_cash_patient(db, patient_id):
         # Not a cash patient, redirect back
-        redirect_url = f"/radiology/orders/{order_id}"
+        redirect_url = f"/api/v1/ancillary/radiology/orders/{order_id}"
         if return_to:
             redirect_url = f"/{return_to}"
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -443,7 +751,7 @@ def pay_radiology_page(
     
     if payment_paid:
         # Already paid, redirect back
-        redirect_url = f"/radiology/orders/{order_id}"
+        redirect_url = f"/api/v1/ancillary/radiology/orders/{order_id}"
         if return_to:
             redirect_url = f"/{return_to}"
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -472,7 +780,7 @@ def pay_radiology_page(
         "charge": charge,
         "invoice": invoice,
         "service_type": "radiology",
-        "return_to": return_to or f"radiology/orders/{order_id}"
+        "return_to": return_to or f"api/v1/ancillary/radiology/orders/{order_id}"
     }
     
     return templates.TemplateResponse("billing/pay_service.html", context)
@@ -504,7 +812,7 @@ def process_radiology_payment(
     
     payment = billing_crud.create_payment(db, payment_data, current_user.id)
     
-    redirect_url = f"/radiology/orders/{order_id}?status=payment_success" if order_id else f"/patients/{patient_id}?status=payment_success"
+    redirect_url = f"/api/v1/ancillary/radiology/orders/{order_id}?status=payment_success" if order_id else f"/patients/{patient_id}?status=payment_success"
     if return_to:
         redirect_url = f"/{return_to}?status=payment_success"
     
@@ -589,7 +897,7 @@ def pay_pharmacy_page(
         "charge": charge,
         "invoice": invoice,
         "service_type": "pharmacy",
-        "return_to": return_to or f"pharmacy/prescriptions/{prescription_id}"
+        "return_to": return_to or f"api/v1/ancillary/pharmacy/prescriptions/{prescription_id}"
     }
     
     return templates.TemplateResponse("billing/pay_service.html", context)
@@ -670,7 +978,7 @@ def pay_lab_page(
     # Check if payment is required
     if not is_cash_patient(db, patient_id):
         # Not a cash patient, redirect back
-        redirect_url = f"/lab/orders/{order_id}"
+        redirect_url = f"/api/v1/ancillary/lab/orders/{order_id}"
         if return_to:
             redirect_url = f"/{return_to}"
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -684,7 +992,7 @@ def pay_lab_page(
     
     if payment_paid:
         # Already paid, redirect back
-        redirect_url = f"/lab/orders/{order_id}"
+        redirect_url = f"/api/v1/ancillary/lab/orders/{order_id}"
         if return_to:
             redirect_url = f"/{return_to}"
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -713,7 +1021,7 @@ def pay_lab_page(
         "charge": charge,
         "invoice": invoice,
         "service_type": "lab",
-        "return_to": return_to or f"lab/orders/{order_id}"
+        "return_to": return_to or f"api/v1/ancillary/lab/orders/{order_id}"
     }
     
     return templates.TemplateResponse("billing/pay_service.html", context)
@@ -745,7 +1053,7 @@ def process_lab_payment(
     
     payment = billing_crud.create_payment(db, payment_data, current_user.id)
     
-    redirect_url = f"/lab/orders/{order_id}?status=payment_success" if order_id else f"/patients/{patient_id}?status=payment_success"
+    redirect_url = f"/api/v1/ancillary/lab/orders/{order_id}?status=payment_success" if order_id else f"/patients/{patient_id}?status=payment_success"
     if return_to:
         redirect_url = f"/{return_to}?status=payment_success"
     

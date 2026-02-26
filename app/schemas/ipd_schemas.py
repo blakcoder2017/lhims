@@ -100,6 +100,13 @@ class AdmissionBase(BaseModel):
     diagnosis: Optional[str] = None
     notes: Optional[str] = None
     expected_discharge_date: Optional[datetime] = None
+    # Allergies - Critical for patient safety
+    allergies: Optional[str] = None
+    # Guardian/Attendant Information
+    guardian_name: Optional[str] = None
+    guardian_phone: Optional[str] = None
+    guardian_relationship: Optional[str] = None
+    guardian_address: Optional[str] = None
 
 
 class AdmissionCreate(AdmissionBase):

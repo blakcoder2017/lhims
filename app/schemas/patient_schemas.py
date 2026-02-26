@@ -38,6 +38,7 @@ class PatientUpdate(BaseModel):
     address: Optional[str] = Field(None, max_length=255)
     payment_mechanism: Optional[PaymentMechanism] = None
     nhis_number: Optional[str] = Field(None, max_length=50)
+    nhis_expiry_date: Optional[date] = None
     insurance_provider: Optional[str] = Field(None, max_length=100)
     insurance_policy_number: Optional[str] = Field(None, max_length=50)
     languages_spoken: Optional[str] = Field(None, max_length=200)
@@ -49,6 +50,7 @@ class Patient(PatientBase):
     is_active: bool
     payment_mechanism: Optional[PaymentMechanism] = None
     nhis_number: Optional[str] = None
+    nhis_expiry_date: Optional[date] = None
     insurance_provider: Optional[str] = None
     insurance_policy_number: Optional[str] = None
     created_at: datetime 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -11,6 +11,11 @@ class HospitalSettingsBase(BaseModel):
     hospital_website: Optional[str] = None
     logo_path: Optional[str] = None
     logo_url: Optional[str] = None
+    # Insurance activation settings
+    nhis_enabled: Optional[bool] = True
+    private_insurance_enabled: Optional[bool] = True
+    # Charge Types configuration - list of charge type values
+    charge_types_config: Optional[List[str]] = None
 
 
 class HospitalSettingsCreate(HospitalSettingsBase):

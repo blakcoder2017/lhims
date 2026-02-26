@@ -3,13 +3,13 @@ UI routes for scheduled appointments management
 """
 from fastapi import APIRouter, Request, Depends, Query, Form, HTTPException
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, date, timedelta
 
 from app.db.database import get_db
-from app.core.deps import get_current_user, role_required
+from app.core.deps import get_current_user, role_required, permission_required
 from app.crud import scheduled_appointment_crud
 from app.crud import user_crud
 from app.models.user_models import User
@@ -20,7 +20,6 @@ router = APIRouter(
     tags=["Appointments UI"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/appointments", name="manage_appointments")
@@ -29,7 +28,7 @@ def appointments_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Front Office", "Admin", "Doctor"])),
     date_filter: Optional[str] = Query(None),
-    doctor_filter: Optional[int] = Query(None),
+    doctor_filter: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None)
 ):
     """Main appointments management dashboard"""
@@ -41,6 +40,14 @@ def appointments_dashboard(
             filter_date = date.today()
     else:
         filter_date = date.today()
+    
+    # Convert doctor_filter to int if provided
+    doctor_id = None
+    if doctor_filter:
+        try:
+            doctor_id = int(doctor_filter)
+        except ValueError:
+            doctor_id = None
     
     # Get appointments for the selected date
     start_date = filter_date
@@ -55,7 +62,7 @@ def appointments_dashboard(
             pass  # Invalid status, ignore filter
     
     appointments = scheduled_appointment_crud.get_scheduled_appointments_for_date_range(
-        db, start_date, end_date, doctor_filter, status_enum
+        db, start_date, end_date, doctor_id, status_enum
     )
     
     # Get doctors for filter dropdown
@@ -63,7 +70,7 @@ def appointments_dashboard(
     
     # Get statistics
     stats = scheduled_appointment_crud.get_appointment_statistics(
-        db, start_date, end_date, doctor_filter
+        db, start_date, end_date, doctor_id
     )
     
     context = {
@@ -294,11 +301,11 @@ def confirm_appointment(
     )
 
 
-@router.get("/doctor/appointments", name="doctor_appointments")
+@router.get("/doctor/appointments", name="doctor_appointments", dependencies=[Depends(permission_required("doctor_appointments"))])
 def doctor_appointments(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Doctor", "Admin"])),
+    current_user: User = Depends(get_current_user),
     date_filter: Optional[str] = Query(None)
 ):
     """Doctor's appointments view"""

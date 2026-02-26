@@ -5,7 +5,7 @@ UI routes for managing bed types.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Request, Query
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -20,7 +20,6 @@ router = APIRouter(
     tags=["Bed Types UI"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/admin/bed-types", name="bed_types_list")

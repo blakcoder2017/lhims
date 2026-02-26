@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, Enum, Numeric
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, Enum, Numeric, event
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects import postgresql
@@ -80,6 +80,17 @@ class LabSample(Base):
     
     def __repr__(self):
         return f"<LabSample(id={self.id}, barcode='{self.barcode}', status={self.status.value})>"
+
+
+def validate_lab_sample_before_insert(mapper, connection, target):
+    """Validate that lab_order_id is not None before inserting/updating a LabSample."""
+    if target.lab_order_id is None:
+        raise ValueError("lab_order_id cannot be None for LabSample. A valid lab order must be associated with each sample.")
+
+
+# Register event listeners for LabSample
+event.listen(LabSample, 'before_insert', validate_lab_sample_before_insert)
+event.listen(LabSample, 'before_update', validate_lab_sample_before_insert)
 
 
 class QCRecord(Base):

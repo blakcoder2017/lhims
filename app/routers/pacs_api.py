@@ -2,7 +2,7 @@
 API routes for PACS (Picture Archiving and Communication System).
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse, FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -17,7 +17,6 @@ from app.crud import pacs_crud
 from app.schemas.pacs_schemas import RadiologyImageCreate, RadiologyImageUpdate
 
 router = APIRouter(tags=["PACS"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/pacs/images", name="pacs_dashboard")

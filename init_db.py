@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # Import all models to ensure they're registered
+# Import specific models explicitly to avoid circular imports and improve clarity
 from app.models.user_models import User, Role
 from app.models.patient_models import Patient
 from app.models.department_models import Department
@@ -25,14 +26,17 @@ from app.models.supplier_models import Supplier
 from app.models.inventory_models import Medication
 from app.models.lab_catalog_models import LabTest
 from app.models.procedure_catalog_models import ProcedureCatalog
+from app.models import *  # noqa: F401, F403 - Import remaining models from __init__
 from app.db.database import Base
 
 from app.core.config import settings
 
-# Update the database URL to use SQLite
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test_lhims.db"
+# Use the actual database URL from environment
+SQLALCHEMY_DATABASE_URL = settings.SQLALCHEMY_DATABASE_URL
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+# check_same_thread is SQLite-only; PostgreSQL rejects it
+_connect_args = {"check_same_thread": False} if "sqlite" in SQLALCHEMY_DATABASE_URL else {}
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

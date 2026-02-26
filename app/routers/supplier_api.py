@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -12,7 +12,6 @@ from app.schemas.supplier_schemas import SupplierCreate, SupplierUpdate
 from fastapi import status
 
 router = APIRouter(tags=["Suppliers"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/pharmacy/suppliers", name="suppliers_dashboard")

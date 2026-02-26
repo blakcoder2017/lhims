@@ -1,0 +1,396 @@
+{# Template-driven lab result form - supports showIf, calculated, repeat_group, table, critical comms #}
+{# Handle both list and dict schema formats #}
+{% if schema_json is mapping %}
+    {% set _schema = schema_json %}
+{% elif schema_json is sequence and schema_json|length > 0 %}
+    {# Convert list format to dict format #}
+    {% set _fields = {} %}
+    {% for f in schema_json %}
+        {% if f is mapping %}
+            {% set fid = f.field_name or f.code or f.id %}
+            {% if fid %}
+                {% set _ = _fields.update({fid: f}) %}
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+    {% set _schema = {
+        'layout': {'sections': [{'title': 'Results', 'rows': [{'columns': [{'width': 12, 'items': _fields.keys()}]}]}]},
+        'fields': _fields,
+        'rules': {'visibility': []},
+        'calculated': []
+    } %}
+{% else %}
+    {% set _schema = {'layout': {'sections': []}, 'fields': {}, 'rules': {'visibility': []}, 'calculated': []} %}
+{% endif %}
+
+<div class="card card-success" id="template-result-form">
+    <div class="card-header">
+        <h3 class="card-title"><i class="fas fa-edit mr-1"></i> Enter Test Result (Structured)</h3>
+    </div>
+    <form id="labResultTemplateForm" method="POST" action="{{ url_for('enter_lab_result', order_id=lab_order.id) }}">
+        <div class="card-body">
+            <input type="hidden" name="use_template" value="1">
+            {% set visibility_rules = _schema.rules.visibility if _schema.rules else [] %}
+            {% for section in (_schema.layout.sections or []) %}
+            <div class="mb-4">
+                <h5 class="border-bottom pb-2">{{ section.title or 'Results' }}</h5>
+                <div class="row">
+                    {% for row in (section.rows or []) %}
+                        {% for col in (row.columns or []) %}
+                        <div class="col-md-{{ col.width or 12 }}">
+                            {% for fid in (col['items'] or []) %}
+                                {% set fld = _schema.fields.get(fid) %}
+                                {% if fld %}
+                                {% set ns = namespace(show_if=none) %}{% for r in visibility_rules %}{% if (r.target or r.target_code) == fid %}{% set ns.show_if = r.showIf or r.if %}{% endif %}{% endfor %}
+                                {% set show_if = ns.show_if %}
+                                {% set initially_visible = not show_if or (show_if and (result_json.get(show_if.field) == show_if.value)) %}
+                                <div class="form-group field-row {{ 'd-none' if not initially_visible }}" data-field-id="{{ fid }}"
+                                     {% if show_if %}data-show-if-field="{{ show_if.field }}" data-show-if-op="{{ show_if.op }}" data-show-if-value="{{ show_if.value }}"{% endif %}>
+                                    <label for="result_{{ fid }}">{{ fld.label }}{% if fld.required %} *{% endif %}</label>
+                                    {% if fld.type == 'numeric' %}
+                                    <div class="input-group">
+                                    <input type="number" class="form-control template-field" id="result_{{ fid }}" name="result_{{ fid }}"
+                                           data-field-code="{{ fid }}"
+                                           value="{{ result_json.get(fid, '') }}"
+                                           step="{{ 0.1 if fld.decimals else 1 }}"
+                                           {% if fld.min is defined %}min="{{ fld.min }}"{% endif %}
+                                           {% if fld.max is defined %}max="{{ fld.max }}"{% endif %}
+                                           {% if fld.required %}required{% endif %}
+                                           onchange="checkReferenceRange(this, '{{ fid }}')">
+                                    {% if fld.unit %}
+                                    <div class="input-group-append"><span class="input-group-text">{{ fld.unit }}</span></div>
+                                    {% endif %}
+                                    </div>
+                                    {% if ref_ranges.get(fid) %}
+                                    <small class="text-muted d-block" id="ref_range_{{ fid }}">
+                                        <i class="fas fa-info-circle"></i> Reference: {{ ref_ranges[fid].low }} - {{ ref_ranges[fid].high }}{% if fld.unit %} {{ fld.unit }}{% endif %}
+                                    </small>
+                                    <small class="text-danger d-none" id="abnormal_{{ fid }}"><i class="fas fa-exclamation-triangle"></i> Value out of reference range!</small>
+                                    {% endif %}
+                                    {% elif fld.type == 'text' %}
+                                    <input type="text" class="form-control template-field" id="result_{{ fid }}" name="result_{{ fid }}"
+                                           data-field-code="{{ fid }}" value="{{ result_json.get(fid, '') }}"
+                                           {% if fld.required %}required{% endif %}>
+                                    {% elif fld.type == 'choice' %}
+                                    <select class="form-control template-field" id="result_{{ fid }}" name="result_{{ fid }}"
+                                            data-field-code="{{ fid }}" {% if fld.required %}required{% endif %}>
+                                        <option value="">-- Select --</option>
+                                        {% for opt in (fld.options or []) %}
+                                        <option value="{{ opt }}" {{ 'selected' if result_json.get(fld.code) == opt else '' }}>{{ opt }}</option>
+                                        {% endfor %}
+                                        {% if fld.optionSet %}
+                                        {% for opt in (option_sets.get(fld.optionSet) or []) %}
+                                        <option value="{{ opt }}" {{ 'selected' if result_json.get(fld.code) == opt else '' }}>{{ opt }}</option>
+                                        {% endfor %}
+                                        {% endif %}
+                                    </select>
+                                    {% elif fld.type == 'multichoice' %}
+                                    <div class="form-control" style="min-height: 80px;">
+                                        {% for opt in (fld.options or []) %}
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input template-field" name="result_{{ fld.code }}" value="{{ opt }}"
+                                                   id="result_{{ fid }}_{{ loop.index }}" data-field-code="{{ fld.code }}"
+                                                   {% if opt in (result_json.get(fld.code) or []) %}checked{% endif %}>
+                                            <label class="form-check-label" for="result_{{ fid }}_{{ loop.index }}">{{ opt }}</label>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% elif fld.type == 'calculated' %}
+                                    {% set calc = (_schema.calculated or []) | selectattr('target_code', 'equalto', fld.code) | first %}
+                                    {% if calc and calc.deps %}
+                                    <input type="text" class="form-control" id="result_{{ fid }}_display" readonly
+                                           data-calc-target="{{ fld.code }}" data-calc-formula="{{ calc.formula }}"
+                                           data-calc-deps="{{ calc.deps | join(',') }}" data-calc-decimals="{{ calc.decimals or 1 }}"
+                                           placeholder="Auto-calculated">
+                                    {% if fld.unit %}<small class="text-muted">{{ fld.unit }}</small>{% endif %}
+                                    {% endif %}
+                                    {% elif fld.type == 'repeat_group' %}
+                                    {% set child_fields = fld.childFields or fld.fields or [] %}
+                                    {% set _rgval = result_json.get(fld.code) %}
+                                    {% set existing_rows = _rgval if (_rgval is defined and _rgval is sequence and _rgval is not string) else [] %}
+                                    <div class="repeat-group-container" data-code="{{ fld.code }}" data-field-id="{{ fid }}">
+                                        <div class="repeat-rows">
+                                            {% for row in existing_rows %}
+                                            {% set row_idx = loop.index0 %}
+                                            <div class="repeat-row card card-outline card-secondary mb-2" data-index="{{ row_idx }}">
+                                                <div class="card-body py-2">
+                                                    <div class="row align-items-end">
+                                                        {% for cf in child_fields %}
+                                                        <div class="col-md-4 form-group mb-0">
+                                                            <label class="small">{{ cf.label or cf.code }}</label>
+                                                            {% if cf.type == 'choice' %}
+                                                            <select class="form-control form-control-sm template-field" name="result_{{ fld.code }}__{{ row_idx }}__{{ cf.code }}" data-field-code="{{ fld.code }}">
+                                                                <option value="">--</option>
+                                                                {% for opt in (cf.options or []) %}
+                                                                <option value="{{ opt }}" {{ 'selected' if (row[cf.code] == opt) else '' }}>{{ opt }}</option>
+                                                                {% endfor %}
+                                                                {% if cf.optionSet %}
+                                                                {% for opt in (option_sets.get(cf.optionSet) or []) %}
+                                                                <option value="{{ opt }}" {{ 'selected' if (row[cf.code] == opt) else '' }}>{{ opt }}</option>
+                                                                {% endfor %}
+                                                                {% endif %}
+                                                            </select>
+                                                            {% elif cf.type == 'text' %}
+                                                            <input type="text" class="form-control form-control-sm template-field" name="result_{{ fld.code }}__{{ row_idx }}__{{ cf.code }}" value="{{ row[cf.code] or '' }}" data-field-code="{{ fld.code }}">
+                                                            {% else %}
+                                                            <input type="text" class="form-control form-control-sm template-field" name="result_{{ fld.code }}__{{ row_idx }}__{{ cf.code }}" value="{{ row[cf.code] or '' }}" data-field-code="{{ fld.code }}">
+                                                            {% endif %}
+                                                        </div>
+                                                        {% endfor %}
+                                                        <div class="col-auto"><button type="button" class="btn btn-sm btn-outline-danger repeat-remove"><i class="fas fa-times"></i></button></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                            <div class="repeat-row-template d-none">
+                                                <div class="repeat-row card card-outline card-secondary mb-2">
+                                                    <div class="card-body py-2">
+                                                        <div class="row align-items-end">
+                                                            {% for cf in child_fields %}
+                                                            <div class="col-md-4 form-group mb-0">
+                                                                <label class="small">{{ cf.label or cf.code }}</label>
+                                                                {% if cf.type == 'choice' %}
+                                                                <select class="form-control form-control-sm template-field" name="result_{{ fld.code }}__REPLACE_IDX__{{ cf.code }}" data-field-code="{{ fld.code }}">
+                                                                    <option value="">--</option>
+                                                                    {% for opt in (cf.options or []) %}
+                                                                    <option value="{{ opt }}">{{ opt }}</option>
+                                                                    {% endfor %}
+                                                                    {% if cf.optionSet %}
+                                                                    {% for opt in (option_sets.get(cf.optionSet) or []) %}
+                                                                    <option value="{{ opt }}">{{ opt }}</option>
+                                                                    {% endfor %}
+                                                                    {% endif %}
+                                                                </select>
+                                                                {% elif cf.type == 'text' %}
+                                                                <input type="text" class="form-control form-control-sm template-field" name="result_{{ fld.code }}__REPLACE_IDX__{{ cf.code }}" data-field-code="{{ fld.code }}">
+                                                                {% else %}
+                                                                <input type="text" class="form-control form-control-sm template-field" name="result_{{ fld.code }}__REPLACE_IDX__{{ cf.code }}" data-field-code="{{ fld.code }}">
+                                                                {% endif %}
+                                                            </div>
+                                                            {% endfor %}
+                                                            <div class="col-auto"><button type="button" class="btn btn-sm btn-outline-danger repeat-remove"><i class="fas fa-times"></i></button></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-outline-primary repeat-add"><i class="fas fa-plus mr-1"></i>Add row</button>
+                                    </div>
+                                    {% elif fld.type == 'table' %}
+                                    {% set row_opts = (option_sets.get(fld.rowOptionSet or '') or fld.rowOptions or []) %}
+                                    {% set col_opts = (option_sets.get(fld.colOptionSet or '') or fld.colOptions or []) %}
+                                    {% set cell_opts = fld.cellOptions or ['S', 'I', 'R'] %}
+                                    {% set _tval = result_json.get(fld.code) %}
+                                    {% set ast_data = _tval if (_tval is defined and _tval is mapping) else {} %}
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered ast-table" data-code="{{ fld.code }}">
+                                            <thead>
+                                                <tr><th>{{ fld.label }}</th>{% for c in col_opts %}<th class="text-center small">{{ c }}</th>{% endfor %}</tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for r in row_opts %}
+                                                {% set row_idx = loop.index0 %}
+                                                <tr>
+                                                    <td class="small">{{ r }}</td>
+                                                    {% for c in col_opts %}
+                                                    {% set cell_val = ast_data.get(r, {}).get(c, '') if ast_data is mapping else '' %}
+                                                    <td class="p-1">
+                                                        <select class="form-control form-control-sm ast-cell" name="result_{{ fld.code }}__r{{ row_idx }}__c{{ loop.index0 }}" data-row-val="{{ r }}" data-col-val="{{ c }}" data-field-code="{{ fld.code }}">
+                                                            <option value="">-</option>
+                                                            {% for opt in cell_opts %}<option value="{{ opt }}" {{ 'selected' if cell_val == opt else '' }}>{{ opt }}</option>{% endfor %}
+                                                        </select>
+                                                    </td>
+                                                    {% endfor %}
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {% else %}
+                                    <input type="text" class="form-control template-field" id="result_{{ fid }}" name="result_{{ fld.code }}"
+                                           value="{{ result_json.get(fld.code, '') }}">
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endfor %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+            {% if has_critical_fields %}
+            <div class="mb-4 border border-danger rounded p-3" id="critical-comms-section">
+                <h5 class="text-danger"><i class="fas fa-exclamation-triangle mr-1"></i> Critical Result Communication</h5>
+                <p class="text-muted small">Required when any result is critical. Document that the responsible clinician was notified.</p>
+                <div class="form-row">
+                    <div class="form-group col-md-4">
+                        <label>Critical result called? *</label>
+                        <select name="critical_called" class="form-control">
+                            <option value="">-- Select --</option>
+                            <option value="Yes" {{ 'selected' if lab_order.critical_called else '' }}>Yes</option>
+                            <option value="No">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label>Date/Time called</label>
+                        <input type="datetime-local" name="critical_called_at" class="form-control"
+                               value="{{ lab_order.critical_called_at.strftime('%Y-%m-%dT%H:%M') if lab_order.critical_called_at else '' }}">
+                    </div>
+                    <div class="form-group col-md-4">
+                        <label>Called to (person/role)</label>
+                        <input type="text" name="critical_called_to" class="form-control"
+                               value="{{ lab_order.critical_called_to or '' }}" placeholder="e.g. Dr. Smith">
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            <div class="form-group">
+                <label>Comments (optional)</label>
+                <textarea class="form-control" name="result_comment" rows="2">{{ result_json.get('comment', '') }}</textarea>
+            </div>
+        </div>
+        <div class="card-footer">
+            <button type="submit" name="action" value="save_draft" class="btn btn-secondary mr-2">
+                <i class="fas fa-save mr-1"></i> Save Draft
+            </button>
+            <button type="submit" name="action" value="submit" class="btn btn-success">
+                <i class="fas fa-check mr-1"></i> Submit for Verification
+            </button>
+        </div>
+    </form>
+</div>
+<script>
+(document.addEventListener('DOMContentLoaded', function() {
+    // Conditional visibility (showIf)
+    var fields = document.querySelectorAll('.field-row[data-show-if-field]');
+    function updateVisibility() {
+        fields.forEach(function(row) {
+            var fieldCode = row.dataset.showIfField;
+            var op = row.dataset.showIfOp;
+            var value = row.dataset.showIfValue;
+            if (!fieldCode) return;
+            var inputs = document.querySelectorAll('[name="result_' + fieldCode + '"], [data-field-code="' + fieldCode + '"]');
+            var actual = '';
+            if (inputs.length) {
+                var first = inputs[0];
+                if (first.type === 'checkbox') {
+                    var checked = Array.prototype.slice.call(inputs).filter(function(x) { return x.checked; });
+                    actual = checked.length ? checked.map(function(x) { return x.value; }) : '';
+                } else {
+                    actual = first.value || '';
+                }
+            }
+            var show = (op === '==' && actual == value) || (op === '!=' && actual != value);
+            row.classList.toggle('d-none', !show);
+        });
+    }
+    document.querySelectorAll('.template-field, select.template-field').forEach(function(el) {
+        el.addEventListener('change', updateVisibility);
+        el.addEventListener('input', updateVisibility);
+    });
+    updateVisibility();
+    // Calculated fields
+    document.querySelectorAll('[data-calc-target]').forEach(function(display) {
+        function recalc() {
+            var deps = display.dataset.calcDeps.split(',');
+            var decimals = parseInt(display.dataset.calcDecimals, 10) || 1;
+            var ns = {};
+            deps.forEach(function(d) {
+                var inp = document.querySelector('[name="result_' + d.trim() + '"]');
+                var v = inp ? parseFloat(inp.value) || 0 : 0;
+                ns[d.trim()] = v;
+            });
+            try {
+                var formula = display.dataset.calcFormula;
+                var result = eval(formula);
+                display.value = typeof result === 'number' ? result.toFixed(decimals) : result;
+            } catch(e) { display.value = ''; }
+        }
+        deps = display.dataset.calcDeps.split(',');
+        deps.forEach(function(d) {
+            var inp = document.querySelector('[name="result_' + d.trim() + '"]');
+            if (inp) { inp.addEventListener('input', recalc); inp.addEventListener('change', recalc); }
+        });
+        recalc();
+    });
+    // Repeat group add/remove
+    document.querySelectorAll('.repeat-group-container').forEach(function(container) {
+        var code = container.dataset.code;
+        var tpl = container.querySelector('.repeat-row-template .repeat-row');
+        var rowsCont = container.querySelector('.repeat-rows');
+        container.querySelector('.repeat-add').addEventListener('click', function() {
+            if (!tpl) return;
+            var idx = rowsCont.querySelectorAll('.repeat-row').length;
+            var clone = tpl.cloneNode(true);
+            clone.classList.remove('d-none');
+            clone.dataset.index = idx;
+            clone.querySelectorAll('[name]').forEach(function(inp) {
+                inp.name = inp.name.replace('REPLACE_IDX', idx);
+            });
+            rowsCont.insertBefore(clone, container.querySelector('.repeat-row-template'));
+        });
+        container.addEventListener('click', function(e) {
+            if (e.target.closest('.repeat-remove')) {
+                e.target.closest('.repeat-row').remove();
+                rowsCont.querySelectorAll('.repeat-row').forEach(function(row, i) {
+                    if (row.closest('.repeat-row-template')) return;
+                    row.dataset.index = i;
+                    row.querySelectorAll('[name]').forEach(function(inp) {
+                        if (inp.name.indexOf('result_' + code + '__') === 0) {
+                            inp.name = inp.name.replace(/result_[^_]+__\d+__/, 'result_' + code + '__' + i + '__');
+                        }
+                    });
+                });
+            }
+        });
+    });
+}
+
+// Reference range checking function
+function checkReferenceRange(input, fieldCode) {
+    var value = parseFloat(input.value);
+    var abnormalEl = document.getElementById('abnormal_' + fieldCode);
+    
+    // Get reference range from the data attributes or lookup
+    var refRangesData = {{ ref_ranges | tojson | safe }};
+    var refRange = refRangesData[fieldCode];
+    
+    if (refRange && !isNaN(value)) {
+        var low = refRange.low;
+        var high = refRange.high;
+        
+        if (value < low || value > high) {
+            // Show abnormal warning
+            if (abnormalEl) {
+                abnormalEl.classList.remove('d-none');
+            }
+            input.classList.add('border-danger');
+            input.classList.remove('border-success');
+        } else {
+            // Value is normal
+            if (abnormalEl) {
+                abnormalEl.classList.add('d-none');
+            }
+            input.classList.remove('border-danger');
+            input.classList.add('border-success');
+        }
+    } else {
+        // No reference range or invalid value
+        if (abnormalEl) {
+            abnormalEl.classList.add('d-none');
+        }
+        input.classList.remove('border-danger', 'border-success');
+    }
+}
+
+// Check all numeric fields on page load
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.template-field[type="number"]').forEach(function(input) {
+        var fieldCode = input.dataset.fieldCode;
+        if (fieldCode) {
+            checkReferenceRange(input, fieldCode);
+        }
+    });
+});
+</script>

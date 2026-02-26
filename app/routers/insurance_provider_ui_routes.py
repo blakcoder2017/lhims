@@ -5,7 +5,7 @@ UI routes for managing insurance providers.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Form, Request, Query
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -20,7 +20,6 @@ router = APIRouter(
     tags=["Insurance Providers UI"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/insurance-providers", name="insurance_providers_list")

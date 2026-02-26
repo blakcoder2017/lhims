@@ -10,7 +10,11 @@
                     <div class="col-sm-6">
                         <h1>
                             <i class="fas fa-money-bill-wave mr-2"></i>
+                            {% if service_type == 'consultation' and from_registration %}
+                            Complete registration – Pay consultation fee
+                            {% else %}
                             Pay {{ service_type|title }} Fee
+                            {% endif %}
                         </h1>
                     </div>
                     <div class="col-sm-6">
@@ -75,6 +79,12 @@
                             {% endif %}
                             {% if new_visit %}
                             <input type="hidden" name="new_visit" value="{{ new_visit }}">
+                            {% endif %}
+                            {% if service_type == 'consultation' and from_registration %}
+                            <input type="hidden" name="from_registration" value="1">
+                            {% endif %}
+                            {% if service_type == 'consultation' and department %}
+                            <input type="hidden" name="department" value="{{ department }}">
                             {% endif %}
 
                             <div class="row">

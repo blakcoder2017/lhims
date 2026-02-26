@@ -2,7 +2,7 @@
 API routes for backup and recovery management.
 """
 from fastapi import APIRouter, Depends, Request, HTTPException, Query, Form
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse, FileResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
@@ -22,7 +22,6 @@ from app.services.backup_scheduler import (
 )
 
 router = APIRouter(tags=["Backup"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/admin/backup", name="backup_dashboard")

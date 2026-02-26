@@ -19,11 +19,17 @@ from datetime import date, timedelta
 
 
 def is_cash_patient(db: Session, patient_id: int) -> bool:
-    """Check if patient is a cash-only patient."""
+    """Check if patient is a cash-only patient or has no payment mechanism set.
+    
+    Patients with NULL payment_mechanism are treated as cash patients - they must pay
+    before services like lab results can be entered.
+    """
     patient = db.query(Patient).filter(Patient.id == patient_id).first()
     if not patient:
         return False
-    return patient.payment_mechanism == PaymentMechanism.CASH
+    # Treat NULL/None payment_mechanism as CASH (require payment before results)
+    # Only NHIS and PRIVATE_INSURANCE patients can bypass payment
+    return patient.payment_mechanism is None or patient.payment_mechanism == PaymentMechanism.CASH
 
 
 def is_patient_admitted(db: Session, patient_id: int) -> bool:
@@ -42,10 +48,9 @@ def requires_payment_before_service(
     Determine if payment is required before a service can be performed.
     
     Rules:
-    - Cash OPD patients: Pay-as-you-go (payment required for all services)
-    - Cash IPD patients: 
-      - Admission/bed fees: Paid at discharge ONLY
-      - ALL other services: Pay-as-you-go (labs, imaging, procedures, drugs, consumables)
+    - Cash OPD patients: Pay-as-you-go (payment required for labs, radiology, pharmacy, etc. before service)
+    - Cash IPD patients: All services (admission, bed, labs, imaging, procedures, pharmacy) are billed
+      and paid at discharge; no pay-as-you-go (return False for all when admitted).
     - Insurance patients: No immediate payment required
     - Emergency patients: Payment after stabilization (bypass for consultation)
     """
@@ -63,21 +68,14 @@ def requires_payment_before_service(
     
     is_admitted = is_patient_admitted(db, patient_id)
     
-    # For admitted patients (IPD cash patients):
+    # For admitted patients (IPD cash): all services paid at discharge, no pay-as-you-go
     if is_admitted:
-        # Admission/bed charges paid at discharge
-        if service_type == ChargeType.ADMISSION:
-            return False
-        # Triage/vitals for inpatients = monitoring; do not require consultation payment
-        if service_type == ChargeType.CONSULTATION:
-            return False
-        # All other services (labs, imaging, procedures, pharmacy) are pay-as-you-go
-        return True
-    
-    # OPD cash: consultation + labs paid AFTER doctor orders (not before triage/check-in/encounter).
-    # So do NOT require payment before consultation (triage/check-in/encounter).
-    if service_type == ChargeType.CONSULTATION:
         return False
+    
+    # OPD cash: consultation paid at registration (new) or before triage (returning).
+    # Payment required before patient is added to triage.
+    if service_type == ChargeType.CONSULTATION:
+        return True
     # For lab: payment is enforced via has_visit_invoice_been_paid before lab result entry (see ancillary).
     # Radiology and pharmacy remain pay-before-service (separate flow).
     return True
@@ -392,31 +390,70 @@ def has_visit_invoice_been_paid(
     encounter_id: Optional[int] = None,
     opd_visit_id: Optional[int] = None,
     patient_id: Optional[int] = None,
+    lab_order_id: Optional[int] = None,
 ) -> bool:
     """
     Check if the visit invoice (consultation + lab for this encounter/OPD visit) has been paid.
     Used for OPD cash flow: lab result entry allowed only when this returns True.
 
-    Returns True if: no invoice found (nothing to pay), or invoice balance <= 0 / status PAID.
-    Returns False if: invoice exists and has unpaid balance (payment required before lab result).
+    Returns True if: invoice balance <= 0 / status PAID, OR all lab order charges are paid.
+    Returns False if: invoice exists and has unpaid balance, OR lab order has unpaid charges.
     """
-    if not encounter_id and not opd_visit_id:
-        return True
-    q = db.query(Invoice).filter(Invoice.is_active == True)
-    if encounter_id:
-        q = q.filter(Invoice.encounter_id == encounter_id)
-    if opd_visit_id:
-        q = q.filter(Invoice.opd_visit_id == opd_visit_id)
+    from app.models.billing_models import Invoice, InvoiceStatus, Charge, ChargeType
+    
+    # Check encounter/opd_visit invoice first
+    if encounter_id or opd_visit_id:
+        q = db.query(Invoice).filter(Invoice.is_active == True)
+        if encounter_id:
+            q = q.filter(Invoice.encounter_id == encounter_id)
+        if opd_visit_id:
+            q = q.filter(Invoice.opd_visit_id == opd_visit_id)
+        if patient_id:
+            q = q.filter(Invoice.patient_id == patient_id)
+        invoice = q.first()
+        if invoice:
+            if invoice.balance is not None and invoice.balance <= Decimal("0"):
+                return True
+            if invoice.status == InvoiceStatus.PAID.value:
+                return True
+            # Invoice exists with unpaid balance - require payment
+            return False
+    
+    # If no encounter/opd_visit invoice, check lab order-specific charges
+    # For cash patients, lab order charges must be paid before results can be entered
+    if lab_order_id:
+        lab_charge = db.query(Charge).filter(
+            Charge.lab_order_id == lab_order_id,
+            Charge.charge_type == ChargeType.LAB_TEST,
+            Charge.is_active == True
+        ).first()
+        if lab_charge and lab_charge.invoice:
+            invoice = lab_charge.invoice
+            if invoice.balance is not None and invoice.balance <= Decimal("0"):
+                return True
+            if invoice.status == InvoiceStatus.PAID.value:
+                return True
+            # Lab charge exists but not paid - require payment
+            return False
+        # No lab charge found - this could mean no charge was created yet
+        # For cash patients, this means payment is required
+        return False
+    
+    # If we have a patient_id but no encounter/opd_visit/lab_order, 
+    # check for any unpaid invoices for this patient
     if patient_id:
-        q = q.filter(Invoice.patient_id == patient_id)
-    invoice = q.first()
-    if not invoice:
-        return True
-    if invoice.balance is not None and invoice.balance <= Decimal("0"):
-        return True
-    if invoice.status == InvoiceStatus.PAID.value:
-        return True
-    return False
+        patient_invoices = db.query(Invoice).filter(
+            Invoice.patient_id == patient_id,
+            Invoice.is_active == True,
+            Invoice.status != InvoiceStatus.PAID.value
+        ).all()
+        # Check if any have unpaid balance
+        for inv in patient_invoices:
+            if inv.balance and inv.balance > Decimal("0"):
+                return False
+    
+    # Default: allow if we can't find any reason to block
+    return True
 
 
 def check_payment_required_and_paid(
@@ -586,4 +623,50 @@ def verify_encounter_workflow(
     
     # All checks passed
     return (True, None, vitals_record, appointment_record, payment_info)
+
+
+def link_existing_charge_to_encounter(
+    db: Session,
+    patient_id: int,
+    encounter_id: int,
+    charge_type: ChargeType = ChargeType.CONSULTATION
+) -> Optional[Charge]:
+    """
+    Link an existing paid consultation charge to an encounter.
+    This prevents duplicate charges when a patient has already paid for consultation
+    at registration and then visits the doctor.
+    
+    Args:
+        db: Database session
+        patient_id: The patient ID
+        encounter_id: The encounter ID to link the charge to
+        charge_type: The type of charge to search for (default: CONSULTATION)
+    
+    Returns:
+        The linked charge if found and linked, None otherwise
+    """
+    from sqlalchemy import func
+    from datetime import date
+    
+    # Find PAID consultation charge from today that hasn't been linked to an encounter yet
+    charge = db.query(Charge).join(Invoice).filter(
+        Invoice.patient_id == patient_id,
+        Charge.charge_type == charge_type,
+        Charge.encounter_id.is_(None),  # Not yet linked to any encounter
+        Invoice.is_active == True,
+        Invoice.balance <= Decimal('0'),  # PAID (balance is zero or less)
+        Invoice.status == InvoiceStatus.PAID,  # Status is PAID
+        func.date(Invoice.invoice_date) == date.today()
+    ).first()
+    
+    if charge:
+        # Link the existing charge to this encounter
+        charge.encounter_id = encounter_id
+        db.commit()
+        db.refresh(charge)
+        print(f"[CHARGE_LINK] Linked existing charge {charge.id} to encounter {encounter_id} for patient {patient_id}")
+        return charge
+    
+    print(f"[CHARGE_LINK] No existing paid charge found for patient {patient_id} to link to encounter {encounter_id}")
+    return None
 

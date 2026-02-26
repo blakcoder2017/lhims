@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Query
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
@@ -15,7 +15,19 @@ from app.models.patient_models import Patient
 from app.crud import encounter_crud
 
 router = APIRouter(tags=["Lab Tracking"])
-templates = Jinja2Templates(directory="app/templates")
+# Register the age filter
+from datetime import date
+def calculate_age(dob):
+    if not dob:
+        return None
+    if isinstance(dob, str):
+        dob = date.fromisoformat(dob)
+    today = date.today()
+    age = today.year - dob.year
+    if (today.month, today.day) < (dob.month, dob.day):
+        age -= 1
+    return age
+templates.env.filters["age"] = calculate_age
 
 
 def generate_barcode() -> str:
@@ -25,6 +37,12 @@ def generate_barcode() -> str:
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     unique_id = str(uuid.uuid4())[:8].upper()
     return f"{prefix}-{timestamp}-{unique_id}"
+
+
+@router.get("/lab", name="lab_index")
+def lab_index():
+    """Redirect /lab to /lab/samples"""
+    return RedirectResponse(url="/lab/samples", status_code=302)
 
 
 @router.get("/lab/samples", name="lab_samples_dashboard")
@@ -42,7 +60,9 @@ def lab_samples_dashboard(
     )
     
     if status_filter:
-        if status_filter.lower() == "all":
+        # Normalize to lowercase to match database enum values
+        status_filter = status_filter.lower()
+        if status_filter == "all":
             # Show all samples when "all" is selected
             pass
         else:
@@ -55,7 +75,10 @@ def lab_samples_dashboard(
         # Default: show only COLLECTED samples (pending - not yet received)
         query = query.filter(LabSample.status == SampleStatus.COLLECTED.value)
     
-    samples = query.filter(LabSample.is_active == True).order_by(LabSample.created_at.desc()).limit(100).all()
+    samples = query.filter(
+        LabSample.is_active == True,
+        LabSample.lab_order.has(LabOrder.encounter_id != None)
+    ).order_by(LabSample.created_at.desc()).limit(100).all()
     
     context = {
         "request": request,
@@ -92,7 +115,7 @@ def view_lab_sample(
         "current_user": current_user,
         "user_role": current_user.role.name,
         "sample": sample,
-        "patient": sample.lab_order.encounter.patient
+        "patient": sample.lab_order.encounter.patient if sample.lab_order.encounter else sample.lab_order.patient
     }
     return templates.TemplateResponse("lab/sample_detail.html", context)
 
@@ -179,6 +202,8 @@ def qc_dashboard(
     )
     
     if status_filter:
+        # Normalize to lowercase to match database enum values
+        status_filter = status_filter.lower()
         try:
             status_enum = QCStatus(status_filter)
             query = query.filter(QCRecord.status == status_enum.value)
@@ -196,6 +221,33 @@ def qc_dashboard(
         "status_filter": status_filter
     }
     return templates.TemplateResponse("lab/qc_dashboard.html", context)
+
+
+@router.get("/lab/analytics", name="lab_analytics_dashboard")
+def lab_analytics_dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Lab Staff", "Admin", "Doctor"])),
+    days: int = 30
+):
+    """Lab Analytics Dashboard"""
+    from datetime import timedelta
+    from app.services.lab_analytics_service import get_lab_analytics
+    
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    
+    analytics = get_lab_analytics(db, start_date, end_date)
+    
+    context = {
+        "request": request,
+        "title": "Lab Analytics",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "analytics": analytics,
+        "days": days
+    }
+    return templates.TemplateResponse("lab/analytics_dashboard.html", context)
 
 
 @router.post("/lab/qc/create", name="create_qc_record", status_code=302)

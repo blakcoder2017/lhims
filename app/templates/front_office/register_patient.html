@@ -3,7 +3,7 @@
 
     {% include "includes/sidebar_navbar.html" %} 
 
-    <div class="content-wrapper">
+    <div class="content-wrapper" data-nhis-enabled="{% if nhis_enabled == false %}false{% else %}true{% endif %}" data-private-insurance-enabled="{% if private_insurance_enabled == false %}false{% else %}true{% endif %}">
         <section class="content-header">
             <div class="container-fluid">
                 <div class="row mb-2">
@@ -22,12 +22,123 @@
 
         <section class="content">
             <div class="container-fluid">
-                <div class="card card-primary card-outline">
+                <!-- Mode Toggle: New Patient vs Start Visit (Existing) -->
+                <div class="row mb-3">
+                    <div class="col-md-12">
+                        <div class="btn-group btn-group-toggle" data-toggle="buttons" id="registrationModeGroup">
+                            <label class="btn btn-outline-primary active" id="labelNewPatient">
+                                <input type="radio" name="registration_mode" value="new" checked>
+                                <i class="fas fa-user-plus mr-1"></i> Register New Patient
+                            </label>
+                            <label class="btn btn-outline-primary" id="labelExistingPatient">
+                                <input type="radio" name="registration_mode" value="existing">
+                                <i class="fas fa-redo mr-1"></i> Start Visit (Existing Patient)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Start Visit: Existing Patient -->
+                <div id="existingPatientCard" class="card card-info card-outline" style="display: none;">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-search mr-1"></i> Search and select patient</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <div class="form-group">
+                                    <label for="existingPatientSearch">Search by name, patient number, or phone</label>
+                                    <input type="text" class="form-control" id="existingPatientSearch" placeholder="Type to search..." autocomplete="off">
+                                    <input type="hidden" id="existingPatientId" name="existing_patient_id">
+                                    <div id="existingPatientResults" class="list-group mt-2" style="display: none; max-height: 250px; overflow-y: auto;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="selectedPatientInfo" class="alert alert-light border mb-3" style="display: none;">
+                            <strong>Selected:</strong> <span id="selectedPatientName">—</span>
+                            <span class="badge badge-primary ml-2" id="selectedPatientNumber">—</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary float-right" id="clearPatientSelection">Clear</button>
+                        </div>
+                        <div id="existingVisitDetails" style="display: none;">
+                            <hr>
+                            <h5 class="mb-2">Visit details</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="existingDepartment">Department <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="existingDepartment">
+                                            <option value="">Select Department</option>
+                                            {% if departments %}
+                                            {% for dept in departments %}
+                                            <option value="{{ dept.name }}" data-full="{{ dept.consultation_price or '' }}" data-revisit="">{{ dept.name }}{% if dept.consultation_price %} – GHS {{ "%.2f"|format(dept.consultation_price) }}{% endif %}</option>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group" id="visitTypeGroupExisting">
+                                        <label>Visit type</label>
+                                        <div class="btn-group btn-group-toggle" data-toggle="buttons">
+                                            <label class="btn btn-outline-secondary active" id="labelVisitNew">
+                                                <input type="radio" name="existing_visit_type" value="new" checked> New visit (full fee)
+                                            </label>
+                                            <label class="btn btn-outline-success" id="labelVisitRevisit" style="display: none;">
+                                                <input type="radio" name="existing_visit_type" value="revisit"> Revisit / Follow-up
+                                                <span class="badge badge-success ml-1" id="revisitDiscountBadge">%</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Payment Method Selection -->
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="existingPaymentMechanism">Payment Method</label>
+                                        <select class="form-control" id="existingPaymentMechanism" name="payment_mechanism">
+                                            <option value="">Loading...</option>
+                                        </select>
+                                        <small class="form-text text-muted">Change payment method if needed</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6" id="existingNhisFields" style="display: none;">
+                                    <div class="form-group">
+                                        <label for="existingNhisNumber">NHIS Number</label>
+                                        <input type="text" class="form-control" id="existingNhisNumber" name="nhis_number" placeholder="Enter NHIS Number">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row" id="existingNhisExpiryRow" style="display: none;">
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="existingNhisExpiry">NHIS Expiry Date</label>
+                                        <input type="date" class="form-control" id="existingNhisExpiry" name="nhis_expiry_date">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-2" id="existingFeeDisplay">
+                                <strong>Fee:</strong> <span id="existingFeeValue">—</span>
+                            </div>
+                            <form method="POST" action="{{ url_for('start_visit_from_registration') }}" id="existingVisitForm">
+                                <input type="hidden" name="patient_id" id="existingFormPatientId">
+                                <input type="hidden" name="department" id="existingFormDepartment">
+                                <input type="hidden" name="visit_type" id="existingFormVisitType">
+                                <button type="submit" class="btn btn-success btn-lg">
+                                    <i class="fas fa-credit-card mr-2"></i> Proceed to collect payment
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- New Patient Form -->
+                <div id="newPatientCard" class="card card-primary card-outline">
                     <div class="card-header patient-header">
                         <h3 class="card-title"><i class="fas fa-user-plus mr-1"></i> New Patient Demographics</h3>
                     </div>
                     
-                    <form method="POST" action="/api/v1/patients/register"> 
+                    <form method="POST" action="/api/v1/patients/register" id="newPatientForm"> 
                         <div class="card-body">
                             
                             <!-- Emergency Case Alert -->
@@ -126,17 +237,38 @@
                             </div>
 
                             <h5 class="mt-4 mb-2">Financial Screening (Step 3)</h5>
+                            <div class="alert alert-info py-2 mb-3">
+                                <strong>Cash patients:</strong> Payment is recorded on the next screen after you save. You will collect the consultation fee, print the receipt, then the patient is added to triage.
+                            </div>
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
-                                        <label for="paymentMechanism">Payment Mechanism</label>
-                                        <select class="form-control" id="paymentMechanism" name="payment_mechanism" onchange="toggleInsuranceFields()">
-                                            <option value="">Select Payment Method</option>
+                                        <label for="department">Department (for this visit) <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="department" name="department" required>
+                                            <option value="" data-price="">Select Department</option>
+                                            {% if departments %}
+                                            {% for dept in departments %}
+                                            <option value="{{ dept.name }}" data-price="{{ dept.consultation_price if dept.consultation_price is not none else '' }}">{{ dept.name }}</option>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </select>
+                                        <div id="departmentPriceDisplay" class="mt-1 font-weight-bold text-primary" style="font-size: 1rem;">
+                                            Consultation fee: <span id="departmentPriceValue">—</span>
+                                        </div>
+                                        <small class="form-text text-muted">Determines consultation fee. Cash patients will pay this amount on the next screen.</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-group">
+                                        <label for="paymentMechanism">Payment Mechanism <span class="text-danger">*</span></label>
+                                        <select class="form-control" id="paymentMechanism" name="payment_mechanism" onchange="toggleInsuranceFields()" required>
+                                            <option value="" disabled>Select Payment Method</option>
                                             <option value="cash">Cash</option>
-                                            <option value="nhis">NHIS (National Health Insurance Scheme)</option>
-                                            <option value="private_insurance">Private Insurance</option>
+                                            {% if nhis_enabled != false %}<option value="nhis">NHIS (National Health Insurance Scheme)</option>{% endif %}
+                                            {% if private_insurance_enabled != false %}<option value="private_insurance">Private Insurance</option>{% endif %}
                                             <option value="self_pay">Self Pay</option>
                                         </select>
+                                        <small class="form-text text-muted">Cash: collect payment on next screen → receipt → then to triage.</small>
                                     </div>
                                 </div>
                             </div>
@@ -269,10 +401,26 @@
                                     }
                                 }
                                 
+                                function updateDepartmentPrice() {
+                                    const sel = document.getElementById('department');
+                                    const display = document.getElementById('departmentPriceValue');
+                                    if (!sel || !display) return;
+                                    const opt = sel.options[sel.selectedIndex];
+                                    const price = opt ? opt.getAttribute('data-price') : '';
+                                    if (price !== '' && price !== null && !isNaN(parseFloat(price))) {
+                                        display.textContent = 'GHS ' + parseFloat(price).toFixed(2);
+                                    } else {
+                                        display.textContent = '—';
+                                    }
+                                }
+
                                 // Initialize on page load
                                 document.addEventListener('DOMContentLoaded', function() {
                                     toggleInsuranceFields();
                                     toggleEmergencyAlert();
+                                    updateDepartmentPrice();
+                                    const deptSel = document.getElementById('department');
+                                    if (deptSel) deptSel.addEventListener('change', updateDepartmentPrice);
                                 });
                             </script>
                             
@@ -284,6 +432,214 @@
                 </div>
             </div>
         </section>
+
+        <script>
+        (function() {
+            // Mode toggle
+            const modeNew = document.getElementById('labelNewPatient');
+            const modeExisting = document.getElementById('labelExistingPatient');
+            const newCard = document.getElementById('newPatientCard');
+            const existingCard = document.getElementById('existingPatientCard');
+            const newForm = document.getElementById('newPatientForm');
+
+            function showMode(mode) {
+                if (mode === 'new') {
+                    newCard.style.display = 'block';
+                    existingCard.style.display = 'none';
+                    if (newForm) newForm.querySelectorAll('[required]').forEach(el => el.required = true);
+                } else {
+                    newCard.style.display = 'none';
+                    existingCard.style.display = 'block';
+                    if (newForm) newForm.querySelectorAll('[required]').forEach(el => el.required = false);
+                }
+            }
+            document.querySelectorAll('input[name="registration_mode"]').forEach(r => {
+                r.addEventListener('change', function() { showMode(this.value); });
+            });
+
+            // Patient search (existing flow)
+            const searchInput = document.getElementById('existingPatientSearch');
+            const resultsDiv = document.getElementById('existingPatientResults');
+            const patientIdInput = document.getElementById('existingPatientId');
+            const selectedInfo = document.getElementById('selectedPatientInfo');
+            const selectedName = document.getElementById('selectedPatientName');
+            const selectedNumber = document.getElementById('selectedPatientNumber');
+            const clearBtn = document.getElementById('clearPatientSelection');
+            const visitDetails = document.getElementById('existingVisitDetails');
+            const deptSel = document.getElementById('existingDepartment');
+            const labelVisitRevisit = document.getElementById('labelVisitRevisit');
+            const existingFeeValue = document.getElementById('existingFeeValue');
+            const paymentMechanismSelect = document.getElementById('existingPaymentMechanism');
+            const nhisFields = document.getElementById('existingNhisFields');
+            const nhisExpiryRow = document.getElementById('existingNhisExpiryRow');
+            const nhisNumberInput = document.getElementById('existingNhisNumber');
+            const nhisExpiryInput = document.getElementById('existingNhisExpiry');
+
+            let searchTimeout;
+            let revisitDiscountPct = null;
+            let currentPatientData = null;
+            searchInput.addEventListener('input', function() {
+                const q = (this.value || '').trim();
+                clearTimeout(searchTimeout);
+                if (q.length < 2) {
+                    resultsDiv.style.display = 'none';
+                    return;
+                }
+                searchTimeout = setTimeout(function() {
+                    fetch('/api/v1/patients/search?query=' + encodeURIComponent(q) + '&limit=10')
+                        .then(res => res.json())
+                        .then(patients => {
+                            if (!patients || patients.length === 0) {
+                                resultsDiv.innerHTML = '<div class="list-group-item text-muted">No patients found</div>';
+                            } else {
+                                resultsDiv.innerHTML = patients.map(p => 
+                                    '<a href="#" class="list-group-item list-group-item-action" ' +
+                                    'data-id="' + p.id + '" ' +
+                                    'data-name="' + (p.first_name + ' ' + p.last_name).replace(/"/g, '&quot;') + '" ' +
+                                    'data-number="' + (p.patient_number || '').replace(/"/g, '&quot;') + '" ' +
+                                    'data-payment="' + (p.payment_mechanism || '').replace(/"/g, '&quot;') + '" ' +
+                                    'data-nhis="' + (p.nhis_number || '').replace(/"/g, '&quot;') + '" ' +
+                                    'data-nhis-expiry="' + (p.nhis_expiry_date || '').replace(/"/g, '&quot;') + '">' +
+                                    '<strong>' + (p.first_name + ' ' + p.last_name) + '</strong> ' +
+                                    '<span class="badge badge-primary ml-1">' + (p.patient_number || '—') + '</span> ' +
+                                    (p.payment_mechanism ? '<span class="badge badge-info ml-1">' + p.payment_mechanism + '</span>' : '') +
+                                    '</a>'
+                                ).join('');
+                            }
+                            resultsDiv.style.display = 'block';
+                        })
+                        .catch(() => { resultsDiv.innerHTML = '<div class="list-group-item text-danger">Error searching</div>'; resultsDiv.style.display = 'block'; });
+                }, 300);
+            });
+
+            resultsDiv.addEventListener('click', function(e) {
+                const item = e.target.closest('a[data-id]');
+                if (!item) return;
+                e.preventDefault();
+                const id = item.dataset.id;
+                const name = item.dataset.name;
+                const number = item.dataset.number || '—';
+                const payment = item.dataset.payment || '';
+                const nhisNumber = item.dataset.nhis || '';
+                const nhisExpiry = item.dataset.nhisExpiry || '';
+                
+                patientIdInput.value = id;
+                selectedName.textContent = name;
+                selectedNumber.textContent = number;
+                selectedInfo.style.display = 'block';
+                resultsDiv.style.display = 'none';
+                searchInput.value = '';
+
+                document.getElementById('existingFormPatientId').value = id;
+                visitDetails.style.display = 'block';
+
+                // Populate payment mechanism dropdown
+                currentPatientData = {
+                    payment_mechanism: payment,
+                    nhis_number: nhisNumber,
+                    nhis_expiry_date: nhisExpiry
+                };
+                populatePaymentMechanism(payment, nhisNumber, nhisExpiry);
+
+                // Fetch revisit eligibility
+                revisitDiscountPct = null;
+                fetch('/api/v1/patients/' + id + '/revisit-eligible')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.eligible && data.discount_pct != null) {
+                            revisitDiscountPct = data.discount_pct;
+                            labelVisitRevisit.style.display = 'inline-block';
+                            document.getElementById('revisitDiscountBadge').textContent = data.discount_pct + '%';
+                        } else {
+                            labelVisitRevisit.style.display = 'none';
+                        }
+                        updateExistingFee();
+                    })
+                    .catch(() => { revisitDiscountPct = null; labelVisitRevisit.style.display = 'none'; updateExistingFee(); });
+            });
+
+            clearBtn.addEventListener('click', function() {
+                patientIdInput.value = '';
+                selectedInfo.style.display = 'none';
+                visitDetails.style.display = 'none';
+                document.getElementById('existingFormPatientId').value = '';
+                currentPatientData = null;
+            });
+
+            // Function to populate payment mechanism dropdown
+            function populatePaymentMechanism(currentPayment, currentNhis, currentNhisExpiry) {
+                // Get insurance settings from hidden data attributes
+                var nhisEnabled = document.body.getAttribute('data-nhis-enabled') !== 'false';
+                var privateInsuranceEnabled = document.body.getAttribute('data-private-insurance-enabled') !== 'false';
+                
+                var paymentOptions = [
+                    { value: '', label: 'Select Payment Method' },
+                    { value: 'cash', label: 'Cash' },
+                ];
+                
+                // Add NHIS option if enabled
+                if (nhisEnabled) {
+                    paymentOptions.push({ value: 'nhis', label: 'NHIS' });
+                }
+                
+                // Add Private Insurance option if enabled
+                if (privateInsuranceEnabled) {
+                    paymentOptions.push({ value: 'private_insurance', label: 'Private Insurance' });
+                }
+                
+                paymentOptions.push({ value: 'self_pay', label: 'Self Pay' });
+                
+                paymentMechanismSelect.innerHTML = paymentOptions.map(function(opt) { 
+                    return '<option value="' + opt.value + '"' + (opt.value === currentPayment ? ' selected' : '') + '>' + opt.label + '</option>';
+                }).join('');
+                
+                // Set NHIS fields
+                nhisNumberInput.value = currentNhis || '';
+                nhisExpiryInput.value = currentNhisExpiry || '';
+                
+                // Show/hide NHIS fields based on current payment
+                updateNhisFieldsVisibility();
+            }
+
+            // Function to update NHIS fields visibility
+            function updateNhisFieldsVisibility() {
+                const isNhis = paymentMechanismSelect.value === 'nhis';
+                nhisFields.style.display = isNhis ? 'block' : 'none';
+                nhisExpiryRow.style.display = isNhis ? 'block' : 'none';
+            }
+
+            // Listen for payment mechanism changes
+            paymentMechanismSelect.addEventListener('change', updateNhisFieldsVisibility);
+
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('#existingPatientSearch') && !e.target.closest('#existingPatientResults'))
+                    resultsDiv.style.display = 'none';
+            });
+
+            function updateExistingFee() {
+                const opt = deptSel.options[deptSel.selectedIndex];
+                const fullPrice = opt ? parseFloat(opt.getAttribute('data-full') || '') : NaN;
+                const isRevisit = document.querySelector('input[name="existing_visit_type"]:checked')?.value === 'revisit';
+                let price = fullPrice;
+                if (isRevisit && revisitDiscountPct != null && !isNaN(fullPrice)) {
+                    price = fullPrice * revisitDiscountPct / 100;
+                }
+                existingFeeValue.textContent = !isNaN(price) ? 'GHS ' + price.toFixed(2) : '—';
+            }
+
+            deptSel.addEventListener('change', updateExistingFee);
+
+            document.querySelectorAll('input[name="existing_visit_type"]').forEach(r => {
+                r.addEventListener('change', updateExistingFee);
+            });
+
+            document.getElementById('existingVisitForm').addEventListener('submit', function(e) {
+                document.getElementById('existingFormDepartment').value = deptSel.value;
+                document.getElementById('existingFormVisitType').value = document.querySelector('input[name="existing_visit_type"]:checked')?.value || 'new';
+                if (!deptSel.value) { e.preventDefault(); alert('Please select a department.'); return false; }
+            });
+        })();
+        </script>
         </div>
     <aside class="control-sidebar control-sidebar-dark"></aside>
 

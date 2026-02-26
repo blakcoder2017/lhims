@@ -126,61 +126,74 @@
                     </div>
                     <div class="card-body table-responsive p-0">
                         {% if patients %}
-                        <table class="table table-hover table-bordered table-striped" id="patientsTable">
-                            <thead>
+                        <table class="table table-hover table-bordered table-sm mb-0" id="patientsTable">
+                            <thead class="thead-light">
                                 <tr>
-                                    <th>Patient Number</th>
-                                    <th>ID</th>
+                                    <th>#</th>
+                                    <th>Patient No.</th>
                                     <th>Name</th>
-                                    <th>Date of Birth</th>
                                     <th>Gender</th>
-                                    <th>Phone Number</th>
-                                    <th>National ID</th>
-                                    <th>Payment Type</th>
+                                    <th>Age</th>
+                                    <th>Phone</th>
+                                    <th>Payment</th>
+                                    <th>Visits</th>
                                     <th>Registered</th>
-                                    <th>Actions</th>
+                                    <th class="text-nowrap">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for patient in patients %}
                                 <tr>
-                                    <td><strong>{{ patient.patient_number or 'N/A' }}</strong></td>
-                                    <td>{{ patient.id }}</td>
-                                    <td><strong>{{ patient.first_name }} {{ patient.last_name }}</strong></td>
-                                    <td>{{ patient.date_of_birth.strftime('%Y-%m-%d') }}</td>
-                                    <td>{{ patient.gender }}</td>
-                                    <td>{{ patient.phone_number or 'N/A' }}</td>
-                                    <td>{{ patient.national_id or 'N/A' }}</td>
+                                    <td class="text-muted">{{ patient.id }}</td>
+                                    <td><strong>{{ patient.patient_number or '—' }}</strong></td>
                                     <td>
-                                        {% if patient.payment_mechanism %}
-                                            <span class="badge badge-info">{{ patient.payment_mechanism.value.replace('_', ' ').title() }}</span>
-                                        {% else %}
-                                            <span class="badge badge-secondary">Not Set</span>
+                                        <strong>{{ patient.first_name }} {{ patient.last_name }}</strong>
+                                        {% set visit_count = patient_visit_counts.get(patient.id, 0) %}
+                                        {% if visit_count == 1 %}
+                                        <span class="badge badge-primary badge-sm ml-1" title="First time patient">New</span>
+                                        {% elif visit_count > 1 %}
+                                        <span class="badge badge-success badge-sm ml-1" title="Returning patient – revisit discount applies">Revisit</span>
                                         {% endif %}
                                     </td>
-                                    <td>{{ patient.created_at.strftime('%Y-%m-%d') if patient.created_at else 'N/A' }}</td>
+                                    <td>{{ patient.gender }}</td>
+                                    <td>{% if patient.date_of_birth %}{{ patient.date_of_birth | age }}y{% else %}—{% endif %}</td>
+                                    <td class="text-nowrap">{{ patient.phone_number or '—' }}</td>
                                     <td>
-                                        <div class="btn-group-vertical btn-group-sm" role="group">
+                                        {% if patient.payment_mechanism %}
+                                        <span class="badge badge-info badge-sm">{{ patient.payment_mechanism.value.replace('_', ' ').title() }}</span>
+                                        {% else %}
+                                        <span class="badge badge-secondary badge-sm">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center"><span class="badge badge-secondary">{{ patient_visit_counts.get(patient.id, 0) }}</span></td>
+                                    <td class="text-nowrap text-muted">{{ patient.created_at.strftime('%Y-%m-%d') if patient.created_at else '—' }}</td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm" role="group">
                                             <a href="{{ url_for('view_patient_records', patient_id=patient.id) }}"
-                                               class="btn btn-primary" title="View Patient File">
-                                                <i class="fas fa-file-medical"></i> Patient File
+                                               class="btn btn-primary btn-sm" title="View Patient File">
+                                                <i class="fas fa-file-medical"></i>
                                             </a>
                                             {% if user_role in ['Admin', 'Front Office'] %}
                                             <a href="{{ url_for('edit_patient_form', patient_id=patient.id) }}"
-                                               class="btn btn-warning" title="Edit Patient Biodata & Payment">
-                                                <i class="fas fa-edit"></i> Edit Patient
+                                               class="btn btn-outline-warning btn-sm" title="Edit Patient">
+                                                <i class="fas fa-edit"></i>
                                             </a>
                                             {% endif %}
-                                        </div>
-                                        <div class="btn-group-vertical btn-group-sm mt-1" role="group">
-                                            <a href="{{ url_for('patient_triage', patient_id=patient.id) }}?new_visit=true"
-                                               class="btn btn-info" title="Record Vitals & Process Payment (New Visit)">
-                                                <i class="fas fa-heartbeat"></i> Record Vitals
-                                            </a>
-                                            <button type="button" class="btn btn-secondary" disabled
-                                                    title="Patient must complete workflow: Record vitals, check-in, and payment before starting encounter">
-                                                <i class="fas fa-stethoscope"></i> Encounter
+                                            {% if user_role in ['Admin', 'Front Office', 'Nurse'] %}
+                                            {% if patient.id in start_visit_disabled_ids %}
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" disabled title="Patient in triage queue">
+                                                <i class="fas fa-play-circle"></i>
                                             </button>
+                                            {% else %}
+                                            <button type="button" class="btn btn-info btn-sm" data-toggle="modal" data-target="#startVisitModal{{ patient.id }}" title="{% if patient.payment_mechanism and patient.payment_mechanism.value == 'cash' %}Pay consultation, then triage{% else %}Start visit{% endif %}">
+                                                <i class="fas fa-play-circle"></i>
+                                            </button>
+                                            {% endif %}
+                                            {% else %}
+                                            <a href="{{ url_for('patient_triage', patient_id=patient.id) }}?new_visit=true" class="btn btn-outline-info btn-sm" title="Record Vitals">
+                                                <i class="fas fa-heartbeat"></i>
+                                            </a>
+                                            {% endif %}
                                         </div>
                                     </td>
                                 </tr>
@@ -211,7 +224,7 @@
                                     <ul class="pagination pagination-sm m-0 float-right">
                                         {% if page > 1 %}
                                         <li class="paginate_button page-item previous">
-                                            <a href="{{ url_for('patients_list', query=search_query, page=page-1, per_page=per_page, gender=gender_filter, payment_mechanism=payment_mechanism_filter, sort_by=sort_by, sort_order=sort_order) }}" class="page-link">Previous</a>
+                                            <a href="{{ url_for('patients_list') }}?query={{ (search_query or '')|urlencode }}&page={{ page-1 }}&per_page={{ per_page }}&gender={{ (gender_filter or '')|urlencode }}&payment_mechanism={{ (payment_mechanism_filter or '')|urlencode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}" class="page-link">Previous</a>
                                         </li>
                                         {% else %}
                                         <li class="paginate_button page-item previous disabled">
@@ -226,7 +239,7 @@
                                             </li>
                                             {% elif p <= 3 or p > total_pages - 3 or (p >= page - 1 and p <= page + 1) %}
                                             <li class="paginate_button page-item">
-                                                <a href="{{ url_for('patients_list', query=search_query, page=p, per_page=per_page, gender=gender_filter, payment_mechanism=payment_mechanism_filter, sort_by=sort_by, sort_order=sort_order) }}" class="page-link">{{ p }}</a>
+                                                <a href="{{ url_for('patients_list') }}?query={{ (search_query or '')|urlencode }}&page={{ p }}&per_page={{ per_page }}&gender={{ (gender_filter or '')|urlencode }}&payment_mechanism={{ (payment_mechanism_filter or '')|urlencode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}" class="page-link">{{ p }}</a>
                                             </li>
                                             {% elif p == 4 or p == total_pages - 3 %}
                                             <li class="paginate_button page-item disabled">
@@ -237,7 +250,7 @@
                                         
                                         {% if page < total_pages %}
                                         <li class="paginate_button page-item next">
-                                            <a href="{{ url_for('patients_list', query=search_query, page=page+1, per_page=per_page, gender=gender_filter, payment_mechanism=payment_mechanism_filter, sort_by=sort_by, sort_order=sort_order) }}" class="page-link">Next</a>
+                                            <a href="{{ url_for('patients_list') }}?query={{ (search_query or '')|urlencode }}&page={{ page+1 }}&per_page={{ per_page }}&gender={{ (gender_filter or '')|urlencode }}&payment_mechanism={{ (payment_mechanism_filter or '')|urlencode }}&sort_by={{ sort_by }}&sort_order={{ sort_order }}" class="page-link">Next</a>
                                         </li>
                                         {% else %}
                                         <li class="paginate_button page-item next disabled">
@@ -256,6 +269,8 @@
     </div>
 
     <style>
+        #patientsTable .badge-sm { font-size: 0.7rem; padding: 0.2em 0.5em; }
+        #patientsTable td, #patientsTable th { vertical-align: middle !important; }
         @media print {
             .content-header, .card-header .card-tools, .card-footer, .btn, .sidebar, .navbar, .main-header {
                 display: none !important;
@@ -317,6 +332,61 @@
             });
         });
     </script>
+
+    <!-- Start Visit Payment Method Selection Modal -->
+    {% for patient in patients %}
+    <div class="modal fade" id="startVisitModal{{ patient.id }}" tabindex="-1" role="dialog" aria-labelledby="startVisitModalLabel{{ patient.id }}" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="startVisitModalLabel{{ patient.id }}">Start Visit - {{ patient.first_name }} {{ patient.last_name }}</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <form method="POST" action="{{ url_for('start_new_opd_visit', patient_id=patient.id) }}">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="payment_mechanism{{ patient.id }}">Payment Method</label>
+                            <select class="form-control" id="payment_mechanism{{ patient.id }}" name="payment_mechanism" onchange="toggleNhisFields{{ patient.id }}()">
+                                <option value="{{ patient.payment_mechanism.value if patient.payment_mechanism else '' }}" selected>{{ patient.payment_mechanism.value.replace('_', ' ').title() if patient.payment_mechanism else 'Select Payment Method' }}</option>
+                                <option value="cash">Cash</option>
+                                <option value="nhis">NHIS</option>
+                                <option value="private_insurance">Private Insurance</option>
+                            </select>
+                            <small class="form-text text-muted">Change payment method if needed</small>
+                        </div>
+                        <div class="form-group nhis-fields" id="nhisFields{{ patient.id }}" style="display: none;">
+                            <label for="nhis_number{{ patient.id }}">NHIS Number</label>
+                            <input type="text" class="form-control" id="nhis_number{{ patient.id }}" name="nhis_number" value="{{ patient.nhis_number or '' }}" placeholder="Enter NHIS Number">
+                        </div>
+                        <div class="form-group nhis-fields" id="nhisExpiryFields{{ patient.id }}" style="display: none;">
+                            <label for="nhis_expiry_date{{ patient.id }}">NHIS Expiry Date</label>
+                            <input type="date" class="form-control" id="nhis_expiry_date{{ patient.id }}" name="nhis_expiry_date" value="{{ patient.nhis_expiry_date.strftime('%Y-%m-%d') if patient.nhis_expiry_date else '' }}">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Start Visit</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+    function toggleNhisFields{{ patient.id }}() {
+        var paymentMethod = document.getElementById('payment_mechanism{{ patient.id }}').value;
+        var nhisFields = document.querySelectorAll('#nhisFields{{ patient.id }}, #nhisExpiryFields{{ patient.id }}');
+        nhisFields.forEach(function(field) {
+            field.style.display = (paymentMethod === 'nhis') ? 'block' : 'none';
+        });
+    }
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        toggleNhisFields{{ patient.id }}();
+    });
+    </script>
+    {% endfor %}
 
     <aside class="control-sidebar control-sidebar-dark"></aside>
 

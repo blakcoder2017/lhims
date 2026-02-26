@@ -13,15 +13,42 @@ from app.schemas.procedure_schemas import ProcedureCreate, ProcedureUpdate
 
 
 def generate_procedure_number(db: Session) -> str:
-    """Generate a unique procedure number."""
-    # Get the count of procedures today
+    """Generate a unique procedure number with retry logic for edge cases."""
+    from datetime import datetime
     today = date.today()
-    count = db.query(Procedure).filter(
-        func.date(Procedure.created_at) == today
-    ).count()
+    today_str = today.strftime('%Y%m%d')
+    
+    # Get the maximum procedure number for today
+    result = db.query(func.max(Procedure.procedure_number)).filter(
+        Procedure.procedure_number.like(f"PROC-{today_str}%")
+    ).scalar()
+    
+    if result:
+        # Extract the sequence number from the last procedure number
+        try:
+            last_seq = int(result.split('-')[-1])
+            new_seq = last_seq + 1
+        except (ValueError, IndexError):
+            # If parsing fails, start from 1
+            new_seq = 1
+    else:
+        new_seq = 1
     
     # Format: PROC-YYYYMMDD-XXX
-    return f"PROC-{today.strftime('%Y%m%d')}-{str(count + 1).zfill(3)}"
+    procedure_number = f"PROC-{today_str}-{str(new_seq).zfill(3)}"
+    
+    # Retry logic: if number already exists, increment until we find a unique one
+    max_retries = 10
+    for _ in range(max_retries):
+        existing = db.query(Procedure.procedure_number).filter(
+            Procedure.procedure_number == procedure_number
+        ).first()
+        if not existing:
+            break
+        new_seq += 1
+        procedure_number = f"PROC-{today_str}-{str(new_seq).zfill(3)}"
+    
+    return procedure_number
 
 
 def create_procedure(db: Session, procedure: ProcedureCreate) -> Procedure:

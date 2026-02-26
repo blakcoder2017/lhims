@@ -33,11 +33,22 @@
                                 <a href="{{ url_for('midwife_antenatal_visit_edit_form', visit_id=visit.id) }}" class="btn btn-sm btn-primary"><i class="fas fa-edit"></i> Edit</a>
                             </div>
                             <div class="card-body">
+                                <!-- DEBUG: Visit data -->
+                                <!-- visit: {{ visit }} -->
+                                <!-- visit.id: {{ visit.id }} -->
+                                <!-- visit.patient_id: {{ visit.patient_id }} -->
+                                <!-- visit.blood_pressure_systolic: {{ visit.blood_pressure_systolic }} -->
+                                <!-- visit.blood_pressure_diastolic: {{ visit.blood_pressure_diastolic }} -->
+                                <!-- visit.weight_kg: {{ visit.weight_kg }} -->
+                                <!-- visit.fetal_heart_rate: {{ visit.fetal_heart_rate }} -->
                                 <div class="row">
                                     <div class="col-md-6">
                                         <h5><i class="fas fa-user text-info mr-1"></i> Patient</h5>
                                         <p class="mb-1"><a href="{{ url_for('view_patient_records', patient_id=visit.patient_id) }}">{{ visit.patient.first_name }} {{ visit.patient.last_name }}</a></p>
                                         <p class="text-muted small mb-3">{{ visit.patient.patient_number or 'N/A' }}</p>
+                                        {% if visit.risk_factors %}
+                                        <span class="badge badge-danger mb-2"><i class="fas fa-exclamation-triangle mr-1"></i>High Risk</span>
+                                        {% endif %}
                                     </div>
                                     <div class="col-md-6">
                                         <h5><i class="fas fa-calendar text-info mr-1"></i> Visit Info</h5>
@@ -52,7 +63,7 @@
                                 <div class="row">
                                     <div class="col-md-6">
                                         <h5><i class="fas fa-heartbeat text-danger mr-1"></i> Vitals</h5>
-                                        <p class="mb-1"><strong>BP:</strong> {% if visit.blood_pressure_systolic and visit.blood_pressure_diastolic %}{{ visit.blood_pressure_systolic }}/{{ visit.blood_pressure_diastolic }} mmHg{% else %}–{% endif %}</p>
+                                        <p class="mb-1"><strong>BP:</strong> {% if visit.blood_pressure_systolic and visit.blood_pressure_diastolic %}{% if visit.blood_pressure_systolic >= 140 or visit.blood_pressure_diastolic >= 90 %}<span class="badge badge-danger">{{ visit.blood_pressure_systolic }}/{{ visit.blood_pressure_diastolic }} mmHg</span>{% else %}<span class="badge badge-success">{{ visit.blood_pressure_systolic }}/{{ visit.blood_pressure_diastolic }} mmHg</span>{% endif %}{% else %}–{% endif %}</p>
                                         <p class="mb-1"><strong>Weight:</strong> {{ visit.weight_kg or '–' }} kg</p>
                                         <p class="mb-1"><strong>Height:</strong> {{ visit.height_cm or '–' }} cm</p>
                                         <p class="mb-1"><strong>BMI:</strong> {{ visit.bmi or '–' }}</p>
@@ -102,9 +113,9 @@
                             <div class="card-header"><h3 class="card-title">Quick Actions</h3></div>
                             <div class="card-body">
                                 <a href="{{ url_for('midwife_antenatal_visit_edit_form', visit_id=visit.id) }}" class="btn btn-primary btn-block mb-2"><i class="fas fa-edit"></i> Edit Visit</a>
-                                <a href="{{ url_for('midwife_antenatal_visit_create_form', patient_id=visit.patient_id) }}" class="btn btn-success btn-block mb-2"><i class="fas fa-plus"></i> New Visit (same patient)</a>
+                                <a href="{{ url_for('midwife_antenatal_visit_create_form') }}?patient_id={{ visit.patient_id }}" class="btn btn-success btn-block mb-2"><i class="fas fa-plus"></i> New Visit (same patient)</a>
                                 <a href="{{ url_for('view_patient_records', patient_id=visit.patient_id) }}" class="btn btn-info btn-block mb-2"><i class="fas fa-folder-open"></i> Patient Records</a>
-                                <a href="{{ url_for('birth_record_create_form', mother_id=visit.patient_id) }}" class="btn btn-warning btn-block"><i class="fas fa-baby-carriage"></i> Record Birth (this patient)</a>
+                                <a href="/births/create/{{ visit.patient_id }}" class="btn btn-warning btn-block"><i class="fas fa-baby-carriage"></i> Record Birth (this patient)</a>
                             </div>
                         </div>
                     </div>

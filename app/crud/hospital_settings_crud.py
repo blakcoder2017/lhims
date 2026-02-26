@@ -35,7 +35,10 @@ def update_hospital_settings(
     hospital_email: Optional[str] = None,
     hospital_website: Optional[str] = None,
     logo_path: Optional[str] = None,
-    logo_url: Optional[str] = None
+    logo_url: Optional[str] = None,
+    revisit_follow_up_percentage: Optional[float] = None,
+    nhis_enabled: Optional[bool] = None,
+    private_insurance_enabled: Optional[bool] = None
 ) -> HospitalSettings:
     """Update hospital settings"""
     settings = get_hospital_settings(db)
@@ -59,7 +62,30 @@ def update_hospital_settings(
         settings.logo_path = logo_path
     if logo_url is not None:
         settings.logo_url = logo_url
+    if revisit_follow_up_percentage is not None:
+        from decimal import Decimal
+        settings.revisit_follow_up_percentage = Decimal(str(revisit_follow_up_percentage))
+    if nhis_enabled is not None:
+        settings.nhis_enabled = nhis_enabled
+    if private_insurance_enabled is not None:
+        settings.private_insurance_enabled = private_insurance_enabled
+    if charge_types_config is not None:
+        settings.charge_types_config = charge_types_config
     
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+def update_charge_types(db: Session, charge_types_config: list) -> HospitalSettings:
+    """Update charge types configuration"""
+    settings = get_hospital_settings(db)
+    
+    # If no settings exist, create them
+    if not settings:
+        settings = create_hospital_settings(db)
+    
+    settings.charge_types_config = charge_types_config
     db.commit()
     db.refresh(settings)
     return settings

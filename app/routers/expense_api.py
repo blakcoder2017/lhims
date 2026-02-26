@@ -5,7 +5,7 @@ Routes for expense management including CRUD operations and reporting.
 """
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime, date, timedelta
@@ -18,7 +18,6 @@ from app.schemas.expense_schemas import ExpenseCreate, ExpenseUpdate, Expense
 from app.models.expense_models import ExpenseCategory, ExpenseStatus
 
 router = APIRouter(prefix="/expenses", tags=["Expenses"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/", name="expenses_list")

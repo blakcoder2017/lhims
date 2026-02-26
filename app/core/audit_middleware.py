@@ -54,9 +54,9 @@ class AuditMiddleware(BaseHTTPMiddleware):
             resource_type = 'Invoice'
         elif '/prescriptions/' in request.url.path:
             resource_type = 'Prescription'
-        elif '/lab/orders/' in request.url.path:
+        elif '/api/v1/ancillary/lab/orders/' in request.url.path:
             resource_type = 'LabOrder'
-        elif '/radiology/orders/' in request.url.path:
+        elif '/api/v1/ancillary/radiology/orders/' in request.url.path:
             resource_type = 'RadiologyOrder'
         
         # Execute request

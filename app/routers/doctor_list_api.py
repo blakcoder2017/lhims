@@ -5,7 +5,7 @@ Routes for viewing and searching doctors with pagination and filtering.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -19,7 +19,6 @@ router = APIRouter(
     tags=["Doctors"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/doctors/list", name="doctors_list")

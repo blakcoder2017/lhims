@@ -1208,6 +1208,165 @@ def generate_disease_report_pdf(context: Dict[str, Any]) -> bytes:
     return buffer.getvalue()
 
 
+def generate_dhims_disease_report_pdf(context: Dict[str, Any]) -> bytes:
+    """Generate PDF report for DHIMS2 disease morbidity report."""
+    if not REPORTLAB_AVAILABLE:
+        return b"PDF generation requires reportlab. Install with: pip install reportlab"
+    
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=0.5*inch, rightMargin=0.5*inch)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor=colors.HexColor('#1f4788'),
+        spaceAfter=20,
+        alignment=TA_CENTER
+    )
+    
+    # Title
+    story.append(Paragraph("GHANA HEALTH SERVICE - DHIMS2 DISEASE MORBIDITY REPORT", title_style))
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Period information
+    filters = context.get('filters', {})
+    start_date = filters.get('start_date')
+    end_date = filters.get('end_date')
+    period = filters.get('period', '')
+    
+    period_text = "All Time"
+    if start_date and end_date:
+        period_text = f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+    elif period:
+        period_text = f"Period: {period}"
+    
+    hospital_settings = context.get('hospital_settings', {})
+    story.append(Paragraph(f"<b>Facility:</b> {hospital_settings.get('name', 'N/A')}", styles['Normal']))
+    story.append(Paragraph(f"<b>Period:</b> {period_text}", styles['Normal']))
+    story.append(Paragraph(f"<b>Report Generated:</b> {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", styles['Normal']))
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Summary Statistics
+    opd = context.get('opd', {})
+    ipd = context.get('ipd', {})
+    
+    story.append(Paragraph("<b>SUMMARY STATISTICS</b>", styles['Heading2']))
+    summary_data = [
+        ['Category', 'OPD Cases', 'IPD Cases', 'Total'],
+        ['Total Cases', str(opd.get('total_cases', 0)), str(ipd.get('total_cases', 0)), 
+         str(opd.get('total_cases', 0) + ipd.get('total_cases', 0))],
+        ['Male Cases', str(opd.get('male_cases', 0)), str(ipd.get('male_cases', 0)),
+         str(opd.get('male_cases', 0) + ipd.get('male_cases', 0))],
+        ['Female Cases', str(opd.get('female_cases', 0)), str(ipd.get('female_cases', 0)),
+         str(opd.get('female_cases', 0) + ipd.get('female_cases', 0))],
+        ['Unique Diseases', str(opd.get('unique_diseases', 0)), str(ipd.get('unique_diseases', 0)),
+         str(opd.get('unique_diseases', 0) + ipd.get('unique_diseases', 0))],
+    ]
+    summary_table = Table(summary_data, colWidths=[1.8*inch, 1.3*inch, 1.3*inch, 1.3*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Age Distribution
+    story.append(Paragraph("<b>AGE DISTRIBUTION</b>", styles['Heading2']))
+    age_groups = context.get('age_groups', [])
+    opd_age = opd.get('age_summary', {})
+    ipd_age = ipd.get('age_summary', {})
+    
+    age_data = [['Age Group', 'OPD', 'IPD', 'Total']]
+    for ag in age_groups:
+        opd_count = opd_age.get(ag, 0)
+        ipd_count = ipd_age.get(ag, 0)
+        age_label = ag.replace('_', ' ').upper() if ag != '65_plus' else '65+'
+        age_data.append([age_label, str(opd_count), str(ipd_count), str(opd_count + ipd_count)])
+    
+    age_table = Table(age_data, colWidths=[1.8*inch, 1.3*inch, 1.3*inch, 1.3*inch])
+    age_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+    ]))
+    story.append(age_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Disease Category Breakdown
+    category_breakdown = context.get('category_breakdown', [])
+    if category_breakdown:
+        story.append(Paragraph("<b>DISEASE CATEGORY BREAKDOWN</b>", styles['Heading2']))
+        cat_data = [['Category', 'OPD', 'IPD', 'Total']]
+        for cat in category_breakdown[:10]:
+            cat_data.append([
+                cat.get('name', 'Unknown').upper(),
+                str(cat.get('opd', 0)),
+                str(cat.get('ipd', 0)),
+                str(cat.get('total', 0))
+            ])
+        
+        cat_table = Table(cat_data, colWidths=[2*inch, 1.3*inch, 1.3*inch, 1.3*inch])
+        cat_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+        ]))
+        story.append(cat_table)
+        story.append(Spacer(1, 0.3*inch))
+    
+    # Top Diseases
+    top_diseases = context.get('top_diseases', [])
+    if top_diseases:
+        story.append(Paragraph("<b>TOP DISEASES</b>", styles['Heading2']))
+        disease_data = [['Disease', 'OPD', 'IPD', 'Total']]
+        for disease in top_diseases[:15]:
+            disease_data.append([
+                disease.get('name', 'Unknown')[:30],
+                str(disease.get('opd', 0)),
+                str(disease.get('ipd', 0)),
+                str(disease.get('total', 0))
+            ])
+        
+        disease_table = Table(disease_data, colWidths=[2.5*inch, 1*inch, 1*inch, 1*inch])
+        disease_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f4788')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+        ]))
+        story.append(disease_table)
+    
+    story.append(Spacer(1, 0.3*inch))
+    story.append(Paragraph(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 def generate_pharmacy_report_pdf(context: Dict[str, Any]) -> bytes:
     """Generate PDF report for pharmacy report."""
     if not REPORTLAB_AVAILABLE:
@@ -1939,6 +2098,213 @@ def generate_transfer_medical_report_pdf(context: Dict[str, Any]) -> bytes:
     
     if hospital_settings:
         story.append(Paragraph(f"Prepared by: {hospital_settings.hospital_name or 'Hospital'}", footer_style))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generate_lab_result_pdf(context: Dict[str, Any]) -> bytes:
+    """Generate PDF report for a lab result."""
+    if not REPORTLAB_AVAILABLE:
+        return b"PDF generation requires reportlab. Install with: pip install reportlab"
+    
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=0.5*inch, rightMargin=0.5*inch)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    lab_order = context['lab_order']
+    patient = context['patient']
+    result_json = context.get('result_json')
+    schema_json = context.get('schema_json')
+    flags_json = context.get('flags_json')
+    ref_ranges = context.get('ref_ranges')
+    
+    # Hospital header
+    hospital_settings = context.get('hospital_settings')
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        textColor=colors.HexColor('#1f4788'),
+        spaceAfter=20,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    if hospital_settings:
+        story.append(Paragraph(hospital_settings.hospital_name or "Laboratory Report", title_style))
+    else:
+        story.append(Paragraph("LABORATORY REPORT", title_style))
+    
+    story.append(Spacer(1, 0.2*inch))
+    story.append(Paragraph("LABORATORY TEST REPORT", title_style))
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Patient Information
+    story.append(Paragraph("<b>Patient Information</b>", styles['Heading2']))
+    patient_data = [
+        ['Patient Name:', f"{patient.first_name} {patient.last_name}"],
+        ['Patient Number:', patient.patient_number or 'N/A'],
+        ['Date of Birth:', patient.date_of_birth.strftime('%Y-%m-%d') if patient.date_of_birth else 'N/A'],
+        ['Gender:', patient.gender or 'N/A'],
+    ]
+    patient_table = Table(patient_data, colWidths=[2*inch, 4*inch])
+    patient_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(patient_table)
+    story.append(Spacer(1, 0.2*inch))
+    
+    # Test Information
+    story.append(Paragraph("<b>Test Information</b>", styles['Heading2']))
+    test_data = [
+        ['Test Name:', lab_order.test_name or 'N/A'],
+        ['Test Code:', lab_order.test_code or 'N/A'],
+        ['Collection Date:', lab_order.ordered_at.strftime('%Y-%m-%d') if lab_order.ordered_at else 'N/A'],
+        ['Report Date:', lab_order.result_entered_at.strftime('%Y-%m-%d %H:%M') if lab_order.result_entered_at else 'N/A'],
+        ['Status:', lab_order.result_status or 'N/A'],
+    ]
+    test_table = Table(test_data, colWidths=[2*inch, 4*inch])
+    test_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(test_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Results
+    if result_json and schema_json and flags_json:
+        story.append(Paragraph("<b>Test Results</b>", styles['Heading2']))
+        
+        result_data = [['Test Parameter', 'Result', 'Flag', 'Reference Range']]
+        
+        # Get sections from schema layout
+        sections = schema_json.get('layout', {}).get('sections', []) if isinstance(schema_json, dict) else []
+        
+        for section in sections:
+            if section.get('title'):
+                # Add section header row
+                result_data.append([section['title'], '', '', ''])
+            
+            rows = section.get('rows', [])
+            for row in rows:
+                columns = row.get('columns', [])
+                for col in columns:
+                    items = col.get('items', [])
+                    for fid in items:
+                        if isinstance(schema_json, dict):
+                            fld = schema_json.get('fields', {}).get(fid)
+                        else:
+                            fld = None
+                        
+                        if fld:
+                            val = result_json.get(fld.get('code'))
+                            if val is not None and val != '' and val != []:
+                                flag_info = flags_json.get(fld.get('code')) if flags_json else None
+                                flag = flag_info.get('flag') if flag_info else None
+                                
+                                # Format result value
+                                if isinstance(val, list):
+                                    val_str = ', '.join(map(str, val))
+                                else:
+                                    val_str = str(val)
+                                
+                                # Add unit if present
+                                unit = fld.get('unit', '')
+                                if unit and not isinstance(val, list):
+                                    val_str = f"{val_str} {unit}"
+                                
+                                # Format flag
+                                if flag == 'CRITICAL':
+                                    flag_str = 'CRITICAL'
+                                elif flag == 'H':
+                                    flag_str = 'HIGH'
+                                elif flag == 'L':
+                                    flag_str = 'LOW'
+                                else:
+                                    flag_str = 'Normal'
+                                
+                                # Get reference range
+                                ref_range = None
+                                if ref_ranges:
+                                    ref_range = ref_ranges.get(fld.get('code'))
+                                
+                                if ref_range:
+                                    ref_str = f"{ref_range.get('low', '')} - {ref_range.get('high', '')}"
+                                    if unit:
+                                        ref_str = f"{ref_str} {unit}"
+                                elif unit:
+                                    ref_str = unit
+                                else:
+                                    ref_str = 'N/A'
+                                
+                                result_data.append([
+                                    fld.get('label', ''),
+                                    val_str,
+                                    flag_str,
+                                    ref_str
+                                ])
+        
+        # Create table
+        result_table = Table(result_data, colWidths=[2*inch, 1.5*inch, 0.8*inch, 1.7*inch])
+        result_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#007bff')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (2, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+        ]))
+        story.append(result_table)
+        story.append(Spacer(1, 0.2*inch))
+    
+    # Comments
+    if result_json and result_json.get('comment'):
+        story.append(Paragraph("<b>Comments/Interpretation:</b>", styles['Heading3']))
+        story.append(Paragraph(result_json.get('comment'), styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+    
+    # Signatures
+    story.append(Paragraph("<b>Signatures</b>", styles['Heading2']))
+    signature_data = [
+        ['Result Entered By:', lab_order.result_entered_by.full_name if lab_order.result_entered_by and hasattr(lab_order.result_entered_by, 'full_name') else 'N/A'],
+        ['Verified By:', lab_order.verified_by.full_name if lab_order.verified_by and hasattr(lab_order.verified_by, 'full_name') else 'N/A'],
+        ['Authorized By:', lab_order.authorized_by.full_name if lab_order.authorized_by and hasattr(lab_order.authorized_by, 'full_name') else 'N/A'],
+    ]
+    signature_table = Table(signature_data, colWidths=[2*inch, 4*inch])
+    signature_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    story.append(signature_table)
+    
+    # Footer
+    story.append(Spacer(1, 0.3*inch))
+    footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=9, textColor=colors.grey, alignment=TA_CENTER, spaceBefore=20)
+    story.append(Paragraph("This is a computer-generated report. No signature required.", footer_style))
+    story.append(Paragraph(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", footer_style))
     
     doc.build(story)
     buffer.seek(0)

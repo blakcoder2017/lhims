@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 from app.models.department_models import Department
 from app.schemas.department_schemas import DepartmentCreate, DepartmentUpdate
@@ -37,8 +38,11 @@ def get_departments(
 
 
 def get_department_by_name(db: Session, name: str) -> Optional[Department]:
-    """Get a department by name"""
-    return db.query(Department).filter(Department.name == name).first()
+    """Get a department by name (case-insensitive, strips whitespace)."""
+    if not name or not str(name).strip():
+        return None
+    clean = str(name).strip()
+    return db.query(Department).filter(func.lower(Department.name) == clean.lower()).first()
 
 
 def update_department(

@@ -787,6 +787,276 @@ def generate_disease_report_excel(context: Dict[str, Any]) -> bytes:
     return buffer.getvalue()
 
 
+def generate_dhims_disease_report_excel(context: Dict[str, Any]) -> bytes:
+    """Generate detailed Excel report for DHIMS2 disease morbidity."""
+    if not OPENPYXL_AVAILABLE:
+        return _generate_dhims_disease_report_csv(context).encode('utf-8')
+    
+    wb = Workbook()
+    
+    # Style definitions
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=12)
+    title_font = Font(bold=True, size=16)
+    subtitle_font = Font(bold=True, size=12)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Sheet 1: Summary
+    ws_summary = wb.active
+    ws_summary.title = "Summary"
+    
+    row = 1
+    
+    # Hospital header
+    hospital_settings = context.get('hospital_settings')
+    if hospital_settings:
+        ws_summary.merge_cells(f'A{row}:E{row}')
+        ws_summary.cell(row=row, column=1, value=hospital_settings.hospital_name or "Hospital").font = title_font
+        ws_summary.cell(row=row, column=1).alignment = Alignment(horizontal='center')
+        row += 1
+    
+    # Title
+    ws_summary.merge_cells(f'A{row}:E{row}')
+    ws_summary.cell(row=row, column=1, value="DHIMS2 DISEASE MORBIDITY REPORT").font = title_font
+    ws_summary.cell(row=row, column=1).alignment = Alignment(horizontal='center')
+    row += 2
+    
+    # Period
+    ws_summary.cell(row=row, column=1, value="Period:").font = subtitle_font
+    ws_summary.cell(row=row, column=2, value=f"{context['start_date']} to {context['end_date']}")
+    row += 1
+    report_date = context.get('report_date', datetime.now())
+    if isinstance(report_date, datetime):
+        ws_summary.cell(row=row, column=1, value="Report Generated:").font = subtitle_font
+        ws_summary.cell(row=row, column=2, value=report_date.strftime('%Y-%m-%d %H:%M'))
+    row += 2
+    
+    # Summary Statistics
+    ws_summary.cell(row=row, column=1, value="SUMMARY STATISTICS").font = subtitle_font
+    row += 1
+    
+    headers = ['Category', 'OPD Cases', 'IPD Cases', 'Total']
+    for col, header in enumerate(headers, 1):
+        cell = ws_summary.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    opd_total = context.get('opd_total_cases', 0)
+    ipd_total = context.get('ipd_total_cases', 0)
+    
+    summary_data = [
+        ['Total Cases', opd_total, ipd_total, opd_total + ipd_total],
+        ['Male Cases', context.get('opd_male_cases', 0), context.get('ipd_male_cases', 0), 
+         context.get('opd_male_cases', 0) + context.get('ipd_male_cases', 0)],
+        ['Female Cases', context.get('opd_female_cases', 0), context.get('ipd_female_cases', 0),
+         context.get('opd_female_cases', 0) + context.get('ipd_female_cases', 0)],
+        ['Unique Diseases', context.get('opd_unique_diseases', 0), context.get('ipd_unique_diseases', 0),
+         context.get('opd_unique_diseases', 0) + context.get('ipd_unique_diseases', 0)]
+    ]
+    
+    for data in summary_data:
+        for col, value in enumerate(data, 1):
+            cell = ws_summary.cell(row=row, column=col, value=value)
+            cell.border = border
+            if col == 1:
+                cell.alignment = Alignment(horizontal='left')
+            else:
+                cell.alignment = Alignment(horizontal='center')
+        row += 1
+    row += 1
+    
+    # Age Distribution
+    ws_summary.cell(row=row, column=1, value="AGE DISTRIBUTION").font = subtitle_font
+    row += 1
+    
+    headers = ['Age Group', 'OPD', 'IPD', 'Total']
+    for col, header in enumerate(headers, 1):
+        cell = ws_summary.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    age_groups = context.get('age_groups', [])
+    opd_age = context.get('opd_age_summary', {})
+    ipd_age = context.get('ipd_age_summary', {})
+    
+    for ag in age_groups:
+        opd_count = opd_age.get(ag, 0)
+        ipd_count = ipd_age.get(ag, 0)
+        age_label = ag.replace('_', ' ').title() if ag != '65_plus' else '65+'
+        ws_summary.cell(row=row, column=1, value=age_label).border = border
+        ws_summary.cell(row=row, column=2, value=opd_count).border = border
+        ws_summary.cell(row=row, column=3, value=ipd_count).border = border
+        ws_summary.cell(row=row, column=4, value=opd_count + ipd_count).border = border
+        for col in range(1, 5):
+            ws_summary.cell(row=row, column=col).alignment = Alignment(horizontal='center')
+        row += 1
+    row += 1
+    
+    # Category Breakdown
+    category_breakdown = context.get('category_breakdown', [])
+    if category_breakdown:
+        ws_summary.cell(row=row, column=1, value="DISEASE CATEGORY BREAKDOWN").font = subtitle_font
+        row += 1
+        
+        headers = ['Category', 'OPD', 'IPD', 'Total']
+        for col, header in enumerate(headers, 1):
+            cell = ws_summary.cell(row=row, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center')
+        row += 1
+        
+        for cat in category_breakdown[:15]:
+            ws_summary.cell(row=row, column=1, value=cat.get('name', 'Unknown').upper()).border = border
+            ws_summary.cell(row=row, column=2, value=cat.get('opd', 0)).border = border
+            ws_summary.cell(row=row, column=3, value=cat.get('ipd', 0)).border = border
+            ws_summary.cell(row=row, column=4, value=cat.get('total', 0)).border = border
+            for col in range(1, 5):
+                ws_summary.cell(row=row, column=col).alignment = Alignment(horizontal='center')
+            row += 1
+    
+    # Adjust column widths
+    for col in range(1, 6):
+        ws_summary.column_dimensions[get_column_letter(col)].width = 20
+    
+    # Sheet 2: Top Diseases
+    ws_diseases = wb.create_sheet("Top Diseases")
+    row = 1
+    
+    ws_diseases.cell(row=row, column=1, value="TOP DISEASES").font = subtitle_font
+    row += 1
+    
+    headers = ['Disease', 'OPD Cases', 'IPD Cases', 'Total']
+    for col, header in enumerate(headers, 1):
+        cell = ws_diseases.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    top_diseases = context.get('top_diseases', [])
+    for disease in top_diseases[:30]:
+        ws_diseases.cell(row=row, column=1, value=disease.get('name', 'Unknown')).border = border
+        ws_diseases.cell(row=row, column=2, value=disease.get('opd', 0)).border = border
+        ws_diseases.cell(row=row, column=3, value=disease.get('ipd', 0)).border = border
+        ws_diseases.cell(row=row, column=4, value=disease.get('total', 0)).border = border
+        for col in range(1, 5):
+            ws_diseases.cell(row=row, column=col).alignment = Alignment(horizontal='center')
+        row += 1
+    
+    for col in range(1, 5):
+        ws_diseases.column_dimensions[get_column_letter(col)].width = 25
+    
+    # Sheet 3: OPD Diseases
+    ws_opd = wb.create_sheet("OPD Diseases")
+    row = 1
+    
+    ws_opd.cell(row=row, column=1, value="OPD DISEASE MORBIDITY").font = subtitle_font
+    row += 1
+    
+    headers = ['Disease', 'Code', 'Total', 'Male', 'Female', 'Unknown Gender']
+    for col, header in enumerate(headers, 1):
+        cell = ws_opd.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    opd_diseases = context.get('opd_diseases', [])
+    for disease in opd_diseases[:50]:
+        ws_opd.cell(row=row, column=1, value=disease.get('name', 'Unknown')).border = border
+        ws_opd.cell(row=row, column=2, value=disease.get('code', '')).border = border
+        ws_opd.cell(row=row, column=3, value=disease.get('total', 0)).border = border
+        ws_opd.cell(row=row, column=4, value=disease.get('male', 0)).border = border
+        ws_opd.cell(row=row, column=5, value=disease.get('female', 0)).border = border
+        ws_opd.cell(row=row, column=6, value=disease.get('unknown_gender', 0)).border = border
+        for col in range(1, 7):
+            ws_opd.cell(row=row, column=col).alignment = Alignment(horizontal='center')
+        row += 1
+    
+    for col in range(1, 7):
+        ws_opd.column_dimensions[get_column_letter(col)].width = 20
+    
+    # Sheet 4: IPD Diseases
+    ws_ipd = wb.create_sheet("IPD Diseases")
+    row = 1
+    
+    ws_ipd.cell(row=row, column=1, value="IPD DISEASE MORBIDITY").font = subtitle_font
+    row += 1
+    
+    headers = ['Disease', 'Code', 'Total', 'Male', 'Female', 'Unknown Gender']
+    for col, header in enumerate(headers, 1):
+        cell = ws_ipd.cell(row=row, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal='center')
+    row += 1
+    
+    ipd_diseases = context.get('ipd_diseases', [])
+    for disease in ipd_diseases[:50]:
+        ws_ipd.cell(row=row, column=1, value=disease.get('name', 'Unknown')).border = border
+        ws_ipd.cell(row=row, column=2, value=disease.get('code', '')).border = border
+        ws_ipd.cell(row=row, column=3, value=disease.get('total', 0)).border = border
+        ws_ipd.cell(row=row, column=4, value=disease.get('male', 0)).border = border
+        ws_ipd.cell(row=row, column=5, value=disease.get('female', 0)).border = border
+        ws_ipd.cell(row=row, column=6, value=disease.get('unknown_gender', 0)).border = border
+        for col in range(1, 7):
+            ws_ipd.cell(row=row, column=col).alignment = Alignment(horizontal='center')
+        row += 1
+    
+    for col in range(1, 7):
+        ws_ipd.column_dimensions[get_column_letter(col)].width = 20
+    
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def _generate_dhims_disease_report_csv(context: Dict[str, Any]) -> str:
+    """Generate CSV for DHIMS2 disease report as fallback."""
+    import csv
+    from io import StringIO
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    # Header
+    writer.writerow(['DHIMS2 Disease Morbidity Report'])
+    writer.writerow(['Period', f"{context['start_date']} to {context['end_date']}"])
+    writer.writerow([])
+    
+    # Summary
+    writer.writerow(['Summary'])
+    writer.writerow(['Category', 'OPD', 'IPD', 'Total'])
+    writer.writerow(['Total Cases', context.get('opd_total_cases', 0), context.get('ipd_total_cases', 0), 
+                     context.get('opd_total_cases', 0) + context.get('ipd_total_cases', 0)])
+    writer.writerow([])
+    
+    # Top diseases
+    writer.writerow(['Top Diseases'])
+    writer.writerow(['Disease', 'OPD', 'IPD', 'Total'])
+    for disease in context.get('top_diseases', [])[:20]:
+        writer.writerow([disease.get('name', ''), disease.get('opd', 0), disease.get('ipd', 0), disease.get('total', 0)])
+    
+    return output.getvalue()
+
+
 def generate_financial_report_excel(context: Dict[str, Any]) -> bytes:
     """Generate detailed Excel report for financial report."""
     if not OPENPYXL_AVAILABLE:

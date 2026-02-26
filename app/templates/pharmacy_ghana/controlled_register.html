@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-lock mr-2"></i>Controlled Drugs Register</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_ghana_dashboard') }}">Pharmacy Ghana</a></li>
+                            <li class="breadcrumb-item active">Controlled Register</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <form method="GET" class="mb-3 form-inline">
+                    <label class="mr-2">From:</label>
+                    <input type="date" name="from_date" class="form-control form-control-sm mr-2" value="{{ from_date }}">
+                    <label class="mr-2">To:</label>
+                    <input type="date" name="to_date" class="form-control form-control-sm mr-2" value="{{ to_date }}">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-search"></i> Update</button>
+                </form>
+
+                <div class="card">
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Patient</th>
+                                    <th>Drug</th>
+                                    <th>Qty Dispensed</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for di, disp, drug, patient in items %}
+                                <tr>
+                                    <td>{{ disp.dispensed_at.strftime('%Y-%m-%d %H:%M') if disp.dispensed_at else '–' }}</td>
+                                    <td>{{ patient.first_name }} {{ patient.last_name }} ({{ patient.patient_number or 'N/A' }})</td>
+                                    <td>{{ drug.generic_name }}</td>
+                                    <td>{{ di.qty_dispensed }}</td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="4" class="text-center text-muted">No controlled drug dispenses in this period</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

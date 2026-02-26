@@ -1,125 +1,120 @@
-version: '3.8'
 
 services:
   # PostgreSQL Database
-  db:
-    image: postgres:15-alpine
-    container_name: lhims_db
+  postgres:
+    image: postgres:16-alpine
+    container_name: lhims_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-lhims}
-      POSTGRES_USER: ${POSTGRES_USER:-lhims_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
-    restart: unless-stopped
-    networks:
-      - lhims_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lhims_user} -d ${POSTGRES_DB:-lhims}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-lhims}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    command: >
-      postgres
-      -c max_connections=200
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=64MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=4MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
+    networks:
+      - lhims_network
 
-  # FastAPI Application
+  # Redis Cache (for Celery and caching)
+  redis:
+    image: redis:7-alpine
+    container_name: lhims_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lhims_network
+
+  # LHIMS Application
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: lhims_app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      # Database connection
-      SQLALCHEMY_DATABASE_URL: postgresql://${POSTGRES_USER:-lhims_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-lhims}
-      
-      # Application settings
+      # Application Settings
       APP_TITLE: ${APP_TITLE:-LHIMS}
       VERSION: ${VERSION:-2.0}
       DEBUG: ${DEBUG:-False}
       
-      # Security
-      SECRET_KEY: ${SECRET_KEY}
-      ALGORITHM: ${ALGORITHM:-HS256}
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      # Database Settings (using service names in Docker network)
+      SQLALCHEMY_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password123}@postgres:5432/${POSTGRES_DB:-lhims}
       
-      # Optional: Email configuration
+      # Security Settings
+      SECRET_KEY: ${SECRET_KEY:-09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      
+      # SMS Settings (Optional)
+      SMSONLINEGH_API_KEY: ${SMSONLINEGH_API_KEY:-77fc8a8574646a14f24f60decd7fba2c0d4328be9437064e7e523592d9ee45bd}
+      SMSONLINEGH_SENDER: ${SMSONLINEGH_SENDER:-DEI GRATIA}
+      
+      # Redis URL for Celery
+      REDIS_URL: redis://redis:6379/0
+      
+      # Email Settings (Optional)
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
-      
-      # Optional: SMS configuration
-      AFRICASTALKING_API_KEY: ${AFRICASTALKING_API_KEY:-}
-      AFRICASTALKING_USERNAME: ${AFRICASTALKING_USERNAME:-}
-      AFRICASTALKING_SENDER_ID: ${AFRICASTALKING_SENDER_ID:-LHIMS}
-      
-      # Python settings
-      PYTHONUNBUFFERED: 1
-      PYTHONDONTWRITEBYTECODE: 1
-    volumes:
-      - ./app/static:/app/app/static
-      - ./app/static/uploads:/app/app/static/uploads
-      - ./backups:/app/backups
-      # Exclude venv and other unnecessary files
     ports:
       - "${APP_PORT:-8000}:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - lhims_network
+    volumes:
+      - ./uploads:/app/uploads
+      - ./backups:/app/backups
+      - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 30s
+    networks:
+      - lhims_network
 
   # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
     container_name: lhims_nginx
+    restart: unless-stopped
+    depends_on:
+      - app
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./app/static:/usr/share/nginx/html/static:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - app
-    restart: unless-stopped
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+      - ./app/static:/app/static:ro
     networks:
       - lhims_network
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:
   lhims_network:
     driver: bridge
-

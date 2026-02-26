@@ -635,7 +635,24 @@
                         </div>
                         <div class="form-group">
                             <label for="pharmacy_frequency">Frequency *</label>
-                            <input type="text" class="form-control" name="frequency" id="pharmacy_frequency" placeholder="e.g., Twice daily" required>
+                            <select class="form-control" name="frequency" id="pharmacy_frequency" required>
+                                <option value="">Select frequency</option>
+                                <option value="Once daily (OD)">Once daily (OD)</option>
+                                <option value="Twice daily (BD)">Twice daily (BD)</option>
+                                <option value="Three times daily (TDS)">Three times daily (TDS)</option>
+                                <option value="Four times daily (QDS)">Four times daily (QDS)</option>
+                                <option value="Every 4 hours (Q4H)">Every 4 hours (Q4H)</option>
+                                <option value="Every 6 hours (Q6H)">Every 6 hours (Q6H)</option>
+                                <option value="Every 8 hours (Q8H)">Every 8 hours (Q8H)</option>
+                                <option value="Every 12 hours (Q12H)">Every 12 hours (Q12H)</option>
+                                <option value="At night (ON)">At night (ON)</option>
+                                <option value="As needed (PRN)">As needed (PRN)</option>
+                                <option value="With meals (PC)">With meals (PC)</option>
+                                <option value="Before meals (AC)">Before meals (AC)</option>
+                                <option value="Immediately (STAT)">Immediately (STAT)</option>
+                                <option value="Other">Other (specify)</option>
+                            </select>
+                            <input type="text" class="form-control mt-2" name="frequency_custom" id="pharmacy_frequency_custom" placeholder="Specify other frequency" style="display: none;">
                         </div>
                         <div class="form-group">
                             <label for="pharmacy_duration">Duration *</label>
@@ -697,6 +714,18 @@
                             </div>
                         </div>
                         <div class="form-group">
+                            <label for="procedure_catalog_select">Procedure Catalog (Optional)</label>
+                            <select class="form-control" id="procedure_catalog_select">
+                                <option value="">-- Select from Catalog --</option>
+                                {% for catalog in procedure_catalogs %}
+                                <option value="{{ catalog.id }}" data-name="{{ catalog.name }}" data-price="{{ catalog.cash_price }}">
+                                    {{ catalog.name }} - GHS {{ catalog.cash_price }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <small class="form-text text-muted">Select a procedure from catalog for correct pricing</small>
+                        </div>
+                        <div class="form-group">
                             <label for="procedure_name">Procedure Name *</label>
                             <select class="form-control" name="procedure_name" id="procedure_name" required>
                                 <option value="">-- Select Procedure or Type Manually --</option>
@@ -708,6 +737,7 @@
                             </select>
                             <small class="form-text text-muted">Select from list or type procedure name directly in the dropdown</small>
                         </div>
+                        <input type="hidden" name="procedure_catalog_id" id="procedure_catalog_id" value="">
                         <div class="form-group">
                             <label for="procedure_code_proc">Procedure Code</label>
                             <input type="text" class="form-control" name="procedure_code" id="procedure_code_proc" placeholder="Auto-filled from selection or enter manually">
@@ -887,6 +917,42 @@
                 }
             });
         }
+        
+        // Procedure Catalog - auto-fill procedure name and set hidden field
+        const procedureCatalogSelect = document.getElementById('procedure_catalog_select');
+        const procedureCatalogIdInput = document.getElementById('procedure_catalog_id');
+        if (procedureCatalogSelect && procedureCatalogIdInput && procedureNameSelect) {
+            procedureCatalogSelect.addEventListener('change', function() {
+                const selectedOption = this.options[this.selectedIndex];
+                if (selectedOption && selectedOption.value) {
+                    // Set the hidden procedure_catalog_id
+                    procedureCatalogIdInput.value = selectedOption.value;
+                    // Auto-fill the procedure name
+                    const procName = selectedOption.dataset.name;
+                    if (procName) {
+                        // Find the option in procedure_name dropdown or add it
+                        let found = false;
+                        for (let i = 0; i < procedureNameSelect.options.length; i++) {
+                            if (procedureNameSelect.options[i].value === procName) {
+                                procedureNameSelect.selectedIndex = i;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            // Add the option if not found
+                            const newOption = document.createElement('option');
+                            newOption.value = procName;
+                            newOption.textContent = procName;
+                            procedureNameSelect.appendChild(newOption);
+                            procedureNameSelect.selectedIndex = procedureNameSelect.options.length - 1;
+                        }
+                    }
+                } else {
+                    procedureCatalogIdInput.value = '';
+                }
+            });
+        }
 
         // Pharmacy medication search from inventory database
         const pharmacyMedicationInput = document.getElementById('pharmacy_medication_name');
@@ -978,6 +1044,33 @@
                     pharmacyMedicationResults.style.display = 'none';
                 }
             });
+        }
+        
+        // Handle walk-in pharmacy frequency dropdown - show custom input when "Other" is selected
+        var walkinFrequencySelect = document.getElementById('pharmacy_frequency');
+        var walkinFrequencyCustom = document.getElementById('pharmacy_frequency_custom');
+        if (walkinFrequencySelect && walkinFrequencyCustom) {
+            walkinFrequencySelect.addEventListener('change', function() {
+                if (this.value === 'Other') {
+                    walkinFrequencyCustom.style.display = 'block';
+                    walkinFrequencyCustom.required = true;
+                } else {
+                    walkinFrequencyCustom.style.display = 'none';
+                    walkinFrequencyCustom.required = false;
+                    walkinFrequencyCustom.value = '';
+                }
+            });
+            
+            // Handle form submission to use custom frequency value
+            var pharmacySaleForm = walkinFrequencySelect.closest('form');
+            if (pharmacySaleForm) {
+                pharmacySaleForm.addEventListener('submit', function(e) {
+                    if (walkinFrequencySelect.value === 'Other' && walkinFrequencyCustom.value) {
+                        // Set the frequency value to the custom input
+                        walkinFrequencySelect.value = walkinFrequencyCustom.value;
+                    }
+                });
+            }
         }
     </script>
 

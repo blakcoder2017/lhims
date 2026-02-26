@@ -171,10 +171,9 @@ def update_patient(db: Session, patient_id: int, patient_update: PatientUpdate) 
         if existing_patient and existing_patient.id != patient_id:
             raise ValueError(f"Patient with National ID '{update_data['national_id']}' already exists")
     
-    # Update fields
+    # Update fields (allow None to clear nullable fields like nhis_expiry_date)
     for field, value in update_data.items():
-        if value is not None:
-            setattr(db_patient, field, value)
+        setattr(db_patient, field, value)
     
     # Update the updated_at timestamp
     db_patient.updated_at = datetime.now()

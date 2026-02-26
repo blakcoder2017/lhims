@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-calendar-alt mr-2"></i>Near Expiry Report (within {{ days }} days)</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_ghana_dashboard') }}">Pharmacy Ghana</a></li>
+                            <li class="breadcrumb-item active">Near Expiry</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <form method="GET" class="mb-3 form-inline">
+                    <label class="mr-2">Days:</label>
+                    <select name="days" class="form-control form-control-sm mr-2" onchange="this.form.submit()">
+                        <option value="30" {% if days == 30 %}selected{% endif %}>30</option>
+                        <option value="60" {% if days == 60 %}selected{% endif %}>60</option>
+                        <option value="90" {% if days == 90 %}selected{% endif %}>90</option>
+                    </select>
+                    <label class="mr-2">Store:</label>
+                    <select name="store_id" class="form-control form-control-sm mr-2" onchange="this.form.submit()">
+                        <option value="">All</option>
+                        {% for s in stores %}
+                        <option value="{{ s.id }}" {% if store_id == s.id|string %}selected{% endif %}>{{ s.name }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+
+                <div class="card">
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Drug</th>
+                                    <th>Batch No</th>
+                                    <th>Store</th>
+                                    <th>Expiry Date</th>
+                                    <th>Qty On Hand</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for b in batches %}
+                                <tr>
+                                    <td>{{ b.drug.generic_name if b.drug else 'N/A' }}</td>
+                                    <td>{{ b.batch_no }}</td>
+                                    <td>{{ b.store.name if b.store else '–' }}</td>
+                                    <td>{{ b.expiry_date }}</td>
+                                    <td>{{ b.qty_on_hand }}</td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="5" class="text-center text-muted">No batches expiring in this period</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-file-export mr-2"></i>Referral Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admissions_list') }}">IPD Admissions</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('ipd_admission_detail', admission_id=admission.id) }}">{{ admission.admission_number }}</a></li>
+                            <li class="breadcrumb-item active">Referral Report</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Print Button -->
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <button onclick="window.print()" class="btn btn-primary">
+                            <i class="fas fa-print mr-1"></i> Print Report
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Referral Report -->
+                <div class="card card-primary card-outline" id="referral-report">
+                    <div class="card-header">
+                        <h3 class="card-title">PATIENT REFERRAL REPORT</h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- Hospital Header -->
+                        <div class="row mb-4">
+                            <div class="col-12 text-center">
+                                {% if hospital_settings %}
+                                <h2>{{ hospital_settings.hospital_name or 'Dei Gratia Hospital' }}</h2>
+                                <p>{{ hospital_settings.address or '' }}</p>
+                                {% else %}
+                                <h2>Dei Gratia Hospital</h2>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Referral Details -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h4 class="text-center">REFERRAL LETTER</h4>
+                                <hr>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <strong>Date:</strong> {{ current_date }}
+                                    </div>
+                                    <div class="col-md-6 text-right">
+                                        <strong>Admission Number:</strong> {{ admission.admission_number }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Patient Information -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5><strong>PATIENT INFORMATION</strong></h5>
+                                <table class="table table-bordered">
+                                    <tr>
+                                        <th>Name</th>
+                                        <td>{{ patient.first_name }} {{ patient.last_name }}</td>
+                                        <th>Patient Number</th>
+                                        <td>{{ patient.patient_number or 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Date of Birth</th>
+                                        <td>{{ patient.date_of_birth }} (Age: {{ patient.date_of_birth | age }} years)</td>
+                                        <th>Age</th>
+                                        <td>{{ patient_age }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Gender</th>
+                                        <td>{{ patient.gender }}</td>
+                                        <th>Phone</th>
+                                        <td>{{ patient.phone_number or 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Address</th>
+                                        <td colspan="3">{{ patient.address or 'N/A' }}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Admission Details -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5><strong>ADMISSION DETAILS</strong></h5>
+                                <table class="table table-bordered">
+                                    <tr>
+                                        <th>Date of Admission</th>
+                                        <td>{{ admission.admission_date }}</td>
+                                        <th>Ward</th>
+                                        <td>{{ admission.ward.name if admission.ward else 'N/A' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Bed</th>
+                                        <td>{{ admission.bed.bed_number if admission.bed else 'N/A' }}</td>
+                                        <th>Length of Stay</th>
+                                        <td>{{ length_of_stay }} days</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Attending Physician</th>
+                                        <td colspan="3">
+                                            {% if admission.initial_encounter and admission.initial_encounter.clinician %}
+                                                Dr. {{ admission.initial_encounter.clinician.first_name }} {{ admission.initial_encounter.clinician.last_name }}
+                                            {% else %}
+                                                {{ admission.admitted_by.first_name }} {{ admission.admitted_by.last_name if admission.admitted_by else 'N/A' }}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Referral Information -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5><strong>REFERRAL DETAILS</strong></h5>
+                                <table class="table table-bordered">
+                                    <tr>
+                                        <th>Referring Hospital</th>
+                                        <td colspan="3">
+                                            {% if hospital_settings %}
+                                                {{ hospital_settings.hospital_name or 'Dei Gratia Hospital' }}
+                                            {% else %}
+                                                Dei Gratia Hospital
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <th>Receiving Hospital</th>
+                                        <td colspan="3">{{ receiving_hospital or '_____________________________' }}</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Reason for Referral</th>
+                                        <td colspan="3">{{ reason_for_referral or '_____________________________' }}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Clinical Summary -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5><strong>CLINICAL SUMMARY</strong></h5>
+                                <div class="card">
+                                    <div class="card-body">
+                                        <p><strong>Primary Diagnosis:</strong> {{ primary_diagnosis or 'Not specified' }}</p>
+                                        <p><strong>Summary of Hospital Stay:</strong></p>
+                                        <p>{{ clinical_summary or 'No summary available.' }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Investigations -->
+                        {% if lab_orders or radiology_orders %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5><strong>INVESTIGATIONS</strong></h5>
+                                {% if lab_orders %}
+                                <p><strong>Laboratory Tests:</strong></p>
+                                <ul>
+                                    {% for order in lab_orders %}
+                                    <li>{{ order.test_name }} - {{ order.status }} ({{ order.ordered_at }})</li>
+                                    {% endfor %}
+                                </ul>
+                                {% endif %}
+                                {% if radiology_orders %}
+                                <p><strong>Radiology Studies:</strong></p>
+                                <ul>
+                                    {% for order in radiology_orders %}
+                                    <li>{{ order.procedure_name }} - {{ order.status }} ({{ order.ordered_at }})</li>
+                                    {% endfor %}
+                                </ul>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Treatment -->
+                        {% if prescriptions %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5><strong>MEDICATIONS</strong></h5>
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Medication</th>
+                                            <th>Dosage</th>
+                                            <th>Frequency</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for prescription in prescriptions %}
+                                        <tr>
+                                            <td>{{ prescription.medication_name or prescription.medication_code }}</td>
+                                            <td>{{ prescription.dosage or 'N/A' }}</td>
+                                            <td>{{ prescription.frequency or 'N/A' }}</td>
+                                            <td>{{ prescription.status }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Vitals -->
+                        {% if latest_vitals %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h5><strong>LATEST VITALS</strong></h5>
+                                <table class="table table-bordered">
+                                    <tr>
+                                        <th>Blood Pressure</th>
+                                        <td>{{ latest_vitals.systolic_bp }}/{{ latest_vitals.diastolic_bp }} mmHg</td>
+                                        <th>Heart Rate</th>
+                                        <td>{{ latest_vitals.pulse_rate or 'N/A' }} bpm</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Temperature</th>
+                                        <td>{{ latest_vitals.temperature or 'N/A' }} °C</td>
+                                        <th>Respiratory Rate</th>
+                                        <td>{{ latest_vitals.respiratory_rate or 'N/A' }}/min</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Oxygen Saturation</th>
+                                        <td>{{ latest_vitals.oxygen_saturation or 'N/A' }}%</td>
+                                        <th>Pain Scale</th>
+                                        <td>{{ latest_vitals.pain_scale or 'N/A' }}/10</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Footer -->
+                        <div class="row mt-5">
+                            <div class="col-6">
+                                <div class="border-top pt-2">
+                                    <p><strong>Signature of Referring Physician</strong></p>
+                                    <p>Date: _________________</p>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="border-top pt-2">
+                                    <p><strong>Signature of Receiving Physician</strong></p>
+                                    <p>Date: _________________</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Print Button -->
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <button onclick="window.print()" class="btn btn-primary">
+                            <i class="fas fa-print mr-1"></i> Print Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <style>
+        @media print {
+            .sidebar-navbar, .content-header, .btn, .card-header {
+                display: none !important;
+            }
+            .content-wrapper {
+                margin-left: 0 !important;
+                padding: 0 !important;
+            }
+            #referral-report {
+                border: none !important;
+                box-shadow: none !important;
+            }
+        }
+    </style>
+
+{% endblock %}

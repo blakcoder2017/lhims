@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-link mr-2"></i>DHIMS2 Disease Mappings</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('diseases_management') }}">Diseases</a></li>
+                            <li class="breadcrumb-item active">DHIMS2 Mappings</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Statistics Cards -->
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ mapped_count }}</h3>
+                                <p>Mapped Diseases</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ unmapped_count }}</h3>
+                                <p>Unmapped Diseases</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-exclamation-circle"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ diseases|length }}</h3>
+                                <p>Total Diseases</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-disease"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Diseases</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('disease_mappings') }}">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Search</label>
+                                        <input type="text" name="search" class="form-control" placeholder="Search disease name..." value="{{ search or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Category</label>
+                                        <select name="category" class="form-control">
+                                            <option value="">All Categories</option>
+                                            <option value="infectious" {% if selected_category == 'infectious' %}selected{% endif %}>Infectious Diseases</option>
+                                            <option value="ncd" {% if selected_category == 'ncd' %}selected{% endif %}>Non-Communicable Diseases</option>
+                                            <option value="maternal" {% if selected_category == 'maternal' %}selected{% endif %}>Maternal Conditions</option>
+                                            <option value="child_health" {% if selected_category == 'child_health' %}selected{% endif %}>Child Health</option>
+                                            <option value="injury" {% if selected_category == 'injury' %}selected{% endif %}>Injuries</option>
+                                            <option value="mental_health" {% if selected_category == 'mental_health' %}selected{% endif %}>Mental Health</option>
+                                            <option value="eye_conditions" {% if selected_category == 'eye_conditions' %}selected{% endif %}>Eye Conditions</option>
+                                            <option value="dental" {% if selected_category == 'dental' %}selected{% endif %}>Dental</option>
+                                            <option value="skin" {% if selected_category == 'skin' %}selected{% endif %}>Skin Diseases</option>
+                                            <option value="respiratory" {% if selected_category == 'respiratory' %}selected{% endif %}>Respiratory</option>
+                                            <option value="other" {% if selected_category == 'other' %}selected{% endif %}>Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search mr-1"></i> Filter
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Mappings Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Disease to DHIS2 Data Element Mappings</h3>
+                    </div>
+                    <div class="card-body">
+                        <table id="mappingsTable" class="table table-bordered table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Disease Name</th>
+                                    <th>Code</th>
+                                    <th>Category</th>
+                                    <th>DHIS2 Data Element UID</th>
+                                    <th>Category Option Combo UID</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for disease in diseases %}
+                                <tr>
+                                    <td>{{ disease.name }}</td>
+                                    <td>{{ disease.code or '-' }}</td>
+                                    <td>
+                                        <span class="badge bg-{% if disease.category.value if hasattr(disease.category, 'value') else disease.category == 'infectious' %}danger
+                                            {% elif disease.category.value if hasattr(disease.category, 'value') else disease.category == 'ncd' %}primary
+                                            {% elif disease.category.value if hasattr(disease.category, 'value') else disease.category == 'maternal' %}pink
+                                            {% elif disease.category.value if hasattr(disease.category, 'value') else disease.category == 'child_health' %}warning
+                                            {% elif disease.category.value if hasattr(disease.category, 'value') else disease.category == 'injury' %}orange
+                                            {% else %}secondary{% endif %}">
+                                            {{ (disease.category.value if hasattr(disease.category, 'value') else disease.category)|upper }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {% if disease.dhis2_data_element_uid %}
+                                            <code>{{ disease.dhis2_data_element_uid }}</code>
+                                        {% else %}
+                                            <span class="text-muted">Not mapped</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if disease.dhis2_category_option_combo_uid %}
+                                            <code>{{ disease.dhis2_category_option_combo_uid }}</code>
+                                        {% else %}
+                                            <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if disease.dhis2_data_element_uid %}
+                                            <span class="badge bg-success">Mapped</span>
+                                        {% else %}
+                                            <span class="badge bg-warning">Pending</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#mappingModal{{ disease.id }}">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </button>
+                                        
+                                        <!-- Mapping Modal -->
+                                        <div class="modal fade" id="mappingModal{{ disease.id }}" tabindex="-1" role="dialog">
+                                            <div class="modal-dialog" role="document">
+                                                <div class="modal-content">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title">Map Disease: {{ disease.name }}</h5>
+                                                        <button type="button" class="close" data-dismiss="modal">
+                                                            <span>&times;</span>
+                                                        </button>
+                                                    </div>
+                                                    <form method="POST" action="{{ url_for('update_disease', disease_id=disease.id) }}">
+                                                        <div class="modal-body">
+                                                            <div class="form-group">
+                                                                <label>Disease Name</label>
+                                                                <input type="text" class="form-control" value="{{ disease.name }}" readonly>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>Category</label>
+                                                                <select name="category" class="form-control">
+                                                                    <option value="infectious" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'infectious' %}selected{% endif %}>Infectious Diseases</option>
+                                                                    <option value="ncd" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'ncd' %}selected{% endif %}>Non-Communicable Diseases</option>
+                                                                    <option value="maternal" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'maternal' %}selected{% endif %}>Maternal Conditions</option>
+                                                                    <option value="child_health" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'child_health' %}selected{% endif %}>Child Health</option>
+                                                                    <option value="injury" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'injury' %}selected{% endif %}>Injuries</option>
+                                                                    <option value="mental_health" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'mental_health' %}selected{% endif %}>Mental Health</option>
+                                                                    <option value="eye_conditions" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'eye_conditions' %}selected{% endif %}>Eye Conditions</option>
+                                                                    <option value="dental" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'dental' %}selected{% endif %}>Dental</option>
+                                                                    <option value="skin" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'skin' %}selected{% endif %}>Skin Diseases</option>
+                                                                    <option value="respiratory" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'respiratory' %}selected{% endif %}>Respiratory</option>
+                                                                    <option value="other" {% if (disease.category.value if hasattr(disease.category, 'value') else disease.category) == 'other' %}selected{% endif %}>Other</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>DHIS2 Data Element UID *</label>
+                                                                <input type="text" name="dhis2_data_element_uid" class="form-control" 
+                                                                       placeholder="e.g., abcdefghij" value="{{ disease.dhis2_data_element_uid or '' }}"
+                                                                       maxlength="20" required>
+                                                                <small class="form-text text-muted">Enter the DHIS2 data element UID for disease reporting</small>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>DHIS2 Category Option Combo UID</label>
+                                                                <input type="text" name="dhis2_category_option_combo_uid" class="form-control" 
+                                                                       placeholder="e.g., klmnopqrst" value="{{ disease.dhis2_category_option_combo_uid or '' }}"
+                                                                       maxlength="20">
+                                                                <small class="form-text text-muted">Optional: For gender/age disaggregation</small>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                                                            <button type="submit" class="btn btn-primary">Save Mapping</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+{% endblock %}
+
+{% block scripts %}
+<!-- DataTables -->
+<script src="{{ url_for('static', path='adminlte/plugins/datatables/jquery.dataTables.min.js') }}"></script>
+<script src="{{ url_for('static', path='adminlte/plugins/datatables-bs4/js/dataTables.bootstrap4.min.js') }}"></script>
+<script>
+    $(function () {
+        $('#mappingsTable').DataTable({
+            "paging": true,
+            "lengthChange": true,
+            "searching": true,
+            "ordering": true,
+            "info": true,
+            "autoWidth": false,
+            "responsive": true,
+        });
+    });
+</script>
+{% endblock %}

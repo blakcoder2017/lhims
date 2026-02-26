@@ -21,7 +21,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">Birth Records</h3>
-                        <a href="{{ url_for('birth_record_create_form') }}" class="btn btn-primary btn-sm float-right">Record Birth</a>
+                        <a href="{{ url_for('birth_record_create') }}" class="btn btn-primary btn-sm float-right">Record Birth</a>
                     </div>
                     <div class="card-body">
                         <form method="GET" action="{{ url_for('births_list') }}" class="form-inline mb-3">
@@ -40,7 +40,7 @@
                                 {% for b in birth_records %}
                                 <tr>
                                     <td><strong>{{ b.birth_number or '–' }}</strong></td>
-                                    <td><a href="{{ url_for('view_patient_records', patient_id=b.mother_patient_id) }}">{{ b.mother.first_name }} {{ b.mother.last_name if b.mother else 'N/A' }}</a></td>
+                                    <td><a href="{{ url_for('view_patient_records', patient_id=b.mother_patient_id) }}">{{ b.mother.first_name if b.mother else 'N/A' }} {{ b.mother.last_name if b.mother else '' }}</a></td>
                                     <td>{{ b.birth_date.strftime('%Y-%m-%d') }}{% if b.birth_time %} {{ b.birth_time.strftime('%H:%M') }}{% endif %}</td>
                                     <td><span class="badge badge-info">{{ b.delivery_type|title }}</span></td>
                                     <td><span class="badge badge-{% if b.birth_outcome=='live' %}success{% else %}warning{% endif %}">{{ b.birth_outcome|replace('_',' ')|title }}</span></td>

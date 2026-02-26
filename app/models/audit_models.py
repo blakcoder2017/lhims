@@ -18,6 +18,7 @@ class AuditAction(str, enum.Enum):
     PRINT = "print"
     APPROVE = "approve"
     REJECT = "reject"
+    VOID = "void"  # Invoice/payment voiding
 
 
 class AuditLog(Base):

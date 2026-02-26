@@ -1,4 +1,27 @@
 {% extends "base.html" %}
+{% block extra_css %}
+{% if request.args.get('embedded') %}
+<style>
+    .main-sidebar, .main-header, .content-header, .breadcrumb, .card-header, .card-footer {
+        display: none !important;
+    }
+    .content-wrapper, .content {
+        margin-left: 0 !important;
+        padding: 0 !important;
+    }
+    .card {
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .card-body {
+        padding: 10px !important;
+    }
+    html, body {
+        background-color: #f4f6f9 !important;
+    }
+</style>
+{% endif %}
+{% endblock %}
 {% block content %}
     {% include "includes/sidebar_navbar.html" %}
     <div class="content-wrapper">
@@ -60,6 +83,7 @@
                                 <div class="col-md-3"><div class="form-group"><label>Fetal Heart Rate (bpm)</label><input type="number" name="fetal_heart_rate" class="form-control" value="{{ (visit and visit.fetal_heart_rate) or '' }}" placeholder="140"></div></div>
                                 <div class="col-md-3"><div class="form-group"><label>Fundal Height (cm)</label><input type="number" name="fundal_height_cm" class="form-control" step="0.1" value="{{ (visit and visit.fundal_height_cm) or '' }}"></div></div>
                                 <div class="col-md-3"><div class="form-group"><label>Fetal Position</label><input type="text" name="fetal_position" class="form-control" value="{{ (visit and visit.fetal_position) or '' }}" placeholder="e.g. Cephalic, Breech"></div></div>
+                                <div class="col-md-3"><div class="form-group"><label>Fetal Movement</label><input type="text" name="fetal_movement" class="form-control" value="{{ (visit and visit.fetal_movement) or '' }}" placeholder="e.g. Active, Normal"></div></div>
                                 <div class="col-md-3"><div class="form-group"><label>Next Visit Date</label><input type="date" name="next_visit_date" class="form-control" value="{{ visit.next_visit_date.strftime('%Y-%m-%d') if visit and visit.next_visit_date else '' }}"></div></div>
                             </div>
 

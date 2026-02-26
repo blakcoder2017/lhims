@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-baby mr-2"></i>Antenatal & Births Report</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('reports_dashboard') }}">Reports</a></li>
+                            <li class="breadcrumb-item active">Antenatal & Births</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <div class="card card-primary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filters</h3>
+                        <div class="card-tools">
+                            <button onclick="window.print()" class="btn btn-sm btn-info">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('antenatal_births_report') }}">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>Start Date</label>
+                                        <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>End Date</label>
+                                        <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-group">
+                                        <label>&nbsp;</label>
+                                        <button type="submit" class="btn btn-primary btn-block">
+                                            <i class="fas fa-search mr-1"></i> Generate Report
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-info">
+                            <div class="inner">
+                                <h3>{{ total_anc_visits }}</h3>
+                                <p>Antenatal Visits</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-user-nurse"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-primary">
+                            <div class="inner">
+                                <h3>{{ unique_patients_anc }}</h3>
+                                <p>Unique ANC Patients</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-success">
+                            <div class="inner">
+                                <h3>{{ total_births }}</h3>
+                                <p>Total Births</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-baby"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-3 col-6">
+                        <div class="small-box bg-warning">
+                            <div class="inner">
+                                <h3>{{ live_births }}</h3>
+                                <p>Live Births</p>
+                            </div>
+                            <div class="icon">
+                                <i class="fas fa-heart"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-chart-bar mr-1"></i> Births by Outcome</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Outcome</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>Live Births</td>
+                                            <td>{{ live_births }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Stillbirths</td>
+                                            <td>{{ stillbirths }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Other / Neonatal Death</td>
+                                            <td>{{ total_births - live_births - stillbirths }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card card-outline">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-procedures mr-1"></i> Delivery Type Breakdown</h3>
+                            </div>
+                            <div class="card-body">
+                                <table class="table table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th>Delivery Type</th>
+                                            <th>Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% if delivery_type_breakdown %}
+                                        {% for dtype, count in delivery_type_breakdown.items() %}
+                                        <tr>
+                                            <td>{{ dtype }}</td>
+                                            <td>{{ count }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                        {% else %}
+                                        <tr>
+                                            <td colspan="2" class="text-center text-muted">No delivery data</td>
+                                        </tr>
+                                        {% endif %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {% if anc_by_month %}
+                <div class="card card-outline">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-calendar-alt mr-1"></i> ANC Visits by Month</h3>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-bordered table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Month</th>
+                                    <th>Visits</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for month, count in anc_by_month.items() %}
+                                <tr>
+                                    <td>{{ month }}</td>
+                                    <td>{{ count }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="card card-secondary">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Report Information</h3>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Report Period:</strong> {{ start_date }} to {{ end_date }}</p>
+                        <p><strong>Generated:</strong> {{ report_date.strftime('%Y-%m-%d %H:%M:%S') if report_date else 'N/A' }}</p>
+                        <p><strong>Generated By:</strong> {{ current_user.full_name or current_user.username }}</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

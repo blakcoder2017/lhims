@@ -1,503 +1,1068 @@
 {% extends "base.html" %}
+
 {% block content %}
 
-    {% include "includes/sidebar_navbar.html" %} 
+{% include "includes/sidebar_navbar.html" %}
 
-    <div class="content-wrapper">
-        <section class="content-header">
-            <div class="container-fluid">
-                <div class="row mb-2">
-                    <div class="col-sm-6">
-                        <h1>Invoice {{ invoice.invoice_number }}</h1>
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1>Invoice {{ invoice.invoice_number }}</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('billing_dashboard') }}">Billing</a></li>
+                        <li class="breadcrumb-item active">{{ invoice.invoice_number }}</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+
+            {% if request.query_params.get('status') == 'charge_added' %}
+            <div class="alert alert-success alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                <h5><i class="icon fas fa-check"></i> Charge Added!</h5>
+                Charge has been successfully added to the invoice.
+            </div>
+            {% endif %}
+
+            {% if request.query_params.get('status') == 'payment_processed' %}
+            <div class="alert alert-success alert-dismissible">
+                <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                <h5><i class="icon fas fa-check"></i> Payment Processed!</h5>
+                Payment has been successfully recorded.
+            </div>
+            {% endif %}
+
+            <!-- Print Button -->
+            <div class="row mb-3">
+                <div class="col-12">
+                    <button onclick="window.print()" class="btn btn-primary">
+                        <i class="fas fa-print mr-1"></i> Print Invoice
+                    </button>
+                </div>
+            </div>
+
+            <!-- Patient Information -->
+            <div class="card card-primary card-outline">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient Information</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3"><strong>Patient:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
+                        <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
+                        <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
+                        <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
                     </div>
-                    <div class="col-sm-6">
-                        <ol class="breadcrumb float-sm-right">
-                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
-                            <li class="breadcrumb-item"><a href="{{ url_for('billing_dashboard') }}">Billing</a></li>
-                            <li class="breadcrumb-item active">{{ invoice.invoice_number }}</li>
-                        </ol>
+                    <div class="row mt-2">
+                        <div class="col-md-3"><strong>Phone:</strong> {{ patient.phone_number or 'N/A' }}</div>
                     </div>
                 </div>
             </div>
-        </section>
 
-        <section class="content">
-            <div class="container-fluid">
-
-                {% if request.query_params.get('status') == 'charge_added' %}
-                <div class="alert alert-success alert-dismissible">
-                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
-                    <h5><i class="icon fas fa-check"></i> Charge Added!</h5>
-                    Charge has been successfully added to the invoice.
+            <!-- Invoice Summary -->
+            <div class="card card-info">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-file-invoice-dollar mr-1"></i> Invoice Summary</h3>
                 </div>
-                {% endif %}
-
-                {% if request.query_params.get('status') == 'payment_processed' %}
-                <div class="alert alert-success alert-dismissible">
-                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
-                    <h5><i class="icon fas fa-check"></i> Payment Processed!</h5>
-                    Payment has been successfully recorded.
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Invoice Number:</th>
+                                    <td><strong>{{ invoice.invoice_number }}</strong></td>
+                                </tr>
+                                <tr>
+                                    <th>Invoice Date:</th>
+                                    <td>{{ invoice.invoice_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Status:</th>
+                                    <td>
+                                        <span class="badge badge-{{ 'success' if invoice.status.value == 'paid' else 'info' if invoice.status.value == 'partially_paid' else 'warning' if invoice.status.value == 'pending' else 'secondary' }}">
+                                            {{ invoice.status.value.replace('_', ' ').title() }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Payment Mechanism:</th>
+                                    <td>{{ invoice.payment_mechanism.value.replace('_', ' ').title() if invoice.payment_mechanism else 'N/A' }}</td>
+                                </tr>
+                                {% if invoice.nhis_number %}
+                                <tr>
+                                    <th>NHIS Number:</th>
+                                    <td>{{ invoice.nhis_number }}</td>
+                                </tr>
+                                {% endif %}
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Subtotal:</th>
+                                    <td>GHS {{ "%.2f"|format(invoice.subtotal) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Discount:</th>
+                                    <td>GHS {{ "%.2f"|format(invoice.discount_amount) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Tax:</th>
+                                    <td>GHS {{ "%.2f"|format(invoice.tax_amount) }}</td>
+                                </tr>
+                                <tr>
+                                    <th><strong>Total Amount:</strong></th>
+                                    <td><strong>GHS {{ "%.2f"|format(invoice.total_amount) }}</strong></td>
+                                </tr>
+                                <tr>
+                                    <th>Paid Amount:</th>
+                                    <td>GHS {{ "%.2f"|format(invoice.paid_amount) }}</td>
+                                </tr>
+                                <tr>
+                                    <th><strong>Balance:</strong></th>
+                                    <td><strong class="text-danger">GHS {{ "%.2f"|format(invoice.balance) }}</strong></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
                 </div>
-                {% endif %}
+            </div>
 
-                <!-- Print Button -->
-                <div class="row mb-3">
-                    <div class="col-12">
-                        <button onclick="window.print()" class="btn btn-primary">
-                            <i class="fas fa-print mr-1"></i> Print Invoice
+            <!-- Charges -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-list mr-1"></i> Charges</h3>
+                    <div class="card-tools">
+                        <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#addChargeModal">
+                            <i class="fas fa-plus mr-1"></i> Add Charge
                         </button>
                     </div>
                 </div>
-
-                <!-- Patient Information -->
-                <div class="card card-primary card-outline">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-user-circle mr-1"></i> Patient Information</h3>
+                <div class="card-body">
+                    {% if invoice.charges %}
+                    <div class="table-responsive">
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Description</th>
+                                    <th>Quantity</th>
+                                    <th>Unit Price</th>
+                                    <th>Discount</th>
+                                    <th>Tax</th>
+                                    <th>Total</th>
+                                    <th>Paid</th>
+                                    <th>Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for charge in invoice.charges %}
+                                {% set charge_paid = charge.charge_payments|sum(attribute='amount') if charge.charge_payments else 0 %}
+                                {% set charge_balance = charge.total_amount - charge_paid %}
+                                <tr>
+                                    <td>{{ charge.charge_type.value.replace('_', ' ').title() }}</td>
+                                    <td>
+                                        {{ charge.description }}
+                                        {% if charge.procedure_catalog_id %}
+                                        <br><small class="text-muted" title="Procedure from Catalog #{{ charge.procedure_catalog_id }}"><i class="fas fa-book-medical"></i> Catalog #{{ charge.procedure_catalog_id }}</small>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ charge.quantity }}</td>
+                                    <td>GHS {{ "%.2f"|format(charge.unit_price) }}</td>
+                                    <td>GHS {{ "%.2f"|format(charge.discount) }}</td>
+                                    <td>GHS {{ "%.2f"|format(charge.tax_amount) }}</td>
+                                    <td><strong>GHS {{ "%.2f"|format(charge.total_amount) }}</strong></td>
+                                    <td>
+                                        <span class="badge badge-{{ 'success' if charge_paid >= charge.total_amount else 'info' if charge_paid > 0 else 'secondary' }}">
+                                            GHS {{ "%.2f"|format(charge_paid) }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-{{ 'success' if charge_balance <= 0 else 'warning' }}">
+                                            GHS {{ "%.2f"|format(charge_balance) }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-3"><strong>Patient:</strong> {{ patient.first_name }} {{ patient.last_name }}</div>
-                            <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
-                            <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
-                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}</div>
-                        </div>
-                        <div class="row mt-2">
-                            <div class="col-md-3"><strong>Phone:</strong> {{ patient.phone_number or 'N/A' }}</div>
-                        </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle mr-1"></i> No charges added yet.
                     </div>
+                    {% endif %}
                 </div>
+            </div>
 
-                <!-- Invoice Summary -->
-                <div class="card card-info">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-file-invoice-dollar mr-1"></i> Invoice Summary</h3>
+            <!-- Payments -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-money-check-alt mr-1"></i> Payments</h3>
+                    {% if invoice.balance > 0 %}
+                    <div class="card-tools">
+                        <button type="button" class="btn btn-sm btn-success" data-toggle="modal" data-target="#paymentModal">
+                            <i class="fas fa-money-bill-wave mr-1"></i> Process Payment
+                        </button>
                     </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <table class="table table-sm">
-                                    <tr>
-                                        <th>Invoice Number:</th>
-                                        <td><strong>{{ invoice.invoice_number }}</strong></td>
-                                    </tr>
-                                    <tr>
-                                        <th>Invoice Date:</th>
-                                        <td>{{ invoice.invoice_date.strftime('%Y-%m-%d %H:%M') }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th>Status:</th>
-                                        <td>
-                                            <span class="badge badge-{{ 'success' if invoice.status.value == 'paid' else 'info' if invoice.status.value == 'partially_paid' else 'warning' if invoice.status.value == 'pending' else 'secondary' }}">
-                                                {{ invoice.status.value.replace('_', ' ').title() }}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <th>Payment Mechanism:</th>
-                                        <td>{{ invoice.payment_mechanism.value.replace('_', ' ').title() if invoice.payment_mechanism else 'N/A' }}</td>
-                                    </tr>
-                                    {% if invoice.nhis_number %}
-                                    <tr>
-                                        <th>NHIS Number:</th>
-                                        <td>{{ invoice.nhis_number }}</td>
-                                    </tr>
-                                    {% endif %}
-                                </table>
-                            </div>
-                            <div class="col-md-6">
-                                <table class="table table-sm">
-                                    <tr>
-                                        <th>Subtotal:</th>
-                                        <td>GHS {{ "%.2f"|format(invoice.subtotal) }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th>Discount:</th>
-                                        <td>GHS {{ "%.2f"|format(invoice.discount_amount) }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th>Tax:</th>
-                                        <td>GHS {{ "%.2f"|format(invoice.tax_amount) }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th><strong>Total Amount:</strong></th>
-                                        <td><strong>GHS {{ "%.2f"|format(invoice.total_amount) }}</strong></td>
-                                    </tr>
-                                    <tr>
-                                        <th>Paid Amount:</th>
-                                        <td>GHS {{ "%.2f"|format(invoice.paid_amount) }}</td>
-                                    </tr>
-                                    <tr>
-                                        <th><strong>Balance:</strong></th>
-                                        <td><strong class="text-danger">GHS {{ "%.2f"|format(invoice.balance) }}</strong></td>
-                                    </tr>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+                    {% endif %}
                 </div>
+                <div class="card-body">
+                    {% if invoice.payments %}
+                    <div class="table-responsive">
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Payment #</th>
+                                    <th>Date</th>
+                                    <th>Amount</th>
+                                    <th>Method</th>
+                                    <th>Reference</th>
+                                    <th>Received By</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for payment in invoice.payments %}
+                                <tr>
+                                    <td>{{ payment.payment_number }}</td>
+                                    <td>{{ payment.payment_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td><strong>GHS {{ "%.2f"|format(payment.amount) }}</strong></td>
+                                    <td>{{ payment.payment_method.value.replace('_', ' ').title() }}</td>
+                                    <td>{{ payment.transaction_reference or 'N/A' }}</td>
+                                    <td>{{ payment.received_by.full_name or payment.received_by.username }}</td>
+                                    <td>
+                                        <a href="{{ url_for('print_receipt', payment_id=payment.id) }}?invoice_id={{ invoice.id }}" class="btn btn-sm btn-primary" target="_blank">
+                                            <i class="fas fa-print"></i> Print Receipt
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle mr-1"></i> No payments recorded yet.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
 
-                <!-- Charges -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-list mr-1"></i> Charges</h3>
-                        <div class="card-tools">
-                            <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#addChargeModal">
-                                <i class="fas fa-plus mr-1"></i> Add Charge
-                            </button>
+            <!-- Actions -->
+            <div class="card">
+                <div class="card-footer">
+                    <a href="{{ url_for('billing_dashboard') }}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left mr-1"></i> Back to Billing Dashboard
+                    </a>
+                </div>
+            </div>
+
+        </div>
+    </section>
+</div>
+
+<!-- MODERN PRINT INVOICE TEMPLATE -->
+<div class="print-invoice-wrapper">
+    <!-- Header Section -->
+    <div class="print-header-modern">
+        <div class="header-left">
+            {% if hospital_settings and hospital_settings.logo_url %}
+            <img src="{{ hospital_settings.logo_url|normalize_logo_url }}" alt="Hospital Logo" class="hospital-logo-modern">
+            {% endif %}
+        </div>
+        <div class="header-right">
+            <h1 class="hospital-name-modern">{{ hospital_settings.hospital_name if hospital_settings else 'HOSPITAL' }}</h1>
+            {% if hospital_settings and hospital_settings.hospital_address %}
+            <p class="hospital-address-modern">{{ hospital_settings.hospital_address }}</p>
+            {% endif %}
+            <div class="hospital-contact-modern">
+                {% if hospital_settings and hospital_settings.hospital_phone %}
+                <span><i class="fas fa-phone"></i> {{ hospital_settings.hospital_phone }}</span>
+                {% endif %}
+                {% if hospital_settings and hospital_settings.hospital_email %}
+                <span><i class="fas fa-envelope"></i> {{ hospital_settings.hospital_email }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Invoice Title Bar -->
+    <div class="invoice-title-bar">
+        <div class="invoice-title-main">INVOICE</div>
+        <div class="invoice-details-badge">
+            <div class="detail-row">
+                <span class="detail-label">Invoice No.</span>
+                <span class="detail-value">{{ invoice.invoice_number }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Date</span>
+                <span class="detail-value">{{ invoice.invoice_date.strftime('%d %b, %Y') }}</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bill To Section -->
+    <div class="bill-section">
+        <div class="section-label">BILL TO</div>
+        <div class="bill-details">
+            <div class="bill-name">{{ patient.first_name }} {{ patient.last_name }}</div>
+            <div class="bill-info">
+                <span><strong>ID:</strong> {{ patient.patient_number or 'N/A' }}</span>
+                {% if invoice.nhis_number %}
+                <span><strong>NHIS:</strong> {{ invoice.nhis_number }}</span>
+                {% endif %}
+            </div>
+            {% if patient.phone_number %}
+            <div class="bill-contact">{{ patient.phone_number }}</div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Items Table -->
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th class="col-desc">Item Description</th>
+                <th class="col-qty">Qty</th>
+                <th class="col-rate">Rate</th>
+                <th class="col-amount">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for charge in invoice.charges %}
+            <tr>
+                <td class="item-desc">
+                    <span class="item-type">{{ charge.charge_type.value.replace('_', ' ').title() }}</span>
+                    <span class="item-name">{{ charge.description }}</span>
+                </td>
+                <td class="item-qty">{{ charge.quantity }}</td>
+                <td class="item-rate">GHS {{ "%.2f"|format(charge.unit_price) }}</td>
+                <td class="item-amount">GHS {{ "%.2f"|format(charge.total_amount) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <!-- Totals Section -->
+    <div class="totals-section">
+        <div class="totals-left">
+            <div class="payment-status">
+                <div class="status-label">Payment Status</div>
+                <div class="status-badge-modern {{ 'status-paid' if invoice.status.value == 'paid' else 'status-pending' if invoice.status.value == 'pending' else 'status-overdue' }}">
+                    {{ invoice.status.value.replace('_', ' ').title() }}
+                </div>
+            </div>
+        </div>
+        <div class="totals-right">
+            <div class="total-line">
+                <span>Subtotal</span>
+                <span>GHS {{ "%.2f"|format(invoice.subtotal) }}</span>
+            </div>
+            {% if invoice.discount_amount > 0 %}
+            <div class="total-line discount">
+                <span>Discount</span>
+                <span>- GHS {{ "%.2f"|format(invoice.discount_amount) }}</span>
+            </div>
+            {% endif %}
+            {% if invoice.tax_amount > 0 %}
+            <div class="total-line">
+                <span>Tax</span>
+                <span>GHS {{ "%.2f"|format(invoice.tax_amount) }}</span>
+            </div>
+            {% endif %}
+            <div class="total-line grand-total">
+                <span>Total</span>
+                <span>GHS {{ "%.2f"|format(invoice.total_amount) }}</span>
+            </div>
+            <div class="total-line paid">
+                <span>Paid</span>
+                <span>GHS {{ "%.2f"|format(invoice.paid_amount) }}</span>
+            </div>
+            <div class="total-line balance">
+                <span>Balance Due</span>
+                <span>GHS {{ "%.2f"|format(invoice.balance) }}</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Signatures Section -->
+    <div class="signatures-section">
+        <div class="sig-box">
+            <div class="sig-label">Authorized Signature</div>
+            <div class="sig-line"></div>
+            <div class="sig-date">Date: ___________</div>
+        </div>
+        <div class="sig-box">
+            <div class="sig-label">Patient/Customer Signature</div>
+            <div class="sig-line"></div>
+            <div class="sig-date">Date: ___________</div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <div class="print-footer-modern">
+        <p class="thank-you-msg">Thank you for choosing our services!</p>
+        <p class="footer-note">{{ hospital_settings.hospital_name if hospital_settings else 'Our facility' }} is committed to your health and wellbeing.</p>
+        <p class="print-meta">Invoice {{ invoice.invoice_number }} | Generated on {{ now.strftime('%d %b, %Y at %I:%M %p') }}</p>
+    </div>
+</div>
+
+<!-- Add Charge Modal -->
+<div class="modal fade" id="addChargeModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('add_charge', invoice_id=invoice.id) }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Charge</h5>
+                    <button type="button" class="close" data-dismiss="modal">
+                        <span>&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Charge Type</label>
+                        <select name="charge_type" class="form-control" id="chargeTypeSelect" required onchange="toggleProcedureCatalog()">
+                            <option value="consultation">Consultation</option>
+                            <option value="lab_test">Lab Test</option>
+                            <option value="radiology">Radiology</option>
+                            <option value="pharmacy">Pharmacy</option>
+                            <option value="procedure">Procedure</option>
+                            <option value="admission">Admission</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Procedure Catalog Selection (shown only for procedure charges) -->
+                    <div class="form-group" id="procedureCatalogGroup" style="display: none;">
+                        <label>Procedure (from Catalog)</label>
+                        <select class="form-control" id="procedureCatalogSelect" onchange="updateFromProcedureCatalog()">
+                            <option value="">-- Select Procedure from Catalog --</option>
+                            {% for cat in procedure_catalogs %}
+                            <option value="{{ cat.id }}" data-name="{{ cat.name }}" data-code="{{ cat.procedure_code or '' }}" data-category="{{ cat.procedure_category or '' }}" data-cash-price="{{ cat.cash_price }}" data-nhis-price="{{ cat.nhis_price }}" data-nhis-covered="{{ cat.nhis_covered }}">{{ cat.name }} ({{ cat.procedure_code or 'No code' }}) - GHS {{ "%.2f"|format(cat.cash_price) }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="form-text text-muted">Select a procedure from the catalog to use its official price</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Description</label>
+                        <input type="text" name="description" class="form-control" id="chargeDescription" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label>Quantity</label>
+                                <input type="number" name="quantity" class="form-control" value="1" min="1" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label>Unit Price (GHS)</label>
+                                <input type="number" name="unit_price" class="form-control" id="unitPriceInput" step="0.01" min="0" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label>Discount (GHS)</label>
+                                <input type="number" name="discount" class="form-control" step="0.01" min="0" value="0.00">
+                            </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        {% if invoice.charges %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered">
+                    <div class="form-group">
+                        <label>Tax Rate (%)</label>
+                        <input type="number" name="tax_rate" class="form-control" step="0.01" min="0" max="100" value="0.00">
+                    </div>
+                    <input type="hidden" name="procedure_catalog_id" id="procedureCatalogId" value="">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Charge</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleProcedureCatalog() {
+    const chargeType = document.getElementById('chargeTypeSelect').value;
+    const procedureGroup = document.getElementById('procedureCatalogGroup');
+    if (chargeType === 'procedure') {
+        procedureGroup.style.display = 'block';
+    } else {
+        procedureGroup.style.display = 'none';
+        document.getElementById('procedureCatalogSelect').value = '';
+        document.getElementById('procedureCatalogId').value = '';
+    }
+}
+
+function updateFromProcedureCatalog() {
+    const select = document.getElementById('procedureCatalogSelect');
+    const selectedOption = select.options[select.selectedIndex];
+    
+    if (selectedOption.value) {
+        const name = selectedOption.getAttribute('data-name');
+        const code = selectedOption.getAttribute('data-code');
+        const category = selectedOption.getAttribute('data-category');
+        const cashPrice = parseFloat(selectedOption.getAttribute('data-cash-price')) || 0;
+        
+        // Build description with procedure details
+        let description = name;
+        if (code) description += ' (' + code + ')';
+        if (category) description += ' - ' + category;
+        
+        document.getElementById('chargeDescription').value = description;
+        document.getElementById('unitPriceInput').value = cashPrice.toFixed(2);
+        document.getElementById('procedureCatalogId').value = selectedOption.value;
+    }
+}
+</script>
+
+<!-- Payment Modal -->
+<div class="modal fade" id="paymentModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('process_payment', invoice_id=invoice.id) }}" id="paymentForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">Process Payment</h5>
+                    <button type="button" class="close" data-dismiss="modal">
+                        <span>&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <strong>Total Balance Due:</strong> GHS {{ "%.2f"|format(invoice.balance) }}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label><strong>Select Charges to Pay (or leave unchecked to pay full invoice balance):</strong></label>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered">
                                 <thead>
                                     <tr>
-                                        <th>Type</th>
+                                        <th style="width: 40px;">
+                                            <input type="checkbox" id="selectAllCharges" onchange="toggleAllCharges()">
+                                        </th>
                                         <th>Description</th>
-                                        <th>Quantity</th>
-                                        <th>Unit Price</th>
-                                        <th>Discount</th>
-                                        <th>Tax</th>
                                         <th>Total</th>
                                         <th>Paid</th>
                                         <th>Balance</th>
+                                        <th>Amount to Pay</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for charge in invoice.charges %}
                                     {% set charge_paid = charge.charge_payments|sum(attribute='amount') if charge.charge_payments else 0 %}
                                     {% set charge_balance = charge.total_amount - charge_paid %}
+                                    {% if charge_balance > 0 %}
                                     <tr>
-                                        <td>{{ charge.charge_type.value.replace('_', ' ').title() }}</td>
+                                        <td>
+                                            <input type="checkbox" 
+                                                   name="charge_ids" 
+                                                   value="{{ charge.id }}" 
+                                                   class="charge-checkbox"
+                                                   onchange="updatePaymentAmount()"
+                                                   data-balance="{{ charge_balance }}">
+                                        </td>
                                         <td>{{ charge.description }}</td>
-                                        <td>{{ charge.quantity }}</td>
-                                        <td>GHS {{ "%.2f"|format(charge.unit_price) }}</td>
-                                        <td>GHS {{ "%.2f"|format(charge.discount) }}</td>
-                                        <td>GHS {{ "%.2f"|format(charge.tax_amount) }}</td>
-                                        <td><strong>GHS {{ "%.2f"|format(charge.total_amount) }}</strong></td>
+                                        <td>GHS {{ "%.2f"|format(charge.total_amount) }}</td>
+                                        <td>GHS {{ "%.2f"|format(charge_paid) }}</td>
+                                        <td><strong>GHS {{ "%.2f"|format(charge_balance) }}</strong></td>
                                         <td>
-                                            <span class="badge badge-{{ 'success' if charge_paid >= charge.total_amount else 'info' if charge_paid > 0 else 'secondary' }}">
-                                                GHS {{ "%.2f"|format(charge_paid) }}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <span class="badge badge-{{ 'success' if charge_balance <= 0 else 'warning' }}">
-                                                GHS {{ "%.2f"|format(charge_balance) }}
-                                            </span>
+                                            <input type="number" 
+                                                   name="charge_amount_{{ charge.id }}" 
+                                                   class="form-control form-control-sm charge-amount" 
+                                                   step="0.01" 
+                                                   min="0.01" 
+                                                   max="{{ charge_balance }}" 
+                                                   value="{{ charge_balance }}"
+                                                   disabled
+                                                   onchange="updatePaymentAmount()">
                                         </td>
                                     </tr>
+                                    {% endif %}
                                     {% endfor %}
                                 </tbody>
                             </table>
                         </div>
-                        {% else %}
-                        <div class="alert alert-info">
-                            <i class="fas fa-info-circle mr-1"></i> No charges added yet.
-                        </div>
-                        {% endif %}
+                        <small class="form-text text-muted">
+                            Check charges to pay individually, or leave unchecked to pay the full invoice balance.
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Total Payment Amount (GHS) <span class="text-danger">*</span></label>
+                        <input type="number" 
+                               name="amount" 
+                               id="totalPaymentAmount"
+                               class="form-control" 
+                               step="0.01" 
+                               min="0.01" 
+                               max="{{ invoice.balance }}" 
+                               value="{{ invoice.balance }}" 
+                               required
+                               readonly>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Payment Method <span class="text-danger">*</span></label>
+                        <select name="payment_method" class="form-control" required>
+                            <option value="cash">Cash</option>
+                            <option value="mobile_money">Mobile Money</option>
+                            <option value="card">Card</option>
+                            <option value="bank_transfer">Bank Transfer</option>
+                            <option value="nhis">NHIS</option>
+                            <option value="private_insurance">Private Insurance</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Transaction Reference</label>
+                        <input type="text" name="transaction_reference" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Receipt Number</label>
+                        <input type="text" name="receipt_number" class="form-control" placeholder="Auto-generated if left blank">
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea name="notes" class="form-control" rows="3"></textarea>
                     </div>
                 </div>
-
-                <!-- Payments -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3 class="card-title"><i class="fas fa-money-check-alt mr-1"></i> Payments</h3>
-                        {% if invoice.balance > 0 %}
-                        <div class="card-tools">
-                            <button type="button" class="btn btn-sm btn-success" data-toggle="modal" data-target="#paymentModal">
-                                <i class="fas fa-money-bill-wave mr-1"></i> Process Payment
-                            </button>
-                        </div>
-                        {% endif %}
-                    </div>
-                    <div class="card-body">
-                        {% if invoice.payments %}
-                        <div class="table-responsive">
-                            <table class="table table-bordered">
-                                <thead>
-                                    <tr>
-                                        <th>Payment #</th>
-                                        <th>Date</th>
-                                        <th>Amount</th>
-                                        <th>Method</th>
-                                        <th>Reference</th>
-                                        <th>Received By</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for payment in invoice.payments %}
-                                    <tr>
-                                        <td>{{ payment.payment_number }}</td>
-                                        <td>{{ payment.payment_date.strftime('%Y-%m-%d %H:%M') }}</td>
-                                        <td><strong>GHS {{ "%.2f"|format(payment.amount) }}</strong></td>
-                                        <td>{{ payment.payment_method.value.replace('_', ' ').title() }}</td>
-                                        <td>{{ payment.transaction_reference or 'N/A' }}</td>
-                                        <td>{{ payment.received_by.full_name or payment.received_by.username }}</td>
-                                        <td>
-                                            <a href="{{ url_for('print_receipt', payment_id=payment.id) }}?invoice_id={{ invoice.id }}" class="btn btn-sm btn-primary" target="_blank">
-                                                <i class="fas fa-print"></i> Print Receipt
-                                            </a>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                        {% else %}
-                        <div class="alert alert-info">
-                            <i class="fas fa-info-circle mr-1"></i> No payments recorded yet.
-                        </div>
-                        {% endif %}
-                    </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">Process Payment</button>
                 </div>
-
-                <!-- Actions -->
-                <div class="card">
-                    <div class="card-footer">
-                        <a href="{{ url_for('billing_dashboard') }}" class="btn btn-secondary">
-                            <i class="fas fa-arrow-left mr-1"></i> Back to Billing Dashboard
-                        </a>
-                    </div>
-                </div>
-
-            </div>
-        </section>
-    </div>
-
-    <!-- Add Charge Modal -->
-    <div class="modal fade" id="addChargeModal" tabindex="-1" role="dialog">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <form method="POST" action="{{ url_for('add_charge', invoice_id=invoice.id) }}">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Add Charge</h5>
-                        <button type="button" class="close" data-dismiss="modal">
-                            <span>&times;</span>
-                        </button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="form-group">
-                            <label>Charge Type</label>
-                            <select name="charge_type" class="form-control" required>
-                                <option value="consultation">Consultation</option>
-                                <option value="lab_test">Lab Test</option>
-                                <option value="radiology">Radiology</option>
-                                <option value="pharmacy">Pharmacy</option>
-                                <option value="procedure">Procedure</option>
-                                <option value="admission">Admission</option>
-                                <option value="other">Other</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Description</label>
-                            <input type="text" name="description" class="form-control" required>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Quantity</label>
-                                    <input type="number" name="quantity" class="form-control" value="1" min="1" required>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Unit Price (GHS)</label>
-                                    <input type="number" name="unit_price" class="form-control" step="0.01" min="0" required>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <label>Discount (GHS)</label>
-                                    <input type="number" name="discount" class="form-control" step="0.01" min="0" value="0.00">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label>Tax Rate (%)</label>
-                            <input type="number" name="tax_rate" class="form-control" step="0.01" min="0" max="100" value="0.00">
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Add Charge</button>
-                    </div>
-                </form>
-            </div>
+            </form>
         </div>
     </div>
+</div>
 
-    <!-- Payment Modal -->
-    <div class="modal fade" id="paymentModal" tabindex="-1" role="dialog">
-        <div class="modal-dialog modal-lg" role="document">
-            <div class="modal-content">
-                <form method="POST" action="{{ url_for('process_payment', invoice_id=invoice.id) }}" id="paymentForm">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Process Payment</h5>
-                        <button type="button" class="close" data-dismiss="modal">
-                            <span>&times;</span>
-                        </button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="alert alert-info">
-                            <strong>Total Balance Due:</strong> GHS {{ "%.2f"|format(invoice.balance) }}
-                        </div>
-                        
-                        <!-- Charge Selection -->
-                        <div class="form-group">
-                            <label><strong>Select Charges to Pay (or leave unchecked to pay full invoice balance):</strong></label>
-                            <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
-                                <table class="table table-sm table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th style="width: 40px;">
-                                                <input type="checkbox" id="selectAllCharges" onchange="toggleAllCharges()">
-                                            </th>
-                                            <th>Description</th>
-                                            <th>Total</th>
-                                            <th>Paid</th>
-                                            <th>Balance</th>
-                                            <th>Amount to Pay</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for charge in invoice.charges %}
-                                        {% set charge_paid = charge.charge_payments|sum(attribute='amount') if charge.charge_payments else 0 %}
-                                        {% set charge_balance = charge.total_amount - charge_paid %}
-                                        {% if charge_balance > 0 %}
-                                        <tr>
-                                            <td>
-                                                <input type="checkbox" 
-                                                       name="charge_ids" 
-                                                       value="{{ charge.id }}" 
-                                                       class="charge-checkbox"
-                                                       onchange="updatePaymentAmount()"
-                                                       data-balance="{{ charge_balance }}">
-                                            </td>
-                                            <td>{{ charge.description }}</td>
-                                            <td>GHS {{ "%.2f"|format(charge.total_amount) }}</td>
-                                            <td>GHS {{ "%.2f"|format(charge_paid) }}</td>
-                                            <td><strong>GHS {{ "%.2f"|format(charge_balance) }}</strong></td>
-                                            <td>
-                                                <input type="number" 
-                                                       name="charge_amount_{{ charge.id }}" 
-                                                       class="form-control form-control-sm charge-amount" 
-                                                       step="0.01" 
-                                                       min="0.01" 
-                                                       max="{{ charge_balance }}" 
-                                                       value="{{ charge_balance }}"
-                                                       disabled
-                                                       onchange="updatePaymentAmount()">
-                                            </td>
-                                        </tr>
-                                        {% endif %}
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <small class="form-text text-muted">
-                                <i class="fas fa-info-circle"></i> Check charges to pay individually, or leave unchecked to pay the full invoice balance.
-                            </small>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Total Payment Amount (GHS) <span class="text-danger">*</span></label>
-                            <input type="number" 
-                                   name="amount" 
-                                   id="totalPaymentAmount"
-                                   class="form-control" 
-                                   step="0.01" 
-                                   min="0.01" 
-                                   max="{{ invoice.balance }}" 
-                                   value="{{ invoice.balance }}" 
-                                   required
-                                   readonly>
-                            <small class="form-text text-muted">This amount is calculated from selected charges. Adjust individual charge amounts above.</small>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Payment Method <span class="text-danger">*</span></label>
-                            <select name="payment_method" class="form-control" required>
-                                <option value="cash">Cash</option>
-                                <option value="mobile_money">Mobile Money</option>
-                                <option value="card">Card</option>
-                                <option value="bank_transfer">Bank Transfer</option>
-                                <option value="nhis">NHIS</option>
-                                <option value="private_insurance">Private Insurance</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Transaction Reference</label>
-                            <input type="text" name="transaction_reference" class="form-control">
-                        </div>
-                        <div class="form-group">
-                            <label>Receipt Number</label>
-                            <input type="text" name="receipt_number" class="form-control" placeholder="Auto-generated if left blank">
-                            <small class="form-text text-muted">Leave blank to auto-generate receipt number</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Notes</label>
-                            <textarea name="notes" class="form-control" rows="3"></textarea>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-success">Process Payment</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
+<style>
+/* MODERN PRINT STYLES */
+@media print {
+    /* Hide all screen elements */
+    .content-wrapper,
+    .content-header,
+    .modal,
+    .breadcrumb,
+    .no-print {
+        display: none !important;
+    }
+    
+    /* Reset everything */
+    body, html {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+        font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    
+    /* Show print wrapper */
+    .print-invoice-wrapper {
+        display: block !important;
+        position: relative !important;
+        width: 100% !important;
+        max-width: 800px !important;
+        margin: 0 auto !important;
+        padding: 25px 30px !important;
+        background: white !important;
+    }
+    
+    /* Header */
+    .print-header-modern {
+        display: flex !important;
+        align-items: flex-start !important;
+        justify-content: space-between !important;
+        padding-bottom: 20px !important;
+        border-bottom: 3px solid #0066cc !important;
+        margin-bottom: 25px !important;
+    }
+    
+    .hospital-logo-modern {
+        max-height: 70px !important;
+        max-width: 150px !important;
+    }
+    
+    .header-right {
+        text-align: right !important;
+    }
+    
+    .hospital-name-modern {
+        margin: 0 0 5px 0 !important;
+        font-size: 24px !important;
+        font-weight: 700 !important;
+        color: #0066cc !important;
+    }
+    
+    .hospital-address-modern {
+        margin: 0 0 8px 0 !important;
+        font-size: 13px !important;
+        color: #555 !important;
+    }
+    
+    .hospital-contact-modern span {
+        display: inline-block !important;
+        margin-left: 15px !important;
+        font-size: 12px !important;
+        color: #666 !important;
+    }
+    
+    .hospital-contact-modern i {
+        margin-right: 4px !important;
+        color: #0066cc !important;
+    }
+    
+    /* Invoice Title Bar */
+    .invoice-title-bar {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        margin-bottom: 25px !important;
+    }
+    
+    .invoice-title-main {
+        font-size: 32px !important;
+        font-weight: 700 !important;
+        color: #333 !important;
+        letter-spacing: 4px !important;
+        text-transform: uppercase !important;
+    }
+    
+    .invoice-details-badge {
+        background: #f8f9fa !important;
+        padding: 12px 20px !important;
+        border-radius: 8px !important;
+        display: flex !important;
+        gap: 25px !important;
+    }
+    
+    .detail-row {
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    
+    .detail-label {
+        font-size: 10px !important;
+        text-transform: uppercase !important;
+        color: #888 !important;
+        letter-spacing: 1px !important;
+    }
+    
+    .detail-value {
+        font-size: 15px !important;
+        font-weight: 600 !important;
+        color: #0066cc !important;
+    }
+    
+    /* Bill Section */
+    .bill-section {
+        background: #f8f9fa !important;
+        padding: 18px 22px !important;
+        border-radius: 10px !important;
+        margin-bottom: 25px !important;
+        border-left: 5px solid #0066cc !important;
+    }
+    
+    .section-label {
+        font-size: 10px !important;
+        text-transform: uppercase !important;
+        letter-spacing: 2px !important;
+        color: #888 !important;
+        margin-bottom: 10px !important;
+    }
+    
+    .bill-name {
+        font-size: 18px !important;
+        font-weight: 600 !important;
+        color: #333 !important;
+        margin-bottom: 6px !important;
+    }
+    
+    .bill-info span {
+        display: inline-block !important;
+        margin-right: 20px !important;
+        font-size: 13px !important;
+        color: #555 !important;
+    }
+    
+    .bill-contact {
+        margin-top: 6px !important;
+        font-size: 13px !important;
+        color: #666 !important;
+    }
+    
+    /* Items Table */
+    .items-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        margin-bottom: 25px !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.06) !important;
+        border-radius: 10px !important;
+        overflow: hidden !important;
+    }
+    
+    .items-table thead th {
+        background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%) !important;
+        color: white !important;
+        padding: 14px 16px !important;
+        font-weight: 600 !important;
+        font-size: 11px !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1px !important;
+    }
+    
+    .items-table tbody td {
+        padding: 14px 16px !important;
+        border-bottom: 1px solid #eef0f2 !important;
+        font-size: 14px !important;
+        color: #333 !important;
+    }
+    
+    .items-table tbody tr:hover {
+        background: #f8f9fa !important;
+    }
+    
+    .item-desc {
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    
+    .item-type {
+        font-size: 11px !important;
+        text-transform: uppercase !important;
+        color: #888 !important;
+        letter-spacing: 0.5px !important;
+        margin-bottom: 3px !important;
+    }
+    
+    .item-name {
+        font-weight: 500 !important;
+    }
+    
+    .col-desc { width: 45% !important; }
+    .col-qty { width: 12% !important; text-align: center !important; }
+    .col-rate { width: 20% !important; }
+    .col-amount { width: 23% !important; text-align: right !important; }
+    
+    .item-qty, .item-rate { text-align: center !important; }
+    .item-amount { text-align: right !important; font-weight: 600 !important; }
+    
+    /* Totals Section */
+    .totals-section {
+        display: flex !important;
+        justify-content: space-between !important;
+        margin-bottom: 30px !important;
+    }
+    
+    .payment-status {
+        background: #f8f9fa !important;
+        padding: 15px 25px !important;
+        border-radius: 10px !important;
+        display: inline-block !important;
+    }
+    
+    .status-label {
+        font-size: 10px !important;
+        text-transform: uppercase !important;
+        color: #888 !important;
+        margin-bottom: 8px !important;
+    }
+    
+    .status-badge-modern {
+        display: inline-block !important;
+        padding: 8px 20px !important;
+        border-radius: 25px !important;
+        font-size: 13px !important;
+        font-weight: 600 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1px !important;
+    }
+    
+    .status-paid {
+        background: #d4edda !important;
+        color: #155724 !important;
+    }
+    
+    .status-pending {
+        background: #fff3cd !important;
+        color: #856404 !important;
+    }
+    
+    .status-overdue {
+        background: #f8d7da !important;
+        color: #721c24 !important;
+    }
+    
+    .totals-right {
+        min-width: 280px !important;
+    }
+    
+    .total-line {
+        display: flex !important;
+        justify-content: space-between !important;
+        padding: 10px 0 !important;
+        border-bottom: 1px solid #eef0f2 !important;
+        font-size: 14px !important;
+    }
+    
+    .total-line.discount {
+        color: #28a745 !important;
+    }
+    
+    .total-line.grand-total {
+        background: #0066cc !important;
+        color: white !important;
+        padding: 14px 15px !important;
+        margin-top: 5px !important;
+        border-radius: 8px !important;
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        border-bottom: none !important;
+    }
+    
+    .total-line.paid {
+        color: #28a745 !important;
+    }
+    
+    .total-line.balance {
+        background: #fff3cd !important;
+        padding: 14px 15px !important;
+        border-radius: 8px !important;
+        font-size: 18px !important;
+        font-weight: 700 !important;
+        color: #856404 !important;
+        border-bottom: none !important;
+    }
+    
+    /* Signatures */
+    .signatures-section {
+        display: flex !important;
+        justify-content: space-between !important;
+        gap: 40px !important;
+        margin-top: 40px !important;
+        padding-top: 30px !important;
+        border-top: 2px solid #eef0f2 !important;
+    }
+    
+    .sig-box {
+        flex: 1 !important;
+        text-align: center !important;
+        background: #f8f9fa !important;
+        padding: 20px !important;
+        border-radius: 10px !important;
+    }
+    
+    .sig-label {
+        font-size: 11px !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1px !important;
+        color: #888 !important;
+        margin-bottom: 40px !important;
+    }
+    
+    .sig-line {
+        width: 100% !important;
+        height: 1px !important;
+        background: #bbb !important;
+        margin-bottom: 12px !important;
+    }
+    
+    .sig-date {
+        font-size: 11px !important;
+        color: #999 !important;
+    }
+    
+    /* Footer */
+    .print-footer-modern {
+        text-align: center !important;
+        margin-top: 35px !important;
+        padding-top: 25px !important;
+        border-top: 2px solid #eef0f2 !important;
+    }
+    
+    .thank-you-msg {
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        color: #333 !important;
+        margin: 0 0 6px 0 !important;
+    }
+    
+    .footer-note {
+        font-size: 13px !important;
+        color: #666 !important;
+        margin: 0 0 12px 0 !important;
+    }
+    
+    .print-meta {
+        font-size: 11px !important;
+        color: #999 !important;
+    }
+}
 
-    <script>
-        function toggleAllCharges() {
-            const selectAll = document.getElementById('selectAllCharges');
-            const checkboxes = document.querySelectorAll('.charge-checkbox');
-            checkboxes.forEach(cb => {
-                cb.checked = selectAll.checked;
-                const amountInput = document.querySelector(`input[name="charge_amount_${cb.value}"]`);
-                if (amountInput) {
-                    amountInput.disabled = !selectAll.checked;
-                    if (!selectAll.checked) {
-                        amountInput.value = amountInput.getAttribute('max');
-                    }
-                }
-            });
-            updatePaymentAmount();
-        }
+/* Hide print wrapper on screen */
+.print-invoice-wrapper {
+    display: none;
+}
+</style>
 
-        function updatePaymentAmount() {
-            const checkboxes = document.querySelectorAll('.charge-checkbox:checked');
-            let total = 0;
-            
-            checkboxes.forEach(cb => {
-                const amountInput = document.querySelector(`input[name="charge_amount_${cb.value}"]`);
-                if (amountInput && amountInput.value) {
-                    total += parseFloat(amountInput.value) || 0;
-                }
-            });
-            
-            // If no charges selected, use full invoice balance
-            if (checkboxes.length === 0) {
-                total = {{ invoice.balance }};
+<script>
+function toggleAllCharges() {
+    const selectAll = document.getElementById('selectAllCharges');
+    const checkboxes = document.querySelectorAll('.charge-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+        const amountInput = document.querySelector('input[name="charge_amount_' + cb.value + '"]');
+        if (amountInput) {
+            amountInput.disabled = !selectAll.checked;
+            if (!selectAll.checked) {
+                amountInput.value = amountInput.getAttribute('max');
             }
-            
-            document.getElementById('totalPaymentAmount').value = total.toFixed(2);
         }
+    });
+    updatePaymentAmount();
+}
 
-        // Enable/disable amount inputs based on checkbox state
-        document.querySelectorAll('.charge-checkbox').forEach(cb => {
-            cb.addEventListener('change', function() {
-                const amountInput = document.querySelector(`input[name="charge_amount_${this.value}"]`);
-                if (amountInput) {
-                    amountInput.disabled = !this.checked;
-                    if (!this.checked) {
-                        amountInput.value = amountInput.getAttribute('max');
-                    }
-                }
-            });
-        });
-    </script>
+function updatePaymentAmount() {
+    const checkboxes = document.querySelectorAll('.charge-checkbox:checked');
+    let total = 0;
+    
+    checkboxes.forEach(cb => {
+        const amountInput = document.querySelector('input[name="charge_amount_' + cb.value + '"]');
+        if (amountInput && amountInput.value) {
+            total += parseFloat(amountInput.value) || 0;
+        }
+    });
+    
+    if (checkboxes.length === 0) {
+        total = parseFloat("{{ invoice.balance }}");
+    }
+    
+    document.getElementById('totalPaymentAmount').value = total.toFixed(2);
+}
+
+document.querySelectorAll('.charge-checkbox').forEach(cb => {
+    cb.addEventListener('change', function() {
+        const amountInput = document.querySelector('input[name="charge_amount_' + this.value + '"]');
+        if (amountInput) {
+            amountInput.disabled = !this.checked;
+            if (!this.checked) {
+                amountInput.value = amountInput.getAttribute('max');
+            }
+        }
+    });
+});
+</script>
 
 {% endblock %}
-

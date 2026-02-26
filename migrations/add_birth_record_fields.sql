@@ -1,0 +1,41 @@
+-- Add Ghana Health Service fields to birth_records table
+-- Run this SQL against your PostgreSQL database
+
+ALTER TABLE birth_records 
+ADD COLUMN IF NOT EXISTS mother_nhis_number VARCHAR(50),
+ADD COLUMN IF NOT EXISTS baby_name VARCHAR(100),
+ADD COLUMN IF NOT EXISTS number_of_babies INTEGER DEFAULT 1,
+ADD COLUMN IF NOT EXISTS birth_order INTEGER,
+ADD COLUMN IF NOT EXISTS gestational_age_weeks INTEGER,
+ADD COLUMN IF NOT EXISTS low_birth_weight BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS very_low_birth_weight BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS resuscitation_required BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS resuscitation_type VARCHAR(50),
+ADD COLUMN IF NOT EXISTS vitamin_k_administered BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS bcg_vaccine BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS polio_vaccine BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS eye_prophylaxis BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS breastfeeding_initiated_1hr BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS nicu_admission BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS birth_defects TEXT,
+ADD COLUMN IF NOT EXISTS facility_name VARCHAR(200),
+ADD COLUMN IF NOT EXISTS district VARCHAR(100),
+ADD COLUMN IF NOT EXISTS region VARCHAR(100),
+ADD COLUMN IF NOT EXISTS attendant_name VARCHAR(200),
+ADD COLUMN IF NOT EXISTS attendant_category VARCHAR(20),
+ADD COLUMN IF NOT EXISTS attendant_registration_number VARCHAR(50),
+ADD COLUMN IF NOT EXISTS father_name VARCHAR(200),
+ADD COLUMN IF NOT EXISTS father_contact VARCHAR(20),
+ADD COLUMN IF NOT EXISTS referred_from VARCHAR(200),
+ADD COLUMN IF NOT EXISTS referred_to VARCHAR(200),
+ADD COLUMN IF NOT EXISTS baby_address TEXT,
+ADD COLUMN IF NOT EXISTS birth_notification_number VARCHAR(50),
+ADD COLUMN IF NOT EXISTS birth_certificate_status VARCHAR(20) DEFAULT 'pending',
+ADD COLUMN IF NOT EXISTS birth_certificate_number VARCHAR(50),
+ADD COLUMN IF NOT EXISTS birth_certificate_date DATE,
+ADD COLUMN IF NOT EXISTS discharge_date DATE,
+ADD COLUMN IF NOT EXISTS mother_discharge_condition VARCHAR(20),
+ADD COLUMN IF NOT EXISTS baby_discharge_condition VARCHAR(20),
+ADD COLUMN IF NOT EXISTS follow_up_date DATE;
+
+-- If columns already exist, this will show NOTICE but won't fail

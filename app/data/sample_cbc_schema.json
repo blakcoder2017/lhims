@@ -1,0 +1,137 @@
+{
+  "meta": {
+    "name": "Complete Blood Count",
+    "discipline": "HEMATOLOGY",
+    "version": 1,
+    "description": "Standard CBC with differential"
+  },
+  "layout": {
+    "sections": [
+      {
+        "id": "sec_main",
+        "title": "CBC Results",
+        "rows": [
+          {
+            "columns": [
+              {"width": 4, "items": ["hemoglobin"]},
+              {"width": 4, "items": ["hematocrit"]},
+              {"width": 4, "items": ["rbc_count"]}
+            ]
+          },
+          {
+            "columns": [
+              {"width": 4, "items": ["wbc_count"]},
+              {"width": 4, "items": ["platelet_count"]},
+              {"width": 4, "items": ["mch"]}
+            ]
+          },
+          {
+            "columns": [
+              {"width": 12, "items": ["differential_table"]}
+            ]
+          },
+          {
+            "columns": [
+              {"width": 12, "items": ["remarks"]}
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "fields": {
+    "hemoglobin": {
+      "code": "Hb",
+      "type": "numeric",
+      "label": "Hemoglobin",
+      "placeholder": "Enter Hb value",
+      "required": true,
+      "min": 0,
+      "max": 30,
+      "decimals": 1,
+      "unit": "g/dL",
+      "critical": true,
+      "criticalLow": 7.0,
+      "criticalHigh": 20.0
+    },
+    "hematocrit": {
+      "code": "Hct",
+      "type": "numeric",
+      "label": "Hematocrit",
+      "required": true,
+      "min": 0,
+      "max": 70,
+      "decimals": 1,
+      "unit": "%"
+    },
+    "rbc_count": {
+      "code": "RBC",
+      "type": "numeric",
+      "label": "RBC Count",
+      "required": true,
+      "min": 0,
+      "max": 10,
+      "decimals": 2,
+      "unit": "10^6/uL"
+    },
+    "wbc_count": {
+      "code": "WBC",
+      "type": "numeric",
+      "label": "WBC Count",
+      "required": true,
+      "min": 0,
+      "max": 50,
+      "decimals": 2,
+      "unit": "10^3/uL",
+      "critical": true,
+      "criticalLow": 2.0,
+      "criticalHigh": 30.0
+    },
+    "platelet_count": {
+      "code": "PLT",
+      "type": "numeric",
+      "label": "Platelet Count",
+      "required": true,
+      "min": 0,
+      "max": 1000,
+      "decimals": 0,
+      "unit": "10^3/uL"
+    },
+    "mch": {
+      "code": "MCH",
+      "type": "numeric",
+      "label": "MCH",
+      "readOnly": true,
+      "decimals": 1,
+      "unit": "pg",
+      "tooltip": "Calculated: Hb * 1000 / RBC"
+    },
+    "differential_table": {
+      "code": "DIFF",
+      "type": "table",
+      "label": "Differential Count",
+      "rowOptions": ["Neutrophils", "Lymphocytes", "Monocytes", "Eosinophils", "Basophils"],
+      "colOptions": ["%", "Absolute"]
+    },
+    "remarks": {
+      "code": "REMARKS",
+      "type": "text",
+      "label": "Laboratory Remarks",
+      "rows": 3
+    }
+  },
+  "rules": {
+    "visibility": [],
+    "requiredIf": []
+  },
+  "calculated": [
+    {
+      "target_code": "mch",
+      "formula": "Hb * 1000 / RBC",
+      "deps": ["hemoglobin", "rbc_count"],
+      "label": "MCH",
+      "unit": "pg",
+      "decimals": 1
+    }
+  ]
+}

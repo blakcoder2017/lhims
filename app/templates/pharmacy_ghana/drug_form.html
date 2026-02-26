@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-pills mr-2"></i>{{ title }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_drugs') }}">Drugs</a></li>
+                            <li class="breadcrumb-item active">{{ title }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="card card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title">Drug Information</h3>
+                            </div>
+                            <form method="POST" action="{{ url_for('pharmacy_drug_create') if 'new' in request.url.path else url_for('pharmacy_drug_update_ui', drug_id=drug.id) }}">
+                                <div class="card-body">
+                                    {% if error %}
+                                    <div class="alert alert-danger alert-dismissible">
+                                        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                                        <h5><i class="icon fas fa-ban"></i> Error</h5>
+                                        {{ error }}
+                                    </div>
+                                    {% endif %}
+
+                                    <div class="form-group">
+                                        <label for="item_code">Item Code *</label>
+                                        <input type="text" class="form-control" id="item_code" name="item_code" 
+                                               value="{{ drug.item_code if drug else '' }}" required placeholder="e.g., AMX500CAP">
+                                        <small class="text-muted">Unique identifier for this formulation</small>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="generic_name">Generic Name *</label>
+                                        <input type="text" class="form-control" id="generic_name" name="generic_name" 
+                                               value="{{ drug.generic_name if drug else '' }}" required placeholder="e.g., Amoxicillin">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="brand_name">Brand Name</label>
+                                        <input type="text" class="form-control" id="brand_name" name="brand_name" 
+                                               value="{{ drug.brand_name if drug else '' }}" placeholder="e.g., Amoxil">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="dosage_form_id">Dosage Form *</label>
+                                        <select class="form-control" id="dosage_form_id" name="dosage_form_id" required>
+                                            <option value="">Select Dosage Form</option>
+                                            {% for df in dosage_forms %}
+                                            <option value="{{ df.id }}" {% if drug and drug.dosage_form_id == df.id %}selected{% endif %}>
+                                                {{ df.name }}
+                                            </option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="strength_value">Strength Value</label>
+                                                <input type="number" step="0.001" class="form-control" id="strength_value" name="strength_value" 
+                                                       value="{{ drug.strength_value if drug and drug.strength_value else '' }}" placeholder="e.g., 500">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="strength_unit">Strength Unit</label>
+                                                <input type="text" class="form-control" id="strength_unit" name="strength_unit" 
+                                                       value="{{ drug.strength_unit if drug and drug.strength_unit else '' }}" placeholder="e.g., mg">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="concentration_value">Concentration Value</label>
+                                                <input type="number" step="0.001" class="form-control" id="concentration_value" name="concentration_value" 
+                                                       value="{{ drug.concentration_value if drug and drug.concentration_value else '' }}" placeholder="e.g., 250">
+                                                <small class="text-muted">For liquids: amount per volume</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-group">
+                                                <label for="concentration_unit">Concentration Unit</label>
+                                                <input type="text" class="form-control" id="concentration_unit" name="concentration_unit" 
+                                                       value="{{ drug.concentration_unit if drug and drug.concentration_unit else '' }}" placeholder="e.g., mg/5mL">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="route">Route</label>
+                                        <select class="form-control" id="route" name="route">
+                                            <option value="">Select Route</option>
+                                            <option value="PO" {% if drug and drug.route == 'PO' %}selected{% endif %}>Oral (PO)</option>
+                                            <option value="IV" {% if drug and drug.route == 'IV' %}selected{% endif %}>Intravenous (IV)</option>
+                                            <option value="IM" {% if drug and drug.route == 'IM' %}selected{% endif %}>Intramuscular (IM)</option>
+                                            <option value="SC" {% if drug and drug.route == 'SC' %}selected{% endif %}>Subcutaneous (SC)</option>
+                                            <option value="TOPICAL" {% if drug and drug.route == 'TOPICAL' %}selected{% endif %}>Topical</option>
+                                            <option value="INHALED" {% if drug and drug.route == 'INHALED' %}selected{% endif %}>Inhaled</option>
+                                            <option value="RECTAL" {% if drug and drug.route == 'RECTAL' %}selected{% endif %}>Rectal</option>
+                                            <option value="NASAL" {% if drug and drug.route == 'NASAL' %}selected{% endif %}>Nasal</option>
+                                            <option value="OTIC" {% if drug and drug.route == 'OTIC' %}selected{% endif %}>Ear (Otic)</option>
+                                            <option value="OPHTHALMIC" {% if drug and drug.route == 'OPHTHALMIC' %}selected{% endif %}>Eye (Ophthalmic)</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="form-group">
+                                                <label for="pack_size">Pack Size</label>
+                                                <input type="number" class="form-control" id="pack_size" name="pack_size" 
+                                                       value="{{ drug.pack_size if drug and drug.pack_size else '' }}" placeholder="e.g., 100">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-group">
+                                                <label for="reorder_level">Reorder Level</label>
+                                                <input type="number" step="0.01" class="form-control" id="reorder_level" name="reorder_level" 
+                                                       value="{{ drug.reorder_level if drug and drug.reorder_level else '' }}" placeholder="e.g., 50">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="form-group">
+                                                <label for="reorder_qty">Reorder Quantity</label>
+                                                <input type="number" step="0.01" class="form-control" id="reorder_qty" name="reorder_qty" 
+                                                       value="{{ drug.reorder_qty if drug and drug.reorder_qty else '' }}" placeholder="e.g., 100">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <div class="custom-control custom-checkbox">
+                                            <input type="checkbox" class="custom-control-input" id="is_controlled" name="is_controlled" 
+                                                   {% if drug and drug.is_controlled %}checked{% endif %}>
+                                            <label class="custom-control-label" for="is_controlled">
+                                                Controlled Drug (requires special handling and prescription)
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="notes">Notes</label>
+                                        <textarea class="form-control" id="notes" name="notes" rows="3" 
+                                                  placeholder="Additional notes about this drug...">{{ drug.notes if drug and drug.notes else '' }}</textarea>
+                                    </div>
+                                </div>
+                                <div class="card-footer">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save mr-1"></i> Save Drug
+                                    </button>
+                                    <a href="{{ url_for('pharmacy_drugs') }}" class="btn btn-secondary float-right">
+                                        <i class="fas fa-times mr-1"></i> Cancel
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card card-info">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Display Format</h3>
+                            </div>
+                            <div class="card-body">
+                                <p>Drugs will be displayed as:</p>
+                                <code id="preview_label">GenericName StrengthUnit DosageForm (Route)</code>
+                                <hr>
+                                <p class="text-muted small">
+                                    Example: <br>
+                                    <strong>Amoxicillin 500 mg Tablet (PO)</strong><br>
+                                    or for liquids:<br>
+                                    <strong>Amoxicillin 250 mg/5mL Suspension (PO)</strong>
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <div class="card card-secondary">
+                            <div class="card-header">
+                                <h3 class="card-title"><i class="fas fa-list mr-1"></i> Dosage Forms</h3>
+                            </div>
+                            <div class="card-body p-0">
+                                <ul class="nav flex-column nav-tabs">
+                                    {% for df in dosage_forms %}
+                                    <li class="nav-item">
+                                        <span class="nav-link">{{ df.name }}</span>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // Update preview label on form change
+        function updatePreview() {
+            const generic = document.getElementById('generic_name').value || 'GenericName';
+            const strength = document.getElementById('strength_value').value || '';
+            const unit = document.getElementById('strength_unit').value || 'unit';
+            const concVal = document.getElementById('concentration_value').value || '';
+            const concUnit = document.getElementById('concentration_unit').value || '';
+            const formSelect = document.getElementById('dosage_form_id');
+            const form = formSelect.options[formSelect.selectedIndex]?.text || 'Form';
+            const routeSelect = document.getElementById('route');
+            const route = routeSelect.value ? ` (${routeSelect.value})` : '';
+            
+            let label = generic;
+            if (concVal && concUnit) {
+                label += ` ${concVal} ${concUnit}`;
+            } else if (strength) {
+                label += ` ${strength} ${unit}`;
+            }
+            label += ` ${form}${route}`;
+            
+            document.getElementById('preview_label').textContent = label;
+        }
+        
+        ['generic_name', 'strength_value', 'strength_unit', 'concentration_value', 
+         'concentration_unit', 'dosage_form_id', 'route'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', updatePreview);
+            if (el) el.addEventListener('input', updatePreview);
+        });
+    </script>
+{% endblock %}

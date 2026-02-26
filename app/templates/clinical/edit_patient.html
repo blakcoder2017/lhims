@@ -157,6 +157,15 @@
                                             <small class="form-text text-muted">Leave blank to clear</small>
                                         </div>
                                     </div>
+                                    <div class="col-md-6">
+                                        <div class="form-group">
+                                            <label for="nhisExpiryDate">NHIS Expiry Date</label>
+                                            <input type="date" class="form-control" id="nhisExpiryDate" name="nhis_expiry_date" 
+                                                   value="{{ patient.nhis_expiry_date.strftime('%Y-%m-%d') if patient.nhis_expiry_date else '' }}" 
+                                                   placeholder="YYYY-MM-DD">
+                                            <small class="form-text text-muted">Card expiry - for validity check</small>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 

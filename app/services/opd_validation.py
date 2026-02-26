@@ -61,7 +61,8 @@ def validate_encounter_creation(
         if not patient:
             return False, f"Patient {patient_id} not found"
         
-        if patient.payment_mechanism == PaymentMechanism.CASH:
+        if patient.payment_mechanism is None or patient.payment_mechanism == PaymentMechanism.CASH:
+            # Treat NULL payment_mechanism as cash
             # Optional: update OPD visit payment_status if we find paid invoices (no block)
             if opd_visit.payment_status not in ["paid", "waived", "emergency"]:
                 from app.models.billing_models import Invoice, InvoiceStatus, Payment, PaymentStatus
@@ -171,13 +172,24 @@ def auto_link_opd_visit(
         if not patient:
             return None
         
+        # Validate and sanitize appointment_id before using it
+        valid_appointment_id = None
+        if appointment_id:
+            from app.models.scheduled_appointment_models import ScheduledAppointment
+            appointment = db.query(ScheduledAppointment).filter(
+                ScheduledAppointment.id == appointment_id,
+                ScheduledAppointment.is_active == True,
+            ).first()
+            if appointment:
+                valid_appointment_id = appointment_id
+        
         # Determine visit_type and payment_status from appointment if provided
         visit_type = "walk_in"
         payment_status = "pending"
-        if appointment_id:
+        if valid_appointment_id:
             from app.models.scheduled_appointment_models import ScheduledAppointment, AppointmentType
             appointment = db.query(ScheduledAppointment).filter(
-                ScheduledAppointment.id == appointment_id,
+                ScheduledAppointment.id == valid_appointment_id,
                 ScheduledAppointment.is_active == True,
             ).first()
             if appointment:
@@ -194,9 +206,9 @@ def auto_link_opd_visit(
             elif patient.payment_mechanism.value in ["nhis", "private_insurance"]:
                 payment_status = "paid"  # Insurance patients don't need upfront payment
         
-        # Create OPD visit
+        # Create OPD visit with validated appointment_id
         opd_visit_data = OPDVisitCreate(
-            appointment_id=appointment_id,
+            appointment_id=valid_appointment_id,
             visit_type=visit_type,
             payment_status=payment_status
         )

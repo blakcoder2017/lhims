@@ -13,8 +13,6 @@ from app.models.patient_models import Patient
 
 def create_scheduled_appointment(db: Session, appointment_data: dict, created_by_id: int) -> ScheduledAppointment:
     """Create a new scheduled appointment"""
-    import logging
-    logging.info(f"DEBUG CRUD: Creating appointment with data: {appointment_data}")
     appointment = ScheduledAppointment(
         patient_id=appointment_data.get("patient_id"),
         patient_name=appointment_data.get("patient_name"),
@@ -27,14 +25,10 @@ def create_scheduled_appointment(db: Session, appointment_data: dict, created_by
         priority=appointment_data.get("priority", 5),
         created_by_id=created_by_id
     )
-    logging.info(f"DEBUG CRUD: Created appointment object: patient_id={appointment.patient_id}, assigned_doctor_id={appointment.assigned_doctor_id}")
 
     db.add(appointment)
-    logging.info("DEBUG CRUD: Added to session")
     db.commit()
-    logging.info("DEBUG CRUD: Committed")
     db.refresh(appointment)
-    logging.info(f"DEBUG CRUD: Refreshed, appointment id: {appointment.id}")
     return appointment
 
 

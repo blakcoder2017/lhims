@@ -3,7 +3,7 @@ API routes for scheduled appointments management
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Form
 from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import datetime, date, timedelta
 
@@ -12,7 +12,7 @@ from app.core.deps import get_current_user, role_required
 from app.crud import scheduled_appointment_crud
 from app.schemas import scheduled_appointment_schemas
 from app.models.user_models import User
-from app.models.scheduled_appointment_models import ScheduledAppointmentStatus
+from app.models.scheduled_appointment_models import ScheduledAppointment, ScheduledAppointmentStatus, AppointmentStatus
 
 router = APIRouter(
     prefix="/api/v1/appointments",
@@ -197,6 +197,54 @@ def confirm_scheduled_appointment(
     return appointment
 
 
+@router.post("/scheduled/{appointment_id}/reschedule", response_model=scheduled_appointment_schemas.ScheduledAppointmentResponse)
+def reschedule_scheduled_appointment(
+    appointment_id: int,
+    new_date: date = Form(...),
+    new_time: str = Form(...),
+    reason: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Front Office", "Admin", "Doctor"]))
+):
+    """Reschedule a scheduled appointment"""
+    from datetime import datetime
+    
+    # Parse time string (HH:MM format)
+    time_parts = new_time.split(':')
+    hour = int(time_parts[0])
+    minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+    
+    # Combine date and time
+    new_datetime = datetime.combine(new_date, datetime.min.time().replace(hour=hour, minute=minute))
+    
+    appointment = db.query(ScheduledAppointment).filter(
+        ScheduledAppointment.id == appointment_id,
+        ScheduledAppointment.is_active == True
+    ).first()
+    
+    if not appointment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Appointment not found"
+        )
+    
+    # Store old date in notes
+    old_date_str = appointment.scheduled_date.strftime('%Y-%m-%d %H:%M') if appointment.scheduled_date else 'N/A'
+    if reason:
+        appointment.notes = f"Rescheduled from {old_date_str}. Reason: {reason}\n\n{appointment.notes or ''}"
+    else:
+        appointment.notes = f"Rescheduled from {old_date_str}\n\n{appointment.notes or ''}"
+    
+    # Update the scheduled date
+    appointment.scheduled_date = new_datetime
+    appointment.status = AppointmentStatus.RESCHEDULED
+    
+    db.commit()
+    db.refresh(appointment)
+    
+    return appointment
+
+
 @router.post("/scheduled/{appointment_id}/complete", response_model=scheduled_appointment_schemas.ScheduledAppointmentResponse)
 def complete_scheduled_appointment(
     appointment_id: int,
@@ -287,3 +335,65 @@ def get_appointment_statistics(
         db, start_date, end_date, doctor_id
     )
     return stats
+
+
+@router.post("/scheduled/send-reminders")
+def send_appointment_reminders(
+    days_ahead: int = Query(1, ge=0, le=7, description="Send reminders for appointments 0=today, 1=tomorrow, etc."),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(role_required(["Admin", "Front Office"])),
+):
+    """
+    Send SMS reminders for upcoming scheduled appointments.
+    Call via cron: curl -X POST "http://localhost:8000/api/v1/appointments/scheduled/send-reminders?days_ahead=1"
+    Requires Admin or Front Office role (or API token).
+    """
+    from sqlalchemy import and_, func
+    from app.models.scheduled_appointment_models import ScheduledAppointment, AppointmentStatus
+    from app.models.patient_models import Patient
+    from app.services.sms_onlinegh_service import send_personalized_sms_notification, is_valid_phone
+
+    target_date = date.today() + timedelta(days=days_ahead)
+    start_dt = datetime.combine(target_date, datetime.min.time())
+    end_dt = datetime.combine(target_date, datetime.max.time())
+
+    appointments = db.query(ScheduledAppointment).options(
+        joinedload(ScheduledAppointment.patient),
+        joinedload(ScheduledAppointment.assigned_doctor),
+    ).filter(
+        ScheduledAppointment.is_active == True,
+        func.date(ScheduledAppointment.scheduled_date) == target_date,
+        ScheduledAppointment.status.in_([AppointmentStatus.SCHEDULED, AppointmentStatus.CONFIRMED]),
+    ).all()
+
+    sent = 0
+    skipped = 0
+    for apt in appointments:
+        phone = None
+        name = None
+        if apt.patient_id and apt.patient:
+            phone = apt.patient.phone_number
+            name = f"{apt.patient.first_name} {apt.patient.last_name}"
+        elif apt.patient_phone:
+            phone = apt.patient_phone
+            name = apt.patient_name or "Patient"
+
+        if not phone or not is_valid_phone(phone):
+            skipped += 1
+            continue
+
+        dt_str = apt.scheduled_date.strftime("%Y-%m-%d %H:%M") if apt.scheduled_date else ""
+        dept = apt.department or "OPD"
+        msg = "Hello {$name}. Reminder: Your appointment is on {$date} at {$department}. Please arrive on time. - LHIMS"
+        try:
+            send_personalized_sms_notification(msg, [{"number": phone, "values": [name, dt_str, dept]}])
+            sent += 1
+        except Exception:
+            skipped += 1
+
+    return {
+        "target_date": target_date.isoformat(),
+        "appointments_found": len(appointments),
+        "reminders_sent": sent,
+        "skipped": skipped,
+    }

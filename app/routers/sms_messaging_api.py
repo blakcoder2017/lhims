@@ -5,7 +5,7 @@ Admin only. Sends only to valid Ghana mobile numbers.
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, role_required
@@ -15,7 +15,6 @@ from app.models.user_models import Role
 from app.services.sms_onlinegh_service import is_valid_phone, send_sms_notification, sms_service
 
 router = APIRouter(prefix="", tags=["SMS Messaging"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _collect_phones_for_audience(

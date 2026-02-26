@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from typing import Optional, Annotated
@@ -14,8 +14,7 @@ from app.core.config import settings
 from app.core.deps import get_current_user
 
 
-templates = Jinja2Templates(directory="app/templates") 
-router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"]) 
+router = APIRouter()
 ui_router = APIRouter(tags=["UI Authentication"])
 
 

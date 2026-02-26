@@ -30,6 +30,87 @@
                 overflow: visible;
             }
         }
+        /* Edit Diagnosis Multi-Select Styles */
+        .edit-diagnosis-select-container {
+            width: 100%;
+            max-width: 100%;
+            position: relative;
+        }
+        .edit-multi-select-input-wrapper {
+            min-height: 46px;
+            max-height: 120px;
+            overflow-y: auto;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            padding: 6px 12px;
+            background: #fff;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: text;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .edit-multi-select-input-wrapper:hover {
+            border-color: #bdbdbd;
+        }
+        .edit-multi-select-input-wrapper.active {
+            border-color: #28a745;
+            box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.15);
+        }
+        .edit-selected-tags-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-right: 8px;
+        }
+        .edit-multi-select-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1000;
+            margin-top: 4px;
+        }
+        .edit-multi-select-dropdown .dropdown-header {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            background: #f8f9fa;
+        }
+        .edit-multi-select-dropdown .options-list {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .edit-multi-select-dropdown .option-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .edit-multi-select-dropdown .option-item:hover {
+            background: #f0f0f0;
+        }
+        .edit-multi-select-dropdown .option-item.selected {
+            background: #e8f5e9;
+        }
+        .edit-multi-select-dropdown .option-item .form-check {
+            margin: 0;
+        }
+        .edit-remove-tag {
+            margin-left: 6px;
+            cursor: pointer;
+            opacity: 0.7;
+            font-size: 16px;
+            line-height: 1;
+        }
+        .edit-remove-tag:hover {
+            opacity: 1;
+        }
     </style>
 
     <div class="content-wrapper">
@@ -56,8 +137,11 @@
                 <!-- Print Button -->
                 <div class="row mb-3">
                     <div class="col-12">
-                        <button onclick="window.print()" class="btn btn-primary">
+                        <a href="{{ url_for('print_encounter', encounter_id=encounter.id) }}" target="_blank" class="btn btn-primary">
                             <i class="fas fa-print mr-1"></i> Print Encounter
+                        </a>
+                        <button type="button" class="btn btn-info" onclick="openCompareModal()">
+                            <i class="fas fa-balance-scale mr-1"></i> Compare with Previous
                         </button>
                     </div>
                 </div>
@@ -70,6 +154,14 @@
                 </div>
                 {% endif %}
 
+                {% if request.query_params.get('status') == 'prescription_added' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <h5><i class="icon fas fa-check"></i> Prescription Added!</h5>
+                    The prescription has been successfully added to this encounter.
+                </div>
+                {% endif %}
+
                 <!-- Patient Demographics Card -->
                 <div class="card card-primary card-outline">
                     <div class="card-header">
@@ -79,11 +171,7 @@
                         <div class="row">
                             <div class="col-md-3"><strong>Patient Number:</strong> <span class="badge badge-primary">{{ patient.patient_number or 'N/A' }}</span></div>
                             <div class="col-md-3"><strong>Patient ID:</strong> #{{ patient.id }}</div>
-                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}
-                                {% if patient_age %}
-                                <span class="badge badge-info">(Age: {{ patient_age.display }})</span>
-                                {% endif %}
-                            </div>
+                            <div class="col-md-3"><strong>DOB:</strong> {{ patient.date_of_birth }}{% if patient.date_of_birth %} (Age: {{ patient.date_of_birth | age }} years){% endif %}</div>
                             <div class="col-md-3"><strong>Gender:</strong> {{ patient.gender }}</div>
                         </div>
                         <div class="row mt-2">
@@ -102,17 +190,140 @@
                             <div class="col-md-3"><strong>Clinician:</strong> {{ encounter.clinician.full_name or encounter.clinician.username }}</div>
                             {% if encounter.appointment %}
                             <div class="col-md-3"><strong>Appointment:</strong> #{{ encounter.appointment.id }} - {{ encounter.appointment.department }}</div>
+                            {% else %}
+                            <div class="col-md-3"></div>
                             {% endif %}
                         </div>
                     </div>
                 </div>
 
+                <!-- Recent / Visit Vitals (for doctor) -->
+                <div class="card card-success card-outline mb-3">
+                    <div class="card-header">
+                        <h3 class="card-title"><i class="fas fa-heartbeat mr-1"></i> Recent Vitals</h3>
+                    </div>
+                    <div class="card-body p-0">
+                        {% if recent_vitals %}
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-sm table-striped mb-0">
+                                <thead class="thead-light">
+                                    <tr>
+                                        <th>Date/Time</th>
+                                        <th>Temp (°C)</th>
+                                        <th>BP</th>
+                                        <th>Pulse</th>
+                                        <th>SpO2</th>
+                                        <th>Recorded by</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for v in recent_vitals %}
+                                    <tr>
+                                        <td>{{ v.recorded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>{% if v.temperature %}{{ "%.1f"|format(v.temperature) }}°C{% else %}—{% endif %}</td>
+                                        <td>{% if v.systolic_bp and v.diastolic_bp %}{{ v.systolic_bp }}/{{ v.diastolic_bp }}{% elif v.blood_pressure %}{{ v.blood_pressure }}{% else %}—{% endif %}</td>
+                                        <td>{% if v.pulse_rate %}{{ v.pulse_rate }}{% else %}—{% endif %}</td>
+                                        <td>{% if v.oxygen_saturation %}{{ v.oxygen_saturation }}%{% else %}—{% endif %}</td>
+                                        <td>{{ v.recorded_by.full_name if v.recorded_by else '—' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="p-3 text-muted">
+                            <i class="fas fa-info-circle"></i> No vitals recorded for this visit yet.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
                 <!-- Clinical Documentation -->
-                <div class="card card-info">
+                <div id="clinical-documents" class="card card-info">
                     <div class="card-header">
                         <h3 class="card-title"><i class="fas fa-stethoscope mr-1"></i> Clinical Documentation</h3>
+                        {% if encounter.status.value != 'completed' and user_role in ['Doctor', 'Admin', 'Clinician'] %}
+                        <div class="card-tools">
+                            <button type="button" class="btn btn-sm btn-primary" data-toggle="collapse" data-target="#editClinicalNotes">
+                                <i class="fas fa-edit mr-1"></i> Edit Notes
+                            </button>
+                        </div>
+                        {% endif %}
                     </div>
                     <div class="card-body">
+                        <!-- Edit Clinical Notes Form (Collapsible) -->
+                        {% if encounter.status.value != 'completed' and user_role in ['Doctor', 'Admin', 'Clinician'] %}
+                        <div id="editClinicalNotes" class="collapse mb-4">
+                            <div class="card card-warning card-outline">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0"><i class="fas fa-edit mr-1"></i> Edit Clinical Notes</h5>
+                                </div>
+                                <div class="card-body">
+                                    <form id="editClinicalNotesForm" onsubmit="saveClinicalNotes(event, {{ encounter.id }}); return false;">
+                                        <div class="form-group">
+                                            <label for="edit_chief_complaint">Chief Complaint</label>
+                                            <textarea class="form-control" id="edit_chief_complaint" name="chief_complaint" rows="2" placeholder="Enter patient's chief complaint...">{{ encounter.chief_complaint or '' }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="edit_history_of_present_illness">History of Present Illness</label>
+                                            <textarea class="form-control" id="edit_history_of_present_illness" name="history_of_present_illness" rows="3" placeholder="Enter detailed history of present illness...">{{ encounter.history_of_present_illness or '' }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="edit_past_medical_history">Past Medical History</label>
+                                            <textarea class="form-control" id="edit_past_medical_history" name="past_medical_history" rows="2" placeholder="Enter past medical history...">{{ encounter.past_medical_history or '' }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="edit_allergies">Allergies</label>
+                                            <textarea class="form-control" id="edit_allergies" name="allergies" rows="2" placeholder="Enter allergies (e.g., Penicillin - rash)">{{ encounter.allergies or '' }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="edit_medications">Current Medications</label>
+                                            <textarea class="form-control" id="edit_medications" name="medications" rows="2" placeholder="Enter current medications...">{{ encounter.medications or '' }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="edit_physical_examination">Physical Examination</label>
+                                            <textarea class="form-control" id="edit_physical_examination" name="physical_examination" rows="3" placeholder="Enter physical examination findings...">{{ encounter.physical_examination or '' }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="edit_assessment">Clinical Assessment</label>
+                                            <textarea class="form-control" id="edit_assessment" name="assessment" rows="3" placeholder="Enter clinical assessment and findings...">{{ encounter.assessment or '' }}</textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="edit_plan">Treatment Plan</label>
+                                            <textarea class="form-control" id="edit_plan" name="plan" rows="4" placeholder="Enter treatment plan, medications, follow-up instructions...">{{ encounter.plan or '' }}</textarea>
+                                        </div>
+                                        
+                                        <!-- Diagnoses Selection - Simple Multi-Select -->
+                                        <div class="form-group">
+                                            <label for="edit_diagnoses">Diagnoses</label>
+                                            <select 
+                                                id="edit_diagnoses" 
+                                                name="diagnoses"
+                                                multiple
+                                                class="form-control"
+                                                style="height: 150px;"
+                                            >
+                                                {% if diseases %}
+                                                    {% for disease in diseases %}
+                                                    {% if disease and disease.id and disease.name and disease.name.strip() %}
+                                                    <option value="{{ disease.id }}" {% if encounter_diseases and encounter_diseases|selectattr('id', 'equalto', disease.id)|list %}selected{% endif %}>{{ disease.name }}{% if disease.code %} ({{ disease.code }}){% endif %}</option>
+                                                    {% endif %}
+                                                    {% endfor %}
+                                                {% endif %}
+                                            </select>
+                                            <small class="form-text text-muted">Hold Ctrl (Windows) or Cmd (Mac) to select multiple diagnoses</small>
+                                        </div>
+                                        
+                                        <button type="submit" class="btn btn-success" id="saveClinicalNotesBtn">
+                                            <i class="fas fa-save mr-1"></i> Save Clinical Notes
+                                        </button>
+                                        <div id="editClinicalNotesAlert" class="mt-2" style="display: none;"></div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
                         {% if encounter.chief_complaint %}
                         <div class="form-group">
                             <label><strong>Chief Complaint:</strong></label>
@@ -201,6 +412,59 @@
                         <div class="form-group">
                             <label><strong>Treatment Plan:</strong></label>
                             <p>{{ encounter.plan }}</p>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Doctors Notes Section - visible to all, editable by Doctor/Admin/Clinician -->
+                        <div class="form-group mt-4">
+                            <label><strong><i class="fas fa-plus-circle mr-1"></i>Doctors Notes / Follow-up Notes:</strong></label>
+                            
+                            {% if addendums and addendums|length > 0 %}
+                            <div class="accordion" id="addendumAccordion">
+                                {% for addendum in addendums|sort(attribute='created_at', reverse=True) %}
+                                <div class="card mb-2">
+                                    <div class="card-header bg-light" id="heading{{ addendum.id }}">
+                                        <h6 class="mb-0">
+                                            <button class="btn btn-link text-dark" type="button" data-toggle="collapse" data-target="#collapse{{ addendum.id }}">
+                                                <i class="fas fa-clipboard-list mr-1"></i>
+                                                Doctors Notes #{{ loop.index }} - {{ addendum.created_at.strftime('%Y-%m-%d %H:%M') if addendum.created_at else 'N/A' }}
+                                            </button>
+                                        </h6>
+                                    </div>
+                                    <div id="collapse{{ addendum.id }}" class="collapse{% if loop.first %} show{% endif %}" data-parent="#addendumAccordion">
+                                        <div class="card-body bg-white">
+                                            <p>{{ addendum.content }}</p>
+                                            <small class="text-muted">
+                                                <i class="fas fa-user-md mr-1"></i> Added by: {{ addendum.added_by.full_name if addendum.added_by else 'Unknown' }}
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <p class="text-muted">No doctors notes yet.</p>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Add New Doctors Note Form (visible to authorized roles) -->
+                        {% if user_role in ['Doctor', 'Admin', 'Clinician'] %}
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-info" data-toggle="collapse" data-target="#newAddendum">
+                                <i class="fas fa-plus"></i> Add New Doctors Note
+                            </button>
+                            <div id="newAddendum" class="collapse mt-2">
+                                <form id="addendumForm" onsubmit="saveAddendum(event, {{ encounter.id }}); return false;">
+                                    <div class="form-group">
+                                        <textarea class="form-control" id="addendum_text" name="content" rows="4" 
+                                            placeholder="Enter follow-up notes, additional observations, or comments about this encounter..."></textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary btn-sm">
+                                        <i class="fas fa-save"></i> Save Doctors Note
+                                    </button>
+                                </form>
+                                <div id="addendumAlert" class="alert mt-2" style="display: none;"></div>
+                            </div>
                         </div>
                         {% endif %}
                     </div>
@@ -318,30 +582,86 @@
                                         <h5><i class="fas fa-vial mr-1"></i> Lab Results</h5>
                                         {% for order in completed_lab_orders %}
                                         <div class="card card-warning card-outline mb-3">
-                                            <div class="card-header">
-                                                <h6 class="card-title mb-0">
-                                                    <strong>{{ order.test_name }}</strong>
-                                                    {% if order.test_code %}
-                                                    <span class="badge badge-info ml-2">{{ order.test_code }}</span>
-                                                    {% endif %}
-                                                </h6>
-                                                <small class="text-muted">
-                                                    Ordered: {{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}
-                                                    {% if order.result_entered_at %}
-                                                    | Result: {{ order.result_entered_at.strftime('%Y-%m-%d %H:%M') }}
-                                                    {% endif %}
-                                                </small>
+                                            <div class="card-header d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <h6 class="card-title mb-0">
+                                                        <strong>{{ order.test_name }}</strong>
+                                                        {% if order.test_code %}
+                                                        <span class="badge badge-info ml-2">{{ order.test_code }}</span>
+                                                        {% endif %}
+                                                        {% if order.result_status %}
+                                                        <span class="badge badge-{{ 'warning' if order.result_status == 'DRAFT' else 'info' if order.result_status == 'SUBMITTED' else 'primary' if order.result_status == 'VERIFIED' else 'success' if order.result_status in ['RELEASED', 'AUTHORIZED'] else 'secondary' }} ml-2">{{ order.result_status }}</span>
+                                                        {% endif %}
+                                                    </h6>
+                                                    <small class="text-muted">
+                                                        Ordered: {{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}
+                                                        {% if order.result_entered_at %}
+                                                        | Result: {{ order.result_entered_at.strftime('%Y-%m-%d %H:%M') }}
+                                                        {% endif %}
+                                                    </small>
+                                                </div>
+                                                <a href="{{ url_for('view_lab_order', order_id=order.id) }}" class="btn btn-sm btn-outline-primary" title="View full lab order">
+                                                    <i class="fas fa-external-link-alt"></i>
+                                                </a>
                                             </div>
                                             <div class="card-body">
-                                                {% if order.result %}
-                                                <div class="alert alert-light">
+                                                {% if order.result_json and order._schema_json %}
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm table-bordered mb-2">
+                                                        <thead class="thead-light">
+                                                            <tr>
+                                                                <th>Parameter</th>
+                                                                <th>Result</th>
+                                                                <th>Flag</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {% set fields = order._schema_json.fields or {} %}
+                                                            {% for field_code, field_def in fields.items() %}
+                                                            {% if order.result_json.get(field_code) is not none and order.result_json.get(field_code) != '' %}
+                                                            {% set flag = order.flags_json.get(field_code).flag if order.flags_json and order.flags_json.get(field_code) else none %}
+                                                            <tr class="{% if flag == 'CRITICAL' %}table-danger{% elif flag in ['H', 'L'] %}table-warning{% endif %}">
+                                                                <td><strong>{{ field_def.label }}</strong></td>
+                                                                <td>
+                                                                    {{ order.result_json.get(field_code) }}
+                                                                    {% if field_def.unit %} <small>{{ field_def.unit }}</small>{% endif %}
+                                                                </td>
+                                                                <td>
+                                                                    {% if flag == 'CRITICAL' %}
+                                                                    <span class="badge badge-danger">CRITICAL</span>
+                                                                    {% elif flag == 'H' %}
+                                                                    <span class="badge badge-warning">HIGH</span>
+                                                                    {% elif flag == 'L' %}
+                                                                    <span class="badge badge-warning">LOW</span>
+                                                                    {% else %}
+                                                                    <span class="badge badge-success">Normal</span>
+                                                                    {% endif %}
+                                                                </td>
+                                                            </tr>
+                                                            {% endif %}
+                                                            {% endfor %}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                {% if order.result_json.get('comment') %}
+                                                <div class="mt-2 p-2 bg-light border rounded">
+                                                    <strong>Comments:</strong> {{ order.result_json.get('comment') }}
+                                                </div>
+                                                {% endif %}
+                                                {% elif order.result %}
+                                                <div class="lab-result-display">
                                                     <strong>Result:</strong>
-                                                    <p class="mb-0" style="white-space: pre-wrap;">{{ order.result }}</p>
+                                                    <p class="mb-0 mt-1" style="white-space: pre-wrap;">{{ order.result }}</p>
                                                 </div>
                                                 {% endif %}
                                                 {% if order.result_entered_by %}
-                                                <small class="text-muted">
+                                                <small class="text-muted d-block mt-2">
                                                     <i class="fas fa-user"></i> Entered by: {{ order.result_entered_by.full_name or order.result_entered_by.username }}
+                                                </small>
+                                                {% endif %}
+                                                {% if order.verified_by %}
+                                                <small class="text-muted d-block">
+                                                    <i class="fas fa-check-circle"></i> Verified by: {{ order.verified_by.full_name }}{% if order.verified_at %} at {{ order.verified_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
                                                 </small>
                                                 {% endif %}
                                             </div>
@@ -447,19 +767,33 @@
                                         <div id="addLabOrder" class="collapse">
                                             <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/lab-orders/create">
                                                 <div class="form-group">
-                                                    <label>Lab Test <span class="text-danger">*</span></label>
-                                                    <select class="form-control" id="labServiceSelect" name="service_pricing_id" required>
-                                                        <option value="">-- Select Lab Test --</option>
-                                                        {% for service in lab_services %}
-                                                        <option value="{{ service.id }}"
-                                                                data-name="{{ service.service_name }}"
-                                                                data-code="{{ service.service_code or '' }}"
-                                                                data-price="{{ service.unit_price }}">
-                                                            {{ service.service_name }}{% if service.unit_price %} (GHS {{ "%.2f"|format(service.unit_price) }}){% endif %}
+                                                    <label>Lab Test from Catalog <span class="text-danger">*</span></label>
+                                                    
+                                                    <!-- Search Input -->
+                                                    <div class="input-group mb-2">
+                                                        <div class="input-group-prepend">
+                                                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                                        </div>
+                                                        <input type="text" class="form-control" id="encounterLabTestSearch" placeholder="Search tests by name or code..." autocomplete="off">
+                                                    </div>
+                                                    
+                                                    <!-- Autocomplete Results -->
+                                                    <div id="encounterLabAutocomplete" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 250px; overflow-y: auto; width: 92%;"></div>
+                                                    
+                                                    <!-- Test Dropdown -->
+                                                    <select class="form-control" id="labTestSelect" name="lab_test_id" required>
+                                                        <option value="">-- Select Lab Test from Catalog --</option>
+                                                        {% for test in lab_tests %}
+                                                        <option value="{{ test.id }}"
+                                                                data-name="{{ test.test_name }}"
+                                                                data-code="{{ test.test_code or '' }}"
+                                                                data-price="{{ test.cost or '' }}"
+                                                                data-category="{{ test.test_category or '' }}">
+                                                            {{ test.test_name }}{% if test.test_code %} ({{ test.test_code }}){% endif %}{% if test.test_category %} - {{ test.test_category }}{% endif %}{% if test.cost %} - GHS {{ "%.2f"|format(test.cost) }}{% endif %}
                                                         </option>
                                                         {% endfor %}
                                                     </select>
-                                                    <small class="form-text text-muted" id="labSelectedPriceText">Select a lab test to see pricing.</small>
+                                                    <small class="form-text text-muted">Search above or select from catalog</small>
                                                 </div>
                                                 <input type="hidden" name="test_name" id="lab_test_name">
                                                 <input type="hidden" name="test_code" id="lab_test_code">
@@ -503,7 +837,7 @@
                                                             </td>
                                                             <td>{{ order.ordered_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                                             <td>
-                                                                <a href="/lab/orders/{{ order.id }}" class="btn btn-xs btn-primary" target="_blank">
+                                                                <a href="/api/v1/ancillary/lab/orders/{{ order.id }}" class="btn btn-xs btn-primary" target="_blank">
                                                                     <i class="fas fa-eye"></i> View
                                                                 </a>
                                                                 {% if order.status.value != 'completed' %}
@@ -660,16 +994,22 @@
                                     </div>
                                     <div class="card-body">
                                         <div id="addPrescription" class="collapse">
-                                            <form id="prescriptionForm" method="POST" action="/api/v1/encounters/{{ encounter.id }}/prescriptions/create">
+                                            <form id="prescriptionForm" method="POST" action="/api/v1/encounters/{{ encounter.id }}/prescriptions/create" data-patient-id="{{ patient.id }}">
                                                 <div id="prescriptionFormAlert" class="alert" style="display: none;"></div>
+                                                <div id="interactionWarningBanner" class="alert alert-warning" style="display: none;" role="alert">
+                                                    <strong><i class="fas fa-exclamation-triangle"></i> Drug Interaction Warning</strong>
+                                                    <div id="interactionWarningContent"></div>
+                                                    <small>Review before proceeding. CONTRAINDICATED interactions block submission.</small>
+                                                </div>
                                                 <div class="form-group" style="position: relative;">
-                                                    <label>Medication *</label>
+                                                    <label>Medication (Formulation) *</label>
                                                     <input type="hidden" name="medication_id" id="medication_id">
+                                                    <input type="hidden" name="pharmacy_drug_id" id="pharmacy_drug_id">
                                                     <input type="text" class="form-control" name="medication_name" id="medication_name"
-                                                           placeholder="Search medication from inventory or type free text"
+                                                           placeholder="Search formulation: generic name, strength, dosage form (e.g. Amoxicillin 500mg Capsule)"
                                                            autocomplete="off" required>
                                                     <small class="form-text text-muted">
-                                                        <i class="fas fa-info-circle"></i> Search from inventory or type medication name manually
+                                                        <i class="fas fa-info-circle"></i> <strong>Ghana:</strong> Select a specific formulation from the list. No free text.
                                                     </small>
                                                     <div id="medication_search_results" class="list-group" style="display: none; position: absolute; z-index: 1000; max-height: 300px; overflow-y: auto; width: 100%; background: white; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
                                                 </div>
@@ -683,7 +1023,24 @@
                                                     <div class="col-md-6">
                                                         <div class="form-group">
                                                             <label>Frequency *</label>
-                                                            <input type="text" class="form-control" name="frequency" id="frequency" placeholder="e.g., twice daily" required>
+                                                            <select class="form-control" name="frequency" id="frequency" required>
+                                                                <option value="">Select frequency</option>
+                                                                <option value="Once daily (OD)">Once daily (OD)</option>
+                                                                <option value="Twice daily (BD)">Twice daily (BD)</option>
+                                                                <option value="Three times daily (TDS)">Three times daily (TDS)</option>
+                                                                <option value="Four times daily (QDS)">Four times daily (QDS)</option>
+                                                                <option value="Every 4 hours (Q4H)">Every 4 hours (Q4H)</option>
+                                                                <option value="Every 6 hours (Q6H)">Every 6 hours (Q6H)</option>
+                                                                <option value="Every 8 hours (Q8H)">Every 8 hours (Q8H)</option>
+                                                                <option value="Every 12 hours (Q12H)">Every 12 hours (Q12H)</option>
+                                                                <option value="At night (ON)">At night (ON)</option>
+                                                                <option value="As needed (PRN)">As needed (PRN)</option>
+                                                                <option value="With meals (PC)">With meals (PC)</option>
+                                                                <option value="Before meals (AC)">Before meals (AC)</option>
+                                                                <option value="Immediately (STAT)">Immediately (STAT)</option>
+                                                                <option value="Other">Other (specify)</option>
+                                                            </select>
+                                                            <input type="text" class="form-control mt-2" name="frequency_custom" id="frequency_custom" placeholder="Specify other frequency" style="display: none;">
                                                         </div>
                                                     </div>
                                                 </div>
@@ -753,14 +1110,23 @@
                                         <div id="addProcedure" class="collapse">
                                             <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/procedures/create">
                                                 <div class="form-group">
-                                                    <label>Procedure Name *</label>
-                                                    <select class="form-control" name="procedure_name" id="procedure_name" required>
-                                                        <option value="">-- Select Procedure --</option>
-                                                        {% for proc_name in procedure_names %}
-                                                        <option value="{{ proc_name }}">{{ proc_name }}</option>
-                                                        {% endfor %}
+                                                    <label>Select Department *</label>
+                                                    <select class="form-control" id="encounter_procedure_department" required>
+                                                        <option value="">-- Select Department --</option>
+                                                        <!-- Departments will be loaded via API -->
                                                     </select>
-                                                    <small class="form-text text-muted">Or type procedure name manually</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Procedure Catalog *</label>
+                                                    <select class="form-control" name="procedure_catalog_id" id="procedure_catalog_id" required>
+                                                        <option value="">-- Select Procedure --</option>
+                                                        <!-- Procedures will be loaded based on department selection -->
+                                                    </select>
+                                                    <small class="form-text text-muted">Select a procedure to use its catalog price</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Procedure Name *</label>
+                                                    <input type="text" class="form-control" name="procedure_name" id="procedure_name" required placeholder="Procedure name">
                                                 </div>
                                                 <div class="form-group">
                                                     <label>Procedure Code (optional)</label>
@@ -920,7 +1286,7 @@
                                     <small class="text-muted text-uppercase">Patient</small>
                                     <p class="mb-1">
                                         <strong>{{ patient.first_name }} {{ patient.last_name }}</strong><br>
-                                        <span class="text-muted">#{{ patient.id }}{% if patient_age %} &bull; {{ patient_age.display }}{% endif %}</span>
+                                        <span class="text-muted">#{{ patient.id }} &bull; {{ patient.date_of_birth | age }} years</span>
                                     </p>
                                     <span class="badge badge-info">{{ patient.gender }}</span>
                                 </div>
@@ -1002,9 +1368,9 @@
                                 </div>
                                 {% endif %}
                             </div>
-                            <div class="card-footer text-center">
-                                <a href="#clinical-documents" class="btn btn-link btn-sm">
-                                    View full documentation
+                            <div class="card-footer text-center py-2">
+                                <a href="#clinical-documents" class="text-primary" onclick="event.preventDefault(); smoothScrollTo('clinical-documents');" style="text-decoration: none;">
+                                    <i class="fas fa-file-medical-alt mr-1"></i>View full documentation
                                 </a>
                             </div>
                         </div>
@@ -1082,7 +1448,10 @@
                             </div>
                             <div id="followUpAppointmentForm" class="collapse">
                                 <div class="card-body">
-                                    <form method="POST" action="/api/v1/encounters/{{ encounter.id }}/create-appointment">
+                                    <!-- Success/Error Alert -->
+                                    <div id="appointmentFormAlert" class="alert" style="display: none;"></div>
+                                    
+                                    <form id="followUpAppointmentFormInner" onsubmit="createAppointment(event, {{ encounter.id }}); return false;">
                                         <div class="row">
                                             <div class="col-md-4">
                                                 <div class="form-group">
@@ -1123,7 +1492,7 @@
                                             </div>
                                         </div>
                                         <input type="hidden" name="appointment_type" value="follow_up">
-                                        <button type="submit" class="btn btn-info">
+                                        <button type="submit" class="btn btn-info" id="followUpSubmitBtn">
                                             <i class="fas fa-calendar-check mr-1"></i> Schedule Follow-Up Appointment
                                         </button>
                                     </form>
@@ -1164,6 +1533,225 @@
 
     <script>
         const encounterId = {{ encounter.id }};
+        
+        // Lab Test Search Autocomplete for Encounter Form
+        const encounterLabSearch = document.getElementById('encounterLabTestSearch');
+        const encounterLabAutocomplete = document.getElementById('encounterLabAutocomplete');
+        const encounterLabTestSelect = document.getElementById('labTestSelect');
+        
+        if (encounterLabSearch && encounterLabAutocomplete) {
+            encounterLabSearch.addEventListener('input', async function() {
+                const query = this.value.trim();
+                if (query.length < 2) {
+                    encounterLabAutocomplete.style.display = 'none';
+                    return;
+                }
+                
+                // Try local filtering first (more reliable)
+                const options = encounterLabTestSelect ? Array.from(encounterLabTestSelect.options) : [];
+                const filtered = options.filter(opt => {
+                    const name = (opt.getAttribute('data-name') || '').toLowerCase();
+                    const code = (opt.getAttribute('data-code') || '').toLowerCase();
+                    return name.includes(query.toLowerCase()) || code.includes(query.toLowerCase());
+                }).slice(0, 15);
+                
+                if (filtered.length > 0) {
+                    encounterLabAutocomplete.innerHTML = filtered.map(opt =>
+                        `<a href="#" class="list-group-item list-group-item-action" 
+                           data-id="${opt.value}" 
+                           data-name="${opt.getAttribute('data-name')}"
+                           data-code="${opt.getAttribute('data-code')}"
+                           data-category="${opt.getAttribute('data-category')}"
+                           data-price="${opt.getAttribute('data-price')}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${opt.getAttribute('data-name')}</strong>
+                                    ${opt.getAttribute('data-code') ? `<span class="text-muted small">(${opt.getAttribute('data-code')})</span>` : ''}
+                                </div>
+                            </div>
+                        </a>`
+                    ).join('');
+                    encounterLabAutocomplete.style.display = 'block';
+                } else {
+                    // Try API if no local results
+                    try {
+                        const response = await fetch(`/api/v1/lab/tests/search?q=${encodeURIComponent(query)}&limit=15`);
+                        const data = await response.json();
+                        
+                        // API returns array directly, not {tests: [...]}
+                        if (Array.isArray(data) && data.length > 0) {
+                            encounterLabAutocomplete.innerHTML = data.map(test =>
+                                `<a href="#" class="list-group-item list-group-item-action" 
+                                   data-id="${test.id}" 
+                                   data-name="${test.test_name}"
+                                   data-code="${test.test_code || ''}"
+                                   data-category="${test.test_category || ''}"
+                                   data-price="${test.cost || ''}">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>${test.test_name}</strong>
+                                            ${test.test_code ? `<span class="text-muted small">(${test.test_code})</span>` : ''}
+                                            ${test.test_category ? `<br><small class="text-info">${test.test_category}</small>` : ''}
+                                        </div>
+                                        <span class="badge badge-primary">${test.cost ? 'GHS ' + parseFloat(test.cost).toFixed(2) : ''}</span>
+                                    </div>
+                                </a>`
+                            ).join('');
+                            encounterLabAutocomplete.style.display = 'block';
+                        } else {
+                            encounterLabAutocomplete.innerHTML = '<div class="list-group-item text-muted">No tests found</div>';
+                            encounterLabAutocomplete.style.display = 'block';
+                        }
+                    } catch (err) {
+                        console.error('Search error:', err);
+                        encounterLabAutocomplete.innerHTML = '<div class="list-group-item text-muted">No tests found</div>';
+                        encounterLabAutocomplete.style.display = 'block';
+                    }
+                }
+            });
+            
+            // Handle click on autocomplete result
+            encounterLabAutocomplete.addEventListener('click', function(e) {
+                e.preventDefault();
+                const item = e.target.closest('[data-id]');
+                if (item) {
+                    const testId = item.getAttribute('data-id');
+                    encounterLabTestSelect.value = testId;
+                    encounterLabSearch.value = item.getAttribute('data-name') + (item.getAttribute('data-code') ? ' (' + item.getAttribute('data-code') + ')' : '');
+                    encounterLabAutocomplete.style.display = 'none';
+                    
+                    // Save to localStorage for quick access
+                    const recentTests = JSON.parse(localStorage.getItem('recentLabTests') || '[]');
+                    const testInfo = { id: testId, name: item.getAttribute('data-name'), category: item.getAttribute('data-category') };
+                    const filtered = recentTests.filter(t => t.id !== testId);
+                    filtered.unshift(testInfo);
+                    localStorage.setItem('recentLabTests', JSON.stringify(filtered.slice(0, 10)));
+                }
+            });
+            
+            // Close autocomplete when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!encounterLabSearch.contains(e.target) && !encounterLabAutocomplete.contains(e.target)) {
+                    encounterLabAutocomplete.style.display = 'none';
+                }
+            });
+        }
+        
+        // Load recent tests on page load
+        (function() {
+            const recentTests = JSON.parse(localStorage.getItem('recentLabTests') || '[]');
+            if (recentTests.length > 0 && encounterLabSearch) {
+                console.log('Recent lab tests available:', recentTests.length);
+            }
+        })();
+        
+        // Load departments and procedures for encounter procedure form
+        (function() {
+            const deptSelect = document.getElementById('encounter_procedure_department');
+            const procSelect = document.getElementById('procedure_catalog_id');
+            const procNameInput = document.getElementById('procedure_name');
+            
+            if (deptSelect && procSelect) {
+                // Load departments
+                fetch('/api/v1/procedures/departments')
+                    .then(res => res.json())
+                    .then(data => {
+                        (data.departments || []).forEach(dept => {
+                            const opt = document.createElement('option');
+                            opt.value = dept.id;
+                            opt.textContent = dept.name;
+                            deptSelect.appendChild(opt);
+                        });
+                    })
+                    .catch(err => console.error('Error loading departments:', err));
+                
+                // Load all procedures initially
+                fetch('/api/v1/procedures/all')
+                    .then(res => res.json())
+                    .then(data => {
+                        (data.procedures || []).forEach(proc => {
+                            const opt = document.createElement('option');
+                            opt.value = proc.id;
+                            opt.setAttribute('data-name', proc.name);
+                            opt.setAttribute('data-code', proc.code || '');
+                            opt.setAttribute('data-price', proc.cash_price);
+                            opt.textContent = proc.name + (proc.cash_price ? ' - GHS ' + proc.cash_price.toFixed(2) : '');
+                            procSelect.appendChild(opt);
+                        });
+                    })
+                    .catch(err => console.error('Error loading procedures:', err));
+                
+                // Handle department selection
+                deptSelect.addEventListener('change', function() {
+                    const deptId = this.value;
+                    procSelect.innerHTML = '<option value="">-- Select Procedure --</option>';
+                    procNameInput.value = '';
+                    
+                    if (!deptId) {
+                        // Reload all procedures
+                        fetch('/api/v1/procedures/all')
+                            .then(res => res.json())
+                            .then(data => {
+                                (data.procedures || []).forEach(proc => {
+                                    const opt = document.createElement('option');
+                                    opt.value = proc.id;
+                                    opt.setAttribute('data-name', proc.name);
+                                    opt.setAttribute('data-code', proc.code || '');
+                                    opt.setAttribute('data-price', proc.cash_price);
+                                    opt.textContent = proc.name + (proc.cash_price ? ' - GHS ' + proc.cash_price.toFixed(2) : '');
+                                    procSelect.appendChild(opt);
+                                });
+                            });
+                        return;
+                    }
+                    
+                    // Load procedures by department
+                    fetch('/api/v1/procedures/by-department/' + deptId)
+                        .then(res => res.json())
+                        .then(data => {
+                            (data.procedures || []).forEach(proc => {
+                                const opt = document.createElement('option');
+                                opt.value = proc.id;
+                                opt.setAttribute('data-name', proc.name);
+                                opt.setAttribute('data-code', proc.code || '');
+                                opt.setAttribute('data-price', proc.cash_price);
+                                opt.textContent = proc.name + (proc.cash_price ? ' - GHS ' + proc.cash_price.toFixed(2) : '');
+                                procSelect.appendChild(opt);
+                            });
+                        })
+                        .catch(err => console.error('Error loading procedures:', err));
+                });
+                
+                // Handle procedure selection
+                procSelect.addEventListener('change', function() {
+                    const opt = this.options[this.selectedIndex];
+                    if (opt && opt.value) {
+                        procNameInput.value = opt.getAttribute('data-name') || '';
+                    } else {
+                        procNameInput.value = '';
+                    }
+                });
+            }
+        })();
+        
+        // Handle procedure catalog selection
+        document.addEventListener('DOMContentLoaded', function() {
+            const procedureCatalogSelect = document.getElementById('procedure_catalog_id');
+            const procedureNameInput = document.getElementById('procedure_name');
+            
+            if (procedureCatalogSelect && procedureNameInput) {
+                procedureCatalogSelect.addEventListener('change', function() {
+                    const selectedOption = this.options[this.selectedIndex];
+                    if (selectedOption && selectedOption.value) {
+                        // Auto-fill the procedure name from the catalog
+                        const procName = selectedOption.getAttribute('data-name');
+                        if (procName) {
+                            procedureNameInput.value = procName;
+                        }
+                    }
+                });
+            }
+        });
 
         function attachServiceSelect(selectId, nameFieldId, codeFieldId, helperTextId) {
             const selectEl = document.getElementById(selectId);
@@ -1208,6 +1796,30 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Handle Lab Test Catalog selection
+            const labTestSelect = document.getElementById('labTestSelect');
+            if (labTestSelect) {
+                labTestSelect.addEventListener('change', function() {
+                    const selectedOption = this.options[this.selectedIndex];
+                    const testNameField = document.getElementById('lab_test_name');
+                    const testCodeField = document.getElementById('lab_test_code');
+                    const priceText = document.getElementById('labSelectedPriceText');
+                    
+                    if (this.value) {
+                        // User selected a test from catalog
+                        testNameField.value = selectedOption.dataset.name || '';
+                        testCodeField.value = selectedOption.dataset.code || '';
+                        priceText.textContent = 'Test selected from Lab Test Catalog: ' + selectedOption.dataset.name;
+                        // Clear the service pricing selection
+                        document.getElementById('labServiceSelect').value = '';
+                    } else {
+                        testNameField.value = '';
+                        testCodeField.value = '';
+                        priceText.textContent = 'Select a lab test to see pricing.';
+                    }
+                });
+            }
+            
             attachServiceSelect('labServiceSelect', 'lab_test_name', 'lab_test_code', 'labSelectedPriceText');
             attachServiceSelect('radiologyServiceSelect', 'radiology_study_name', 'radiology_study_code', 'radiologySelectedPriceText');
             
@@ -1228,64 +1840,86 @@
             }
         });
 
-        // Medication Search Autocomplete
+        // Medication Search - Ghana Formulary (formulation: generic + strength + dosage form + route)
         const medicationNameInput = document.getElementById('medication_name');
         const medicationIdInput = document.getElementById('medication_id');
+        const pharmacyDrugIdInput = document.getElementById('pharmacy_drug_id');
         const searchResults = document.getElementById('medication_search_results');
         let searchTimeout;
         
         medicationNameInput.addEventListener('input', function(e) {
             const query = e.target.value.trim();
             
-            // Clear previous timeout
             clearTimeout(searchTimeout);
             
-            // Hide results if query is too short
             if (query.length < 2) {
                 searchResults.style.display = 'none';
                 medicationIdInput.value = '';
+                if (pharmacyDrugIdInput) pharmacyDrugIdInput.value = '';
                 return;
             }
             
-            // Debounce search
             searchTimeout = setTimeout(async () => {
                 try {
-                    const response = await fetch(`/api/v1/inventory/medications/search?search=${encodeURIComponent(query)}&limit=10`);
+                    const response = await fetch(`/api/v1/pharmacy/formulary/search?q=${encodeURIComponent(query)}`);
                     const data = await response.json();
                     
-                    if (data.medications && data.medications.length > 0) {
-                        // Show results
+                    if (Array.isArray(data) && data.length > 0) {
                         searchResults.innerHTML = '';
-                        data.medications.forEach(med => {
+                        data.forEach(med => {
                             const item = document.createElement('a');
                             item.href = '#';
                             item.className = 'list-group-item list-group-item-action';
                             
-                            let stockBadge = '';
-                            if (med.in_stock) {
-                                stockBadge = `<span class="badge badge-success float-right">In Stock (${med.available_quantity})</span>`;
-                            } else {
-                                stockBadge = `<span class="badge badge-warning float-right">Out of Stock</span>`;
-                            }
+                            const strength = med.strength_value ? `${med.strength_value} ${med.strength_unit || ''}` : (med.concentration_value ? `${med.concentration_value} ${med.concentration_unit || ''}` : '');
+                            const brand = med.brand_name ? ` [${med.brand_name}]` : '';
                             
                             item.innerHTML = `
                                 <div class="d-flex w-100 justify-content-between">
-                                    <h6 class="mb-1">${med.name}${med.strength ? ' - ' + med.strength : ''}</h6>
-                                    ${stockBadge}
+                                    <h6 class="mb-1">${med.generic_name} ${strength} ${med.dosage_form}${med.route ? ' (' + med.route + ')' : ''}${brand}</h6>
+                                    ${med.is_controlled ? '<span class="badge badge-warning">Controlled</span>' : ''}
                                 </div>
-                                ${med.generic_name ? `<small class="text-muted">Generic: ${med.generic_name}</small>` : ''}
-                                ${med.medication_code ? `<small class="text-muted"> | Code: ${med.medication_code}</small>` : ''}
+                                <small class="text-muted">${med.item_code || ''}</small>
                             `;
                             
-                            item.addEventListener('click', function(e) {
+                            item.addEventListener('click', async function(e) {
                                 e.preventDefault();
-                                medicationNameInput.value = med.name;
-                                medicationIdInput.value = med.id;
+                                medicationNameInput.value = med.label || `${med.generic_name} ${strength} ${med.dosage_form}`;
+                                if (pharmacyDrugIdInput) pharmacyDrugIdInput.value = med.id;
+                                medicationIdInput.value = '';
                                 searchResults.style.display = 'none';
                                 
-                                // Auto-fill dosage if available
-                                if (med.strength && !document.getElementById('dosage').value) {
-                                    document.getElementById('dosage').value = med.strength;
+                                const doseVal = med.strength_value || med.concentration_value;
+                                if (doseVal && !document.getElementById('dosage').value) {
+                                    document.getElementById('dosage').value = `${doseVal} ${med.strength_unit || med.concentration_unit || ''}`.trim();
+                                }
+                                // Check drug interactions when drug selected
+                                const patientId = document.getElementById('prescriptionForm')?.dataset?.patientId;
+                                if (patientId && med.id) {
+                                    try {
+                                        const r = await fetch(`/api/v1/pharmacy/interactions/check?patient_id=${patientId}&drug_id=${med.id}`, {
+                                            credentials: 'include'
+                                        });
+                                        const d = await r.json();
+                                        const banner = document.getElementById('interactionWarningBanner');
+                                        const content = document.getElementById('interactionWarningContent');
+                                        if (d.has_interactions && d.interactions?.length) {
+                                            const contraindicated = d.interactions.filter(i => i.severity === 'CONTRAINDICATED');
+                                            const major = d.interactions.filter(i => i.severity === 'MAJOR');
+                                            const others = d.interactions.filter(i => !['CONTRAINDICATED','MAJOR'].includes(i.severity));
+                                            let html = '<ul class="mb-0 mt-1">';
+                                            [...contraindicated,...major,...others].forEach(i => {
+                                                const cls = i.severity === 'CONTRAINDICATED' ? 'text-danger' : (i.severity === 'MAJOR' ? 'text-warning' : '');
+                                                html += `<li class="${cls}"><strong>${i.severity}:</strong> ${i.description || ''} ${i.recommendation ? '— ' + i.recommendation : ''}</li>`;
+                                            });
+                                            html += '</ul>';
+                                            content.innerHTML = html;
+                                            banner.className = contraindicated.length ? 'alert alert-danger' : 'alert alert-warning';
+                                            banner.style.display = 'block';
+                                        } else {
+                                            banner.style.display = 'none';
+                                        }
+                                    } catch (err) { console.error('Interaction check failed:', err); }
                                 }
                             });
                             
@@ -1293,12 +1927,12 @@
                         });
                         searchResults.style.display = 'block';
                     } else {
-                        // No results - allow free text entry
                         searchResults.style.display = 'none';
+                        if (pharmacyDrugIdInput) pharmacyDrugIdInput.value = '';
                         medicationIdInput.value = '';
                     }
                 } catch (error) {
-                    console.error('Error searching medications:', error);
+                    console.error('Error searching formulary:', error);
                     searchResults.style.display = 'none';
                 }
             }, 300);
@@ -1311,6 +1945,22 @@
             }
         });
         
+        // Handle frequency dropdown - show custom input when "Other" is selected
+        const frequencySelect = document.getElementById('frequency');
+        const frequencyCustom = document.getElementById('frequency_custom');
+        if (frequencySelect && frequencyCustom) {
+            frequencySelect.addEventListener('change', function() {
+                if (this.value === 'Other') {
+                    frequencyCustom.style.display = 'block';
+                    frequencyCustom.required = true;
+                } else {
+                    frequencyCustom.style.display = 'none';
+                    frequencyCustom.required = false;
+                    frequencyCustom.value = '';
+                }
+            });
+        }
+        
         // Prescription Form AJAX Submission
         document.getElementById('prescriptionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1322,6 +1972,31 @@
             const noPrescriptionsMsg = document.getElementById('noPrescriptionsMsg');
             const originalBtnText = submitBtn.innerHTML;
             
+            const pharmacyDrugId = document.getElementById('pharmacy_drug_id')?.value;
+            const patientId = form.dataset?.patientId;
+            // Pre-submit interaction check: block CONTRAINDICATED
+            if (patientId && pharmacyDrugId) {
+                try {
+                    const r = await fetch(`/api/v1/pharmacy/interactions/check?patient_id=${patientId}&drug_id=${pharmacyDrugId}`, {
+                        signal: AbortSignal.timeout(5000) // 5 second timeout
+                    });
+                    const d = await r.json();
+                    if (d.has_interactions && d.interactions?.length) {
+                        const contraindicated = d.interactions.filter(i => i.severity === 'CONTRAINDICATED');
+                        if (contraindicated.length) {
+                            alertDiv.className = 'alert alert-danger';
+                            alertDiv.innerHTML = '<i class="fas fa-ban"></i> <strong>Contraindicated:</strong> ' + contraindicated.map(i => i.description || i.recommendation).join(' ');
+                            alertDiv.style.display = 'block';
+                            return;
+                        }
+                        const major = d.interactions.filter(i => i.severity === 'MAJOR');
+                        if (major.length && !confirm('Drug interaction (MAJOR) detected. Do you want to proceed anyway?')) {
+                            return;
+                        }
+                    }
+                } catch (err) { console.error('Interaction check failed:', err); }
+            }
+            
             // Disable submit button
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
@@ -1330,66 +2005,76 @@
             // Get form data
             const formData = new FormData(form);
             
+            // Handle custom frequency if "Other" is selected
+            const frequencySelect = document.getElementById('frequency');
+            const frequencyCustom = document.getElementById('frequency_custom');
+            if (frequencySelect && frequencyCustom && frequencySelect.value === 'Other' && frequencyCustom.value) {
+                formData.set('frequency', frequencyCustom.value);
+            }
+            
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+                
+                console.log('Submitting prescription form to:', form.action);
+                
                 const response = await fetch(form.action, {
                     method: 'POST',
+                    credentials: 'include', // Include cookies for authentication
                     headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json'
                     },
-                    body: formData
+                    body: formData,
+                    signal: controller.signal
                 });
                 
-                const data = await response.json();
+                clearTimeout(timeoutId);
                 
-                if (response.ok && data.success) {
-                    // Success - add prescription to list dynamically
-                    const prescription = data.prescription;
-                    
-                    // Remove "No prescriptions" message if it exists
-                    if (noPrescriptionsMsg) {
-                        noPrescriptionsMsg.remove();
+                console.log('Response status:', response.status, 'OK:', response.ok);
+                console.log('Response headers:', response.headers.get('content-type'));
+                
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                let data;
+                if (contentType && contentType.includes('application/json')) {
+                    try {
+                        data = await response.json();
+                        console.log('Response data:', data);
+                    } catch (jsonError) {
+                        console.error('Failed to parse JSON:', jsonError);
+                        alert('Failed to parse server response. Please check the console for details.');
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = originalBtnText;
+                        return;
                     }
-                    
-                    // Create new prescription item
-                    const prescriptionDiv = document.createElement('div');
-                    prescriptionDiv.className = 'callout callout-danger prescription-item';
-                    prescriptionDiv.setAttribute('data-prescription-id', prescription.id);
-                    
-                    let statusBadgeClass = 'info';
-                    if (prescription.status === 'completed') statusBadgeClass = 'success';
-                    else if (prescription.status === 'in_progress') statusBadgeClass = 'warning';
-                    
-                    let html = `<h5>${prescription.medication_name}</h5>`;
-                    html += `<p><small><strong>Dosage:</strong> ${prescription.dosage} | <strong>Frequency:</strong> ${prescription.frequency} | <strong>Duration:</strong> ${prescription.duration}</small></p>`;
-                    if (prescription.quantity) {
-                        html += `<p><small><strong>Quantity:</strong> ${prescription.quantity}</small></p>`;
+                } else {
+                    // If not JSON, check if it's a redirect (302) that wasn't handled
+                    console.error('Non-JSON response received. Status:', response.status, 'Content-Type:', contentType);
+                    if (response.status === 302 || response.status === 0) {
+                        // Redirect response - reload the page
+                        window.location.reload();
+                        return;
                     }
-                    if (prescription.instructions) {
-                        html += `<p><small><strong>Instructions:</strong> ${prescription.instructions}</small></p>`;
-                    }
-                    html += `<p><small>Status: <span class="badge badge-${statusBadgeClass}">${prescription.status.charAt(0).toUpperCase() + prescription.status.slice(1)}</span></small></p>`;
-                    
-                    prescriptionDiv.innerHTML = html;
-                    
-                    // Add to list
-                    prescriptionsList.insertBefore(prescriptionDiv, prescriptionsList.firstChild);
-                    
-                    // Show success message
-                    alertDiv.className = 'alert alert-success';
-                    alertDiv.innerHTML = '<i class="fas fa-check-circle"></i> Prescription added successfully!';
-                    alertDiv.style.display = 'block';
-                    
-                    // Clear form
-                    form.reset();
-                    
-                    // Hide success message after 3 seconds
-                    setTimeout(() => {
-                        alertDiv.style.display = 'none';
-                    }, 3000);
-                    
-                    // Re-enable submit button
+                    // Something else went wrong
+                    alert('Invalid response from server (content-type: ' + contentType + ', status: ' + response.status + '). Please try refreshing the page.');
                     submitBtn.disabled = false;
                     submitBtn.innerHTML = originalBtnText;
+                    return;
+                }
+                
+                if (response.ok && data.success) {
+                    // Success - reload the page to show the new prescription
+                    // This avoids any UI issues with dynamic updates
+                    console.log('Prescription created successfully, reloading page...');
+                    alertDiv.className = 'alert alert-success';
+                    alertDiv.innerHTML = '<i class="fas fa-check-circle"></i> Prescription added successfully! Reloading...';
+                    alertDiv.style.display = 'block';
+                    
+                    // Reload the page after a short delay to show the message
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
                 } else {
                     // Handle error
                     alertDiv.className = 'alert alert-danger';
@@ -1420,6 +2105,7 @@
             
             fetch(`/api/v1/encounters/${encounterId}/detain`, {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Requested-With': 'XMLHttpRequest'
@@ -1458,6 +2144,7 @@
             
             fetch(url, {
                 method: 'PUT',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -1489,6 +2176,7 @@
             
             fetch(`/api/v1/encounters/lab-orders/${labOrderId}?encounter_id=${encounterId}`, {
                 method: 'DELETE',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 }
@@ -1515,6 +2203,7 @@
             
             fetch(`/api/v1/encounters/radiology-orders/${radiologyOrderId}?encounter_id=${encounterId}`, {
                 method: 'DELETE',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 }
@@ -1541,6 +2230,7 @@
             
             fetch(`/api/v1/encounters/prescriptions/${prescriptionId}?encounter_id=${encounterId}`, {
                 method: 'DELETE',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 }
@@ -1585,6 +2275,7 @@
             
             fetch(`/api/v1/encounters/procedures/${procedureId}?encounter_id=${encounterId}`, {
                 method: 'DELETE',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 }
@@ -1611,6 +2302,7 @@
             
             fetch(`/api/v1/encounters/antenatal-charges/${chargeId}?encounter_id=${encounterId}`, {
                 method: 'DELETE',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 }
@@ -1630,7 +2322,600 @@
             });
         }
         
+        // Edit Diagnosis Multi-Select JavaScript (similar to new_encounter.html)
+        $(document).ready(function() {
+            const $container = $('#edit-diagnosis-select-container');
+            const $inputWrapper = $('#edit-selected-diagnosis-display');
+            const $tagsContainer = $('#edit-tags-container');
+            const $searchInput = $('#edit-diagnosis-search');
+            const $dropdown = $('#edit-multi-select-dropdown');
+            const $optionsList = $('#edit-diagnosis-options-list');
+            const $hiddenSelect = $('#edit-hidden-diagnosis-select');
+            const $selectAllCheckbox = $('#edit-select-all-checkbox');
+            
+            if (!$container.length) return; // Exit if element doesn't exist
+            
+            // Toggle dropdown
+            $inputWrapper.on('click', function(e) {
+                e.stopPropagation();
+                const isExpanded = $container.attr('aria-expanded') === 'true';
+                $container.attr('aria-expanded', !isExpanded);
+                $dropdown.toggle(!isExpanded);
+                if (!isExpanded) {
+                    $searchInput.focus();
+                }
+            });
+            
+            // Close dropdown when clicking outside
+            $(document).on('click', function(e) {
+                if (!$(e.target).closest('#edit-diagnosis-select-container').length) {
+                    $container.attr('aria-expanded', 'false');
+                    $dropdown.hide();
+                }
+            });
+            
+            // Search/filter
+            $searchInput.on('input', function() {
+                const query = $(this).val().toLowerCase();
+                $optionsList.find('.option-item').each(function() {
+                    const text = $(this).text().toLowerCase();
+                    $(this).toggle(text.includes(query));
+                });
+            });
+            
+            // Toggle select all
+            $selectAllCheckbox.on('change', function() {
+                const isChecked = $(this).prop('checked');
+                $optionsList.find('.item-checkbox').each(function() {
+                    $(this).prop('checked', isChecked);
+                    const $item = $(this).closest('.option-item');
+                    if (isChecked) {
+                        $item.addClass('selected').attr('aria-selected', 'true');
+                        const diseaseId = $item.data('id');
+                        if ($hiddenSelect.find(`option[value="${diseaseId}"]`).length === 0) {
+                            const optionText = $item.data('name') || $item.find('label').text().trim();
+                            $hiddenSelect.append(`<option value="${diseaseId}" selected>${optionText}</option>`);
+                        } else {
+                            $hiddenSelect.find(`option[value="${diseaseId}"]`).prop('selected', true);
+                        }
+                    } else {
+                        $item.removeClass('selected').attr('aria-selected', 'false');
+                        $hiddenSelect.find(`option[value="${$item.data('id')}"]`).prop('selected', false);
+                    }
+                });
+                updateEditSelectedDisplay();
+            });
+            
+            // Handle option click
+            $optionsList.on('click', '.option-item', function(e) {
+                if ($(e.target).closest('.form-check').length) return; // Let checkbox handle itself
+                const $checkbox = $(this).find('.item-checkbox');
+                $checkbox.prop('checked', !$checkbox.prop('checked')).trigger('change');
+            });
+            
+            // Handle checkbox change
+            $optionsList.on('change', '.item-checkbox', function() {
+                const $item = $(this).closest('.option-item');
+                const diseaseId = $item.data('id');
+                
+                if ($(this).prop('checked')) {
+                    $item.addClass('selected').attr('aria-selected', 'true');
+                    if ($hiddenSelect.find(`option[value="${diseaseId}"]`).length === 0) {
+                        const optionText = $item.data('name') || $item.find('label').text().trim();
+                        $hiddenSelect.append(`<option value="${diseaseId}" selected>${optionText}</option>`);
+                    } else {
+                        $hiddenSelect.find(`option[value="${diseaseId}"]`).prop('selected', true);
+                    }
+                } else {
+                    $item.removeClass('selected').attr('aria-selected', 'false');
+                    $hiddenSelect.find(`option[value="${diseaseId}"]`).prop('selected', false);
+                }
+                updateEditSelectedDisplay();
+                updateEditSelectAllState();
+            });
+            
+            function updateEditSelectedDisplay() {
+                const selectedIds = $hiddenSelect.val() || [];
+                $tagsContainer.empty();
+                selectedIds.forEach(function(id) {
+                    const $option = $hiddenSelect.find(`option[value="${id}"]`);
+                    const text = $option ? $option.text() : '';
+                    if (text) {
+                        const $tag = $(`<span class="selected-tag" data-id="${id}">${text}<span class="edit-remove-tag">&times;</span></span>`);
+                        $tagsContainer.append($tag);
+                    }
+                });
+            }
+            
+            function updateEditSelectAllState() {
+                const totalOptions = $optionsList.find('.option-item').length;
+                const selectedOptions = $optionsList.find('.option-item.selected').length;
+                $selectAllCheckbox.prop('checked', totalOptions > 0 && totalOptions === selectedOptions);
+            }
+            
+            // Handle tag removal
+            $tagsContainer.on('click', '.edit-remove-tag', function(e) {
+                e.stopPropagation();
+                const $tag = $(this).closest('.selected-tag');
+                const diseaseId = $tag.data('id');
+                
+                $hiddenSelect.find(`option[value="${diseaseId}"]`).prop('selected', false);
+                $(`#edit-item-${diseaseId}`).prop('checked', false);
+                $(`#edit-diagnosis-options-list .option-item[data-id="${diseaseId}"]`)
+                    .removeClass('selected')
+                    .attr('aria-selected', 'false');
+                
+                $tag.remove();
+                updateEditSelectAllState();
+            });
+            
+            // Initialize
+            updateEditSelectedDisplay();
+        });
+        
+        // Remove diagnosis from edit form
+        function editRemoveDiagnosis(event, diseaseId) {
+            event.stopPropagation();
+            $('#edit-hidden-diagnosis-select').find(`option[value="${diseaseId}"]`).prop('selected', false);
+            $(`#edit-item-${diseaseId}`).prop('checked', false);
+            $(`#edit-diagnosis-options-list .option-item[data-id="${diseaseId}"]`)
+                .removeClass('selected')
+                .attr('aria-selected', 'false');
+            $(`.selected-tag[data-id="${diseaseId}"]`).remove();
+            
+            // Update select all state
+            const totalOptions = $('#edit-diagnosis-options-list .option-item').length;
+            const selectedOptions = $('#edit-diagnosis-options-list .option-item.selected').length;
+            $('#edit-select-all-checkbox').prop('checked', totalOptions > 0 && totalOptions === selectedOptions);
+        }
+        
+        // Save Clinical Notes via AJAX
+        function saveClinicalNotes(event, encounterId) {
+            event.preventDefault();
+            
+            const form = document.getElementById('editClinicalNotesForm');
+            const alertEl = document.getElementById('editClinicalNotesAlert');
+            const submitBtn = document.getElementById('saveClinicalNotesBtn');
+            
+            // Hide any previous alerts
+            alertEl.style.display = 'none';
+            alertEl.className = 'alert';
+            
+            // Disable submit button to prevent double submission
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving...';
+            
+            const formData = new FormData(form);
+            
+            // Convert FormData to JSON, handling multi-select properly
+            const data = {};
+            formData.forEach((value, key) => {
+                data[key] = value;
+            });
+            
+            // Handle multi-select diagnoses - get all selected values
+            const diagnosisSelect = document.getElementById('edit_diagnoses');
+            if (diagnosisSelect) {
+                const selectedDiagnoses = Array.from(diagnosisSelect.selectedOptions).map(option => option.value);
+                data.diagnoses = selectedDiagnoses;
+            }
+            
+            fetch(`/api/v1/encounters/${encounterId}`, {
+                method: 'PUT',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error saving clinical notes');
+                    });
+                }
+            })
+            .then(data => {
+                // Show success message
+                alertEl.className = 'alert alert-success';
+                alertEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Clinical notes saved successfully! Reloading page...';
+                alertEl.style.display = 'block';
+                
+                // Reload page after short delay to show updated values
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alertEl.className = 'alert alert-danger';
+                alertEl.innerHTML = '<i class="fas fa-exclamation-circle mr-1"></i> ' + (error.message || 'Error saving clinical notes. Please try again.');
+                alertEl.style.display = 'block';
+            })
+            .finally(() => {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-save mr-1"></i> Save Clinical Notes';
+            });
+        }
+        
+        // Save Doctors Note via AJAX (creates new doctors note, does not edit old ones)
+        function saveAddendum(event, encounterId) {
+            event.preventDefault();
+            
+            const form = document.getElementById('addendumForm');
+            const alertEl = document.getElementById('addendumAlert');
+            const addendumText = document.getElementById('addendum_text').value;
+            
+            // Hide any previous alerts
+            alertEl.style.display = 'none';
+            alertEl.className = 'alert';
+            
+            // Validate
+            if (!addendumText.trim()) {
+                alertEl.className = 'alert alert-danger';
+                alertEl.innerHTML = '<i class="fas fa-exclamation-circle mr-1"></i> Please enter doctors note content.';
+                alertEl.style.display = 'block';
+                return;
+            }
+            
+            fetch(`/api/v1/encounters/${encounterId}/addendums`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ content: addendumText })
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error saving addendum');
+                    });
+                }
+            })
+            .then(data => {
+                // Show success message
+                alertEl.className = 'alert alert-success';
+                alertEl.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Doctors note saved successfully! Reloading page...';
+                alertEl.style.display = 'block';
+                
+                // Reload page after short delay to show updated values
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alertEl.className = 'alert alert-danger';
+                alertEl.innerHTML = '<i class="fas fa-exclamation-circle mr-1"></i> ' + (error.message || 'Error saving doctors note. Please try again.');
+                alertEl.style.display = 'block';
+            });
+        }
+        
+        // Create appointment via AJAX with success popup
+        function createAppointment(event, encounterId) {
+            event.preventDefault();
+            
+            const form = document.getElementById('followUpAppointmentFormInner');
+            const alertEl = document.getElementById('appointmentFormAlert');
+            const submitBtn = document.getElementById('followUpSubmitBtn');
+            
+            // Hide any previous alerts
+            alertEl.style.display = 'none';
+            alertEl.className = 'alert';
+            
+            // Disable submit button to prevent double submission
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Creating...';
+            
+            const formData = new FormData(form);
+            
+            fetch(`/api/v1/encounters/${encounterId}/create-appointment`, {
+                method: 'POST',
+                credentials: 'include',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Error creating appointment');
+                    });
+                }
+            })
+            .then(data => {
+                // Show success modal
+                const modalContent = `
+                    <div class="modal-header bg-success">
+                        <h5 class="modal-title"><i class="fas fa-check-circle mr-2"></i>Appointment Scheduled!</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <p><strong>Appointment #${data.appointment_id}</strong> has been successfully scheduled.</p>
+                        <table class="table table-sm">
+                            <tr><td><strong>Type:</strong></td><td>${data.appointment_type}</td></tr>
+                            <tr><td><strong>Date:</strong></td><td>${new Date(data.scheduled_date).toLocaleString()}</td></tr>
+                            <tr><td><strong>Department:</strong></td><td>${data.department}</td></tr>
+                        </table>
+                        ${data.sms_sent ? '<p class="text-success"><i class="fas fa-check mr-1"></i>SMS notification sent to patient</p>' : ''}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-success" data-dismiss="modal">OK</button>
+                    </div>
+                `;
+                
+                // Create or update modal
+                let modal = document.getElementById('appointmentSuccessModal');
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = 'appointmentSuccessModal';
+                    modal.className = 'modal fade';
+                    modal.setAttribute('tabindex', '-1');
+                    modal.setAttribute('role', 'dialog');
+                    modal.innerHTML = `<div class="modal-dialog" role="document"><div class="modal-content">${modalContent}</div></div>`;
+                    document.body.appendChild(modal);
+                    $(modal).modal('show');
+                    
+                    // Clean up modal after hiding
+                    $(modal).on('hidden.bs.modal', function() {
+                        modal.remove();
+                        // Reset form
+                        form.reset();
+                        // Collapse the form
+                        $('#followUpAppointmentForm').collapse('hide');
+                    });
+                } else {
+                    modal.querySelector('.modal-content').innerHTML = modalContent;
+                    $(modal).modal('show');
+                }
+                
+                // Reset button
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-calendar-check mr-1"></i> Schedule Follow-Up Appointment';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alertEl.textContent = error.message;
+                alertEl.className = 'alert alert-danger';
+                alertEl.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-calendar-check mr-1"></i> Schedule Follow-Up Appointment';
+            });
+        }
+        
+    
+    // Smooth scroll to element
+    function smoothScrollTo(elementId) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+    
+    // Comparison View Functions
+    let previousEncounters = [];
+    
+    function openCompareModal() {
+        $('#compareModal').modal('show');
+        loadPreviousEncounters();
+    }
+    
+    function loadPreviousEncounters() {
+        fetch(`/api/v1/encounters/patient/{{ encounter.patient_id }}?limit=50`, {
+            credentials: 'include'
+        })
+            .then(response => response.json())
+            .then(data => {
+                const select = document.getElementById('compareEncounterSelect');
+                select.innerHTML = '<option value="">-- Select Previous Encounter --</option>';
+                previousEncounters = data.filter(e => e.id != {{ encounter.id }});
+                previousEncounters.forEach(enc => {
+                    const option = document.createElement('option');
+                    option.value = enc.id;
+                    const date = new Date(enc.encounter_date).toLocaleDateString();
+                    option.textContent = `#${enc.id} - ${date} - ${enc.status || 'N/A'}`;
+                    select.appendChild(option);
+                });
+            })
+            .catch(error => console.error('Error loading encounters:', error));
+    }
+    
+    function loadComparison() {
+        const compareId = document.getElementById('compareEncounterSelect').value;
+        const contentDiv = document.getElementById('comparisonContent');
+        
+        if (!compareId) {
+            contentDiv.innerHTML = '';
+            return;
+        }
+        
+        contentDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading comparison...</div>';
+        
+        fetch(`/api/v1/encounters/{{ encounter.id }}/compare?compare_with=${compareId}`)
+            .then(response => response.json())
+            .then(data => {
+                const curr = data.current;
+                const prev = data.comparison;
+                
+                contentDiv.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="bg-primary text-white p-2">Current Encounter #${curr.id}</h6>
+                            <p><strong>Date:</strong> ${new Date(curr.encounter_date).toLocaleDateString()}</p>
+                            <p><strong>Clinician:</strong> ${curr.clinician || 'N/A'}</p>
+                            <p><strong>Chief Complaint:</strong> ${curr.chief_complaint || 'N/A'}</p>
+                            <p><strong>Assessment:</strong> ${curr.assessment || 'N/A'}</p>
+                            <p><strong>Plan:</strong> ${curr.plan || 'N/A'}</p>
+                            <p><strong>Diagnosis:</strong> ${curr.primary_diagnosis_description || 'N/A'}</p>
+                            <p><strong>Allergies:</strong> ${curr.allergies || 'None recorded'}</p>
+                            <p><strong>Medications:</strong> ${curr.medications || 'None recorded'}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="bg-secondary text-white p-2">Previous Encounter #${prev.id}</h6>
+                            <p><strong>Date:</strong> ${new Date(prev.encounter_date).toLocaleDateString()}</p>
+                            <p><strong>Clinician:</strong> ${prev.clinician || 'N/A'}</p>
+                            <p><strong>Chief Complaint:</strong> ${prev.chief_complaint || 'N/A'}</p>
+                            <p><strong>Assessment:</strong> ${prev.assessment || 'N/A'}</p>
+                            <p><strong>Plan:</strong> ${prev.plan || 'N/A'}</p>
+                            <p><strong>Diagnosis:</strong> ${prev.primary_diagnosis_description || 'N/A'}</p>
+                            <p><strong>Allergies:</strong> ${prev.allergies || 'None recorded'}</p>
+                            <p><strong>Medications:</strong> ${prev.medications || 'None recorded'}</p>
+                        </div>
+                    </div>
+                `;
+            })
+            .catch(error => {
+                contentDiv.innerHTML = '<div class="alert alert-danger">Error loading comparison</div>';
+                console.error('Error:', error);
+            });
+    }
     </script>
+
+    <style>
+    @media print {
+        /* Hide non-printable elements */
+        .main-header, .main-sidebar, .content-header, .btn, .card-header .card-tools, 
+        .no-print, .print-hide, .modal, footer, .sidebar {
+            display: none !important;
+        }
+        
+        /* Reset layout for printing */
+        .content-wrapper {
+            margin-left: 0 !important;
+            padding: 0 !important;
+        }
+        
+        .card {
+            border: 1px solid #ddd !important;
+            box-shadow: none !important;
+            margin-bottom: 15px !important;
+            page-break-inside: avoid;
+        }
+        
+        .card-body {
+            padding: 10px !important;
+        }
+        
+        /* Print header with hospital info */
+        .print-header {
+            display: block !important;
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #333;
+        }
+        
+        .print-header h1 {
+            font-size: 24px;
+            margin: 0;
+        }
+        
+        .print-header .hospital-info {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        /* Tables */
+        table {
+            width: 100% !important;
+            font-size: 11px;
+        }
+        
+        /* Encounter summary card */
+        .encounter-summary-card {
+            position: static !important;
+            max-height: none !important;
+            overflow: visible !important;
+            border: 1px solid #333 !important;
+        }
+        
+        /* Badge styling */
+        .badge {
+            border: 1px solid #333 !important;
+            padding: 2px 6px !important;
+        }
+        
+        /* Body text */
+        p, td, th {
+            font-size: 11px;
+        }
+        
+        label {
+            font-weight: bold;
+        }
+        
+        /* Avoid page breaks inside important sections */
+        .clinical-documentation, .orders-section {
+            page-break-inside: avoid;
+        }
+        
+        /* Print footer */
+        .print-footer {
+            display: block !important;
+            margin-top: 30px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+            text-align: center;
+            font-size: 10px;
+            color: #666;
+        }
+    }
+    
+    .print-header, .print-footer {
+        display: none;
+    }
+    </style>
+    
+    <!-- Print Header (visible only when printing) -->
+    <div class="print-header" style="display: none;">
+        <h1>CLINICAL ENCOUNTER SUMMARY</h1>
+        <div class="hospital-info">
+            {% if hospital_settings and hospital_settings.hospital_name %}
+            {{ hospital_settings.hospital_name }}<br>
+            {% endif %}
+            {% if hospital_settings and hospital_settings.address %}
+            {{ hospital_settings.address }}<br>
+            {% endif %}
+            Tel: {% if hospital_settings and hospital_settings.phone %}{{ hospital_settings.phone }}{% else %}N/A{% endif %}
+        </div>
+    </div>
+    
+    <!-- Print Footer (visible only when printing) -->
+    <div class="print-footer" style="display: none;">
+        <p>Printed on: {{ datetime.now().strftime('%Y-%m-%d %H:%M:%S') }} | Encounter #{{ encounter.id }}</p>
+        <p>{% if hospital_settings and hospital_settings.hospital_name %}{{ hospital_settings.hospital_name }}{% else %}Healthcare Facility{% endif %} - MedFlow</p>
+    </div>
+
+    <!-- Comparison Modal -->
+    <div class="modal fade" id="compareModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-xl" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Compare Encounters</h5>
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Select Encounter to Compare:</label>
+                        <select id="compareEncounterSelect" class="form-control" onchange="loadComparison()">
+                            <option value="">-- Select Previous Encounter --</option>
+                        </select>
+                    </div>
+                    <div id="comparisonContent" class="mt-3"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
 {% endblock %}
 

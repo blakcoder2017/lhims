@@ -21,15 +21,21 @@
             </div>
         </section>
 
-        <section class="content">
+        <section class="content triage-queue">
             <div class="container-fluid">
+                {% if request.query_params.get('status') == 'vitals_saved' %}
+                <div class="alert alert-success alert-dismissible">
+                    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">×</button>
+                    <i class="icon fas fa-check"></i> Vitals saved successfully.
+                </div>
+                {% endif %}
                 <!-- Filters -->
                 <div class="card card-primary card-outline">
                     <div class="card-header">
                         <h3 class="card-title"><i class="fas fa-filter mr-1"></i> Filter Queue</h3>
                     </div>
                     <div class="card-body">
-                        <form method="GET" action="{{ url_for('nurse_triage_queue') }}">
+                        <form method="GET" action="{{ url_for('triage_queue') }}">
                             <div class="row">
                                 <div class="col-md-4">
                                     <div class="form-group">
@@ -61,7 +67,7 @@
                                 <div class="col-md-2">
                                     <div class="form-group">
                                         <label>&nbsp;</label>
-                                        <a href="{{ url_for('nurse_triage_queue') }}" class="btn btn-secondary btn-block">Clear</a>
+                                        <a href="{{ url_for('triage_queue') }}" class="btn btn-secondary btn-block">Clear</a>
                                     </div>
                                 </div>
                             </div>
@@ -97,7 +103,7 @@
                                 </thead>
                                 <tbody>
                                     {% for item in triage_queue %}
-                                    {% set appointment = item.appointment %}
+                                    {% set appointment = item.queue_entry %}
                                     <tr class="{% if not item.has_vitals %}table-warning{% endif %}">
                                         <td><strong>{{ appointment.queue_number or 'N/A' }}</strong></td>
                                         <td>{{ appointment.patient.first_name }} {{ appointment.patient.last_name }}</td>
@@ -108,7 +114,7 @@
                                                 {{ (appointment.department_type or 'opd').upper() }}
                                             </span>
                                         </td>
-                                        <td>{{ appointment.scheduled_date.strftime('%H:%M') }}</td>
+                                        <td>{{ appointment.checked_in_at.strftime('%H:%M') if appointment.checked_in_at else 'N/A' }}</td>
                                         <td>
                                             {% if item.wait_time %}
                                                 {% set hours = (item.wait_time.total_seconds() // 3600) | int %}
@@ -210,13 +216,13 @@
                                 </thead>
                                 <tbody>
                                     {% for item in triage_queue_previous %}
-                                    {% set appointment = item.appointment %}
+                                    {% set appointment = item.queue_entry %}
                                     <tr class="table-warning">
                                         <td>{{ appointment.queue_number or 'N/A' }}</td>
                                         <td>{{ appointment.patient.first_name }} {{ appointment.patient.last_name }}</td>
                                         <td><span class="badge badge-primary">{{ appointment.patient.patient_number or 'N/A' }}</span></td>
                                         <td>{{ appointment.department }}</td>
-                                        <td>{{ appointment.scheduled_date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>{{ appointment.created_at.strftime('%Y-%m-%d %H:%M') if appointment.created_at else 'N/A' }}</td>
                                         <td>
                                             {% if item.wait_time %}
                                                 {% set hours = (item.wait_time.total_seconds() // 3600) | int %}

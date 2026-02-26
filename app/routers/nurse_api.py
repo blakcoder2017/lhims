@@ -8,14 +8,14 @@ Routes for nurse-specific functionality:
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from app.core.templates import templates
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, or_
 from typing import Optional, List
 from datetime import datetime, timedelta, date
 
 from app.db.database import get_db
-from app.core.deps import get_current_user, role_required
+from app.core.deps import get_current_user, role_required, permission_required
 from app.models.user_models import User
 from app.models.appointment_models import OPDQueue, QueueStatus
 from app.models.triage_models import TriageVitals
@@ -28,7 +28,6 @@ router = APIRouter(
     tags=["Nurse"]
 )
 
-templates = Jinja2Templates(directory="app/templates")
 
 
 @router.get("/dashboard", name="nurse_dashboard")
@@ -108,11 +107,11 @@ def nurse_dashboard(
     return templates.TemplateResponse("nurse/dashboard.html", context)
 
 
-@router.get("/triage-queue", name="nurse_triage_queue")
+@router.get("/triage-queue", name="triage_queue", dependencies=[Depends(permission_required("view_triage_queue"))])
 def nurse_triage_queue(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Nurse", "Admin", "Front Office"])),
+    current_user: User = Depends(get_current_user),
     department: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None)
 ):

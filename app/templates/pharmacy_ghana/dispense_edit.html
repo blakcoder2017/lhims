@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block content %}
+
+    {% include "includes/sidebar_navbar.html" %}
+
+    <div class="content-wrapper">
+        <section class="content-header">
+            <div class="container-fluid">
+                <div class="row mb-2">
+                    <div class="col-sm-6">
+                        <h1><i class="fas fa-prescription-bottle mr-2"></i>Dispense #{{ dispense.id }}</h1>
+                    </div>
+                    <div class="col-sm-6">
+                        <ol class="breadcrumb float-sm-right">
+                            <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                            <li class="breadcrumb-item"><a href="{{ url_for('pharmacy_ghana_dashboard') }}">Pharmacy</a></li>
+                            <li class="breadcrumb-item active">Dispense #{{ dispense.id }}</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <div class="container-fluid">
+                {% if request.query_params.get('status') == 'item_added' %}
+                <div class="alert alert-success">Item added successfully</div>
+                {% endif %}
+                
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger">{{ request.query_params.get('error') }}</div>
+                {% endif %}
+
+                <div class="row">
+                    <div class="col-md-8">
+                        <!-- Patient Info -->
+                        <div class="card card-primary">
+                            <div class="card-header">
+                                <h3 class="card-title">Patient Information</h3>
+                            </div>
+                            <div class="card-body">
+                                <p><strong>Patient:</strong> {{ dispense.patient.first_name }} {{ dispense.patient.last_name }}</p>
+                                <p><strong>Patient Number:</strong> {{ dispense.patient.patient_number or 'N/A' }}</p>
+                                <p><strong>Status:</strong> <span class="badge badge-{{ 'warning' if dispense.status == 'DRAFT' else 'success' }}">{{ dispense.status }}</span></p>
+                                <p><strong>Payment:</strong> {{ dispense.payment_type or 'N/A' }}</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Dispense Items -->
+                        <div class="card card-info">
+                            <div class="card-header">
+                                <h3 class="card-title">Dispense Items</h3>
+                            </div>
+                            <div class="card-body">
+                                {% if dispense.status == 'DRAFT' %}
+                                <form method="POST" action="{{ url_for('pharmacy_dispense_add_item_ui', dispense_id=dispense.id) }}">
+                                    <div class="row">
+                                        <div class="col-md-5">
+                                            <div class="form-group">
+                                                <label>Drug</label>
+                                                <select class="form-control" name="drug_id" required>
+                                                    <option value="">Select Drug</option>
+                                                    {% for drug in drugs %}
+                                                    <option value="{{ drug.id }}">{{ drug.generic_name }} - {{ drug.dosage_form.name if drug.dosage_form else '' }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <div class="form-group">
+                                                <label>Quantity</label>
+                                                <input type="number" class="form-control" name="qty_dispensed" required min="1" value="1">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-5">
+                                            <div class="form-group">
+                                                <label>Instructions</label>
+                                                <input type="text" class="form-control" name="dosage_instructions" placeholder="e.g., Take 1 tablet tds">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-info">Add Item</button>
+                                </form>
+                                {% endif %}
+                                
+                                {% if dispense.items %}
+                                <table class="table table-sm mt-3">
+                                    <thead>
+                                        <tr>
+                                            <th>Drug</th>
+                                            <th>Qty</th>
+                                            <th>Unit Price</th>
+                                            <th>Total</th>
+                                            <th>Instructions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in dispense.items %}
+                                        <tr>
+                                            <td>{{ item.drug.generic_name if item.drug else 'N/A' }}</td>
+                                            <td>{{ item.qty_dispensed }}</td>
+                                            <td>GHS {{ "%.2f"|format(item.unit_selling_price) if item.unit_selling_price else '0.00' }}</td>
+                                            <td>GHS {{ "%.2f"|format(item.total_amount) if item.total_amount else '0.00' }}</td>
+                                            <td>{{ item.dosage_instructions or '-' }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr>
+                                            <th colspan="3">Total</th>
+                                            <th>GHS 
+                                                {% set total = namespace(value=0) %}
+                                                {% for item in dispense.items %}
+                                                    {% if item.total_amount %}
+                                                        {% set total.value = total.value + item.total_amount %}
+                                                    {% endif %}
+                                                {% endfor %}
+                                                {{ "%.2f"|format(total.value) }}
+                                            </th>
+                                            <th></th>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                                {% else %}
+                                <p class="text-muted">No items added yet.</p>
+                                {% endif %}
+                            </div>
+                            
+                            {% if dispense.status == 'DRAFT' and dispense.items %}
+                            <div class="card-footer">
+                                <form method="POST" action="{{ url_for('pharmacy_dispense_finalize_ui', dispense_id=dispense.id) }}" style="display: inline;" onsubmit="return confirm('Finalize dispense? This will deduct stock.');">
+                                    {% with %}
+                                    {% set can_view_cost = False %}
+                                    {% endwith %}
+                                    <button type="submit" class="btn btn-success" onclick="return confirm('Finalize dispense? This will deduct stock.')">
+                                        <i class="fas fa-check mr-1"></i> Finalize & Dispense
+                                    </button>
+                                </form>
+                                <a href="{{ url_for('pharmacy_dispense_slip', dispense_id=dispense.id) }}" class="btn btn-secondary" target="_blank">
+                                    <i class="fas fa-print mr-1"></i> Preview Slip
+                                </a>
+                            </div>
+                            {% endif %}
+                            
+                            {% if dispense.status == 'DISPENSED' %}
+                            <div class="card-footer">
+                                <a href="{{ url_for('pharmacy_dispense_slip', dispense_id=dispense.id) }}" class="btn btn-primary" target="_blank">
+                                    <i class="fas fa-print mr-1"></i> Print Dispense Slip
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4">
+                        <!-- Batches Used -->
+                        {% if dispense.items and dispense.items[0].allocations %}
+                        <div class="card card-warning">
+                            <div class="card-header">
+                                <h3 class="card-title">Batches Used (FEFO)</h3>
+                            </div>
+                            <div class="card-body p-0">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Batch</th>
+                                            <th>Expiry</th>
+                                            <th>Qty</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for item in dispense.items %}
+                                            {% for alloc in item.allocations %}
+                                            <tr>
+                                                <td>{{ alloc.batch.batch_no if alloc.batch else 'N/A' }}</td>
+                                                <td>{{ alloc.batch.expiry_date.strftime('%Y-%m-%d') if alloc.batch and alloc.batch.expiry_date else 'N/A' }}</td>
+                                                <td>{{ alloc.qty_allocated }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+{% endblock %}

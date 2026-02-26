@@ -84,7 +84,7 @@
                                                 <td><strong>{{ procedure.procedure_number }}</strong></td>
                                                 <td>{{ procedure.procedure_name }}</td>
                                                 <td>
-                                                    <a href="{{ url_for('patient_records', patient_id=procedure.patient_id) }}">
+                                                    <a href="{{ url_for('view_patient_records', patient_id=procedure.patient_id) }}">
                                                         {{ procedure.patient.first_name }} {{ procedure.patient.last_name }}
                                                     </a>
                                                 </td>

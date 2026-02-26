@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "includes/sidebar_navbar.html" %}
+
+{# Handle both list and dict schema formats #}
+{% if schema_json is mapping %}
+    {% set _schema = schema_json %}
+{% elif schema_json is sequence and schema_json|length > 0 %}
+    {# Convert list format to dict format #}
+    {% set _fields = {} %}
+    {% for f in schema_json %}
+        {% if f is mapping %}
+            {% set fid = f.field_name or f.code or f.id %}
+            {% if fid %}
+                {% set _ = _fields.update({fid: f}) %}
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+    {% set _schema = {
+        'layout': {'sections': [{'title': 'Results', 'rows': [{'columns': [{'width': 12, 'items': _fields.keys()}]}]}]},
+        'fields': _fields,
+        'rules': {'visibility': []},
+        'calculated': []
+    } %}
+{% else %}
+    {% set _schema = {'layout': {'sections': []}, 'fields': {}, 'rules': {'visibility': []}, 'calculated': []} %}
+{% endif %}
+
+<div class="content-wrapper">
+    <section class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1>Preview: {{ template.name }}</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{{ url_for('lab_templates_list') }}">Templates</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('lab_template_builder', template_id=template.id) }}">{{ template.name }}</a></li>
+                        <li class="breadcrumb-item active">Preview</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="content">
+        <div class="container-fluid">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Simulated Patient Context</h3>
+                </div>
+                <div class="card-body">
+                    <form method="GET" class="form-inline">
+                        <input type="hidden" name="version" value="{{ request.query_params.get('version', '') }}">
+                        <div class="form-group mr-2">
+                            <label class="mr-1">Age (years)</label>
+                            <input type="number" name="age_years" class="form-control form-control-sm" value="{{ (simulated_age_days / 365)|int if simulated_age_days else '' }}" placeholder="e.g. 35">
+                        </div>
+                        <div class="form-group mr-2">
+                            <label class="mr-1">Sex</label>
+                            <select name="sex" class="form-control form-control-sm">
+                                <option value="">Any</option>
+                                <option value="M" {{ 'selected' if simulated_sex == 'M' else '' }}>M</option>
+                                <option value="F" {{ 'selected' if simulated_sex == 'F' else '' }}>F</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-sm btn-primary">Update ref ranges</button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h3 class="card-title">Form Preview (values for display only)</h3>
+                </div>
+                <div class="card-body" id="preview-form">
+                    {% for section in (_schema.layout.sections or []) %}
+                    <div class="mb-4">
+                        <h5 class="border-bottom pb-2">{{ section.title or 'Results' }}</h5>
+                        <div class="row">
+                            {% for row in (section.rows or []) %}
+                            {% for col in (row.columns or []) %}
+                            <div class="col-md-{{ col.width or 12 }}">
+                                {% for fid in (col['items'] or []) %}
+                                {% set fld = _schema.fields.get(fid) %}
+                                {% if fld %}
+                                <div class="form-group">
+                                    <label>{{ fld.label }}{% if fld.required %} *{% endif %}</label>
+                                    {% if fld.type == 'numeric' %}
+                                    <input type="number" class="form-control preview-numeric" data-code="{{ fld.code }}"
+                                           step="{{ 0.1 if fld.decimals else 1 }}"
+                                           {% if ref_ranges.get(fld.code) %}data-ref-low="{{ ref_ranges[fld.code].low }}" data-ref-high="{{ ref_ranges[fld.code].high }}"{% endif %}
+                                           {% if fld.critical %}data-crit-low="{{ fld.critical.low }}" data-crit-high="{{ fld.critical.high }}"{% endif %}>
+                                    <small class="text-muted">{% if fld.unit %}{{ fld.unit }}{% endif %}
+                                    {% if ref_ranges.get(fld.code) %} (Ref: {{ ref_ranges[fld.code].low }}-{{ ref_ranges[fld.code].high }}){% endif %}</small>
+                                    {% elif fld.type == 'choice' %}
+                                    <select class="form-control">
+                                        <option value="">-- Select --</option>
+                                        {% for opt in (fld.options or option_sets.get(fld.optionSet, [])) %}
+                                        <option value="{{ opt }}">{{ opt }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    {% else %}
+                                    <input type="text" class="form-control" readonly placeholder="({{ fld.type }})">
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {% endfor %}
+                            </div>
+                            {% endfor %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+<script>
+document.querySelectorAll('.preview-numeric').forEach(function(inp) {
+    inp.addEventListener('input', function() {
+        var v = parseFloat(this.value);
+        if (isNaN(v)) { this.classList.remove('border-danger', 'border-warning'); return; }
+        var low = parseFloat(this.dataset.refLow), high = parseFloat(this.dataset.refHigh);
+        var clow = parseFloat(this.dataset.critLow), chigh = parseFloat(this.dataset.critHigh);
+        this.classList.remove('border-danger', 'border-warning');
+        if ((clow !== undefined && v <= clow) || (chigh !== undefined && v >= chigh))
+            this.classList.add('border-danger');
+        else if ((low !== undefined && v < low) || (high !== undefined && v > high))
+            this.classList.add('border-warning');
+    });
+});
+</script>
+{% endblock %}

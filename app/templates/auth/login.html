@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% if hospital_settings %}{{ hospital_settings.hospital_name }}{% else %}LHIMS{% endif %} - Login</title>
+    <title>{% if hospital_settings %}{{ hospital_settings.hospital_name }}{% else %}MedFlow{% endif %} - Login</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #f3f4f6; font-family: 'Inter', sans-serif; }
@@ -15,10 +15,10 @@
         <!-- Hospital Logo and Name -->
         <div class="text-center mb-6">
             {% if hospital_settings and hospital_settings.logo_url %}
-            <img src="{{ hospital_settings.logo_url }}" alt="Hospital Logo" class="mx-auto mb-4" style="max-height: 80px; max-width: 200px;">
+            <img src="{{ hospital_settings.logo_url|normalize_logo_url }}" alt="Hospital Logo" class="mx-auto mb-4" style="max-height: 80px; max-width: 200px;">
             {% endif %}
             <h2 class="text-3xl font-extrabold text-gray-900">
-                {% if hospital_settings %}{{ hospital_settings.hospital_name }}{% else %}LHIMS{% endif %}
+                {% if hospital_settings %}{{ hospital_settings.hospital_name }}{% else %}MedFlow{% endif %}
             </h2>
             {% if hospital_settings and hospital_settings.hospital_address %}
             <p class="text-sm text-gray-600 mt-2">{{ hospital_settings.hospital_address }}</p>

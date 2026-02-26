@@ -1,4 +1,6 @@
+import uuid
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, Numeric
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -38,6 +40,10 @@ class LabTest(Base):
     
     # Restrictions
     is_specialized = Column(Boolean, default=False)  # Is this a specialized test (requires doctor approval)
+
+    # Template mapping (for structured result entry)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("lab_templates.id", ondelete="SET NULL"), nullable=True)
+    template_version = Column(Integer, nullable=True)  # If null, use latest published
     
     # Status
     is_active = Column(Boolean, default=True)  # Is test active
@@ -48,6 +54,7 @@ class LabTest(Base):
     
     # Relationships
     reference_ranges = relationship("ReferenceRange", back_populates="test")
+    lab_orders = relationship("LabOrder", back_populates="lab_test")  # Link to lab orders
     
     def __repr__(self):
         return f"<LabTest(id={self.id}, test_name='{self.test_name}')>"
