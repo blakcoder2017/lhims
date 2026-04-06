@@ -15,6 +15,7 @@ class AppointmentType(str, enum.Enum):
     RADIOLOGY = "radiology"
     OTHER = "other"
     WALK_IN = "walk_in"
+    SCHEDULED = "scheduled"
 
 
 class AppointmentStatus(str, enum.Enum):
@@ -67,12 +68,12 @@ class ScheduledAppointment(Base):
         self.scheduled_date = value
     
     # Appointment Details
-    appointment_type = Column(Enum(AppointmentType), nullable=False, default=AppointmentType.CONSULTATION)
+    appointment_type = Column(Enum(AppointmentType, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=AppointmentType.CONSULTATION)
     reason_complaint = Column(Text, nullable=True)  # Reason for appointment
     notes = Column(Text, nullable=True)  # Additional notes
     
     # Status and Management
-    status = Column(Enum(AppointmentStatus), nullable=False, default=AppointmentStatus.SCHEDULED)
+    status = Column(Enum(AppointmentStatus, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=AppointmentStatus.SCHEDULED)
     priority = Column(Integer, default=5)  # 1-10 scale, 1 being highest priority
     
     # Timestamps

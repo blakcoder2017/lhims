@@ -7,9 +7,10 @@ import enum
 
 class PaymentMechanism(str, enum.Enum):
     """Payment mechanism enumeration for Financial Screening (Workflow Step 3)"""
-    CASH = "cash"
-    NHIS = "nhis"  # National Health Insurance Scheme
-    PRIVATE_INSURANCE = "private_insurance"
+    CASH = "CASH"
+    NHIS = "NHIS"  # National Health Insurance Scheme
+    PRIVATE_INSURANCE = "PRIVATE_INSURANCE"
+    SELF_PAY = "SELF_PAY"
 
 
 class Patient(Base):
@@ -30,7 +31,7 @@ class Patient(Base):
     address = Column(String)
     
     # Financial Screening (Workflow Step 3: Financial Screening)
-    payment_mechanism = Column(Enum(PaymentMechanism), nullable=True)  # Cash, NHIS, Private Insurance
+    payment_mechanism = Column(Enum(PaymentMechanism, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=True)  # Cash, NHIS, Private Insurance
     nhis_number = Column(String, index=True, nullable=True)  # NHIS membership number if applicable
     nhis_expiry_date = Column(Date, nullable=True)  # NHIS card expiry - for validity display
     insurance_provider = Column(String, nullable=True)  # Private insurance provider name
@@ -57,6 +58,7 @@ class Patient(Base):
     radiology_orders = relationship("RadiologyOrder", back_populates="patient")
     antenatal_visits = relationship("AntenatalVisit", back_populates="patient", foreign_keys="AntenatalVisit.patient_id")
     birth_records_as_mother = relationship("BirthRecord", back_populates="mother", foreign_keys="BirthRecord.mother_patient_id")
+    direct_service_registrations = relationship("DirectServiceRegistration", back_populates="patient")
 
     def __repr__(self):
         return f"<Patient(id={self.id}, name='{self.first_name} {self.last_name}')>"

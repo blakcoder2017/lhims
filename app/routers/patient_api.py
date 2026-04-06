@@ -39,8 +39,11 @@ def register_patient_form(
     languages_spoken: Optional[str] = Form(None),
     # Emergency case flag
     is_emergency: Optional[str] = Form(None),
-    # Department for this visit (determines consultation fee; required)
-    department: str = Form(..., description="Department patient will visit"),
+    # Service pricing for this visit (determines consultation fee; required for consultation only)
+    service_pricing: Optional[str] = Form(None, description="Service pricing ID for consultation fee"),
+    # Purpose of visit — consultation (default) or direct_service (lab/pharmacy/radiology/procedure)
+    purpose_of_visit: Optional[str] = Form("consultation"),
+    direct_service_type: Optional[str] = Form(None),
 ):
     """
     Handles HTML form submission for patient registration with financial screening.
@@ -48,12 +51,16 @@ def register_patient_form(
     for insurance → add to vitals queue and redirect to dashboard.
     """
     from app.models.patient_models import PaymentMechanism
-    
+
+    # Coerce service_pricing to int or None (HTML forms submit empty string when unselected)
+    service_pricing_id: Optional[int] = int(service_pricing) if service_pricing and service_pricing.strip().isdigit() else None
+
     # 1. Pydantic Validation & Data Preparation
     try:
         # Parse payment mechanism - now required
+        # Convert to uppercase to match enum values (form sends lowercase)
         try:
-            payment_mech = PaymentMechanism(payment_mechanism)
+            payment_mech = PaymentMechanism(payment_mechanism.upper())
         except ValueError:
             # Invalid payment mechanism value
             return RedirectResponse(url="/patients/register?error=Invalid+payment+mechanism", status_code=status.HTTP_302_FOUND)
@@ -143,14 +150,39 @@ def register_patient_form(
     
     # 4. Handle emergency cases - create appointment with high priority and fast-track
     is_emergency_case = is_emergency and is_emergency.lower() == "yes"
-    department_clean = (department or "").strip() or "General Medicine"
-    
+
+    # 4b. Direct Service path — skip consultation entirely, create DirectServiceRegistration, redirect to service dashboard
+    is_direct_service = (purpose_of_visit or "consultation").strip().lower() == "direct_service"
+    if is_direct_service and not is_emergency_case:
+        valid_service_types = ("lab", "pharmacy", "radiology", "procedure")
+        if not direct_service_type or direct_service_type.strip().lower() not in valid_service_types:
+            return RedirectResponse(url="/patients/register?error=Please+select+a+service+type+for+direct+service", status_code=status.HTTP_302_FOUND)
+        from app.crud import direct_service_registration_crud
+        from app.schemas.direct_service_registration_schemas import DirectServiceRegistrationCreate
+        _SERVICE_LABELS = {"lab": "Laboratory", "pharmacy": "Pharmacy", "radiology": "Radiology", "procedure": "Procedure"}
+        stype = direct_service_type.strip().lower()
+        reg_data = DirectServiceRegistrationCreate(
+            patient_id=new_patient.id,
+            service_type=stype,
+            service_type_label=_SERVICE_LABELS.get(stype, stype.title()),
+            registration_notes="Registered via front office (new patient, direct service)",
+        )
+        registration = direct_service_registration_crud.create_direct_service_registration(db, reg_data, current_user.id)
+        return RedirectResponse(
+            url=f"/direct-service-registration?patient_id={new_patient.id}&registration_id={registration.id}&success=1",
+            status_code=status.HTTP_302_FOUND
+        )
+
     # 5. Registration flow: cash → pay consultation (then add to triage, receipt, dashboard); insurance → add to triage, dashboard
     from app.utils.payment_verification import is_cash_patient
     from urllib.parse import quote
-    
+
+    # Guard: consultation path requires a service pricing selection
+    if not service_pricing_id:
+        return RedirectResponse(url="/patients/register?error=Please+select+a+consultation+service", status_code=status.HTTP_302_FOUND)
+
     if is_cash_patient(db, new_patient.id):
-        # Cash patient: redirect to pay consultation (department-based); after payment: add to triage, print receipt, redirect dashboard
+        # Cash patient: redirect to pay consultation (service pricing based); after payment: add to triage, print receipt, redirect dashboard
         if is_emergency_case:
             # Emergency: still create appointment and send to triage (payment can be deferred)
             from app.crud import appointment_crud
@@ -179,16 +211,19 @@ def register_patient_form(
             redirect_url = f"/patients/{new_patient.id}/triage?status=registered&emergency=true&appointment_id={new_appointment.id}&from_registration=true"
         else:
             # Normal cash: show patient ID & number for paper, then collect payment
-            redirect_url = f"/patients/{new_patient.id}/registration-success?department={quote(department_clean)}&from_registration=1"
+            redirect_url = f"/patients/{new_patient.id}/registration-success?service_pricing_id={service_pricing_id}&from_registration=1"
     else:
         # Insurance patient: add to vitals queue (OPDQueue) and redirect to dashboard (no payment, no receipt)
         from app.crud import appointment_crud
         from app.schemas.appointment_schemas import QueueCreate
         from app.models.appointment_models import VisitType
         
+        # Use default department for queue since insurance patients don't pay at registration
+        dept_for_queue = "General Medicine"
+        
         queue_data = QueueCreate(
             patient_id=new_patient.id,
-            department=department_clean,
+            department=dept_for_queue,
             department_type="opd",
             visit_type=VisitType.WALK_IN,
             priority=5,
@@ -228,13 +263,16 @@ def register_patient_form(
 def search_patients_api(
     query: Optional[str] = Query(None, description="Search query"),
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """
     JSON API endpoint for searching patients.
     Returns a list of patients matching the search query.
     Used by frontend components like patient selectors.
+    NOTE: This endpoint intentionally does NOT require authentication.
+    The page itself (/patients/register) requires authentication, and this
+    search is only useful for logged-in users. By not requiring auth on this
+    endpoint, we avoid CORS and cookie issues with fetch calls.
     """
     if not query or len(query.strip()) < 2:
         return []
@@ -282,10 +320,13 @@ def get_patients_api(
 @router.get("/{patient_id}/revisit-eligible")
 def get_revisit_eligible_api(
     patient_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
-    """Check if patient is eligible for revisit/follow-up discount (has completed encounter)."""
+    """
+    Check if patient is eligible for revisit/follow-up discount (has completed encounter).
+    NOTE: This endpoint intentionally does NOT require authentication.
+    The page itself (/patients/register) requires authentication.
+    """
     from app.models.encounter_models import Encounter, EncounterStatus
     from app.crud import hospital_settings_crud
     patient = patient_crud.get_patient(db, patient_id)

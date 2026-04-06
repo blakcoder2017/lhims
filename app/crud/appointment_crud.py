@@ -6,6 +6,7 @@ from app.models.appointment_models import OPDQueue, QueueStatus, VisitType
 from app.schemas.appointment_schemas import QueueCreate, QueueUpdate, AppointmentCreate, AppointmentUpdate
 from app.models.scheduled_appointment_models import ScheduledAppointment, AppointmentStatus, AppointmentType
 from app.models.patient_models import Patient
+from app.models.triage_models import TriageVitals
 
 
 def create_queue_entry(db: Session, queue_data: QueueCreate) -> OPDQueue:
@@ -334,4 +335,80 @@ def get_appointments_by_patient(db: Session, patient_id: int) -> List[ScheduledA
         ScheduledAppointment.patient_id == patient_id,
         ScheduledAppointment.is_active == True
     ).order_by(desc(ScheduledAppointment.scheduled_date)).all()
+
+
+def auto_clear_stale_vitals_queue(
+    db: Session, 
+    hours_threshold: int = 48,
+    dry_run: bool = False
+) -> Tuple[int, List[dict]]:
+    """
+    Auto-clear patients from vitals queue who have not had vitals recorded 
+    after a specified time threshold (default 48 hours).
+    
+    This function:
+    1. Finds queue entries where status is WAITING or IN_PROGRESS
+    2. Checks if the queue entry is older than the threshold (default 48 hours)
+    3. Checks if any vitals were recorded for that patient after the queue entry was created
+    4. If no vitals recorded, marks the queue entry as NO_SHOW
+    
+    Args:
+        db: Database session
+        hours_threshold: Hours after which to clear stale entries (default 48)
+        dry_run: If True, only return the entries that would be cleared without actually clearing them
+    
+    Returns:
+        Tuple of (count of cleared entries, list of details)
+    """
+    from datetime import datetime, timedelta
+    
+    # Calculate the threshold time
+    threshold_time = datetime.now() - timedelta(hours=hours_threshold)
+    
+    # Find all active queue entries that are WAITING or IN_PROGRESS
+    # and were created before the threshold
+    stale_queue_entries = db.query(OPDQueue).options(
+        joinedload(OPDQueue.patient)
+    ).filter(
+        OPDQueue.created_at < threshold_time,
+        OPDQueue.status.in_([
+            QueueStatus.WAITING.value,
+            QueueStatus.IN_PROGRESS.value
+        ]),
+        OPDQueue.is_active == True
+    ).all()
+    
+    cleared_entries = []
+    cleared_count = 0
+    
+    for queue_entry in stale_queue_entries:
+        # Check if any vitals were recorded for this patient after the queue entry was created
+        vitals_recorded = db.query(TriageVitals).filter(
+            TriageVitals.patient_id == queue_entry.patient_id,
+            TriageVitals.recorded_at > queue_entry.created_at
+        ).first()
+        
+        # If no vitals recorded after queue entry was created, mark as NO_SHOW
+        if not vitals_recorded:
+            entry_details = {
+                "queue_id": queue_entry.id,
+                "patient_id": queue_entry.patient_id,
+                "patient_name": f"{queue_entry.patient.first_name} {queue_entry.patient.last_name}" if queue_entry.patient else "Unknown",
+                "patient_number": queue_entry.patient.patient_number if queue_entry.patient else "Unknown",
+                "created_at": queue_entry.created_at.isoformat() if queue_entry.created_at else None,
+                "status": queue_entry.status.value,
+                "department": queue_entry.department
+            }
+            
+            if not dry_run:
+                # Mark as NO_SHOW
+                queue_entry.status = QueueStatus.NO_SHOW
+                queue_entry.notes = (queue_entry.notes or "") + f" [Auto-cleared: No vitals recorded after {hours_threshold} hours]"
+                db.commit()
+                db.refresh(queue_entry)
+            
+            cleared_entries.append(entry_details)
+            cleared_count += 1
+    
+    return cleared_count, cleared_entries
 

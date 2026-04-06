@@ -74,6 +74,7 @@ def pharmacy_ghana_dashboard(
         "stores": stores,
         "drugs_count": drugs_count,
         "can_view_cost": _can_view_cost(db, current_user.role.name),
+        "hospital_settings": hospital_settings_crud.get_hospital_settings(db),
     }
     return templates.TemplateResponse("pharmacy_ghana/dashboard.html", context)
 
@@ -226,6 +227,8 @@ def pharmacy_ghana_near_expiry(
     batches = q.all()
     stores = db.query(PharmacyStore).all()
     
+    from app.crud import hospital_settings_crud
+    
     context = {
         "request": request,
         "title": f"Near Expiry (within {days} days)",
@@ -235,6 +238,7 @@ def pharmacy_ghana_near_expiry(
         "stores": stores,
         "days": days,
         "store_id": store_id,
+        "hospital_settings": hospital_settings_crud.get_hospital_settings(db),
     }
     return templates.TemplateResponse("pharmacy_ghana/near_expiry.html", context)
 
@@ -269,6 +273,8 @@ def pharmacy_ghana_controlled_register(
         .all()
     )
     
+    from app.crud import hospital_settings_crud
+    
     context = {
         "request": request,
         "title": "Controlled Drugs Register",
@@ -277,6 +283,7 @@ def pharmacy_ghana_controlled_register(
         "items": items,
         "from_date": f,
         "to_date": t,
+        "hospital_settings": hospital_settings_crud.get_hospital_settings(db),
     }
     return templates.TemplateResponse("pharmacy_ghana/controlled_register.html", context)
 
@@ -759,6 +766,43 @@ async def pharmacy_dispense_finalize_ui(
     if not dispense:
         return RedirectResponse(url=f"/pharmacy/ghana/prescriptions?error=Dispense+not+found+or+already+finalized", status_code=302)
     
+    # Check payment verification before finalizing dispense
+    if dispense.patient_id:
+        from app.utils.payment_verification import requires_payment_before_service
+        from app.models.billing_models import Charge, Invoice, ChargeType
+        
+        payment_required = requires_payment_before_service(db, dispense.patient_id, ChargeType.PHARMACY)
+        
+        if payment_required:
+            # For OPD cash patients, check if there's an unpaid charge for any prescription in this dispense
+            prescription_ids = [item.prescription_id for item in dispense.items if item.prescription_id]
+            if prescription_ids:
+                charges = db.query(Charge).filter(
+                    Charge.prescription_id.in_(prescription_ids),
+                    Charge.charge_type == ChargeType.PHARMACY
+                ).all()
+                
+                # Block if payment required but no charges exist
+                if not charges:
+                    return RedirectResponse(
+                        url=f"/pharmacy/ghana/prescriptions?error=Payment+required+-+No+charges+found.+Please+visit+billing+first.",
+                        status_code=302
+                    )
+                
+                # Check for unpaid balance
+                unpaid_balance = 0
+                for charge in charges:
+                    if charge.invoice_id:
+                        invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
+                        if invoice and invoice.balance > 0:
+                            unpaid_balance += float(invoice.balance)
+                
+                if unpaid_balance > 0:
+                    return RedirectResponse(
+                        url=f"/pharmacy/ghana/prescriptions?error=Payment+required+-+Unpaid+balance+GHS+{unpaid_balance}",
+                        status_code=302
+                    )
+    
     # Check for drug interactions (same logic as API)
     if dispense.patient_id and dispense.items:
         from app.models.encounter_models import Prescription, Encounter
@@ -1059,7 +1103,7 @@ def dispense_patient_prescriptions(
             ).order_by(PharmacyBatch.expiry_date.asc()).all()
             
             default_price = fefo_batches[0].selling_price if fefo_batches else None
-            stock_check = {"available": sum(b.qty_on_hand for b in fefo_batches)} if fefo_batches else {"available": 0}
+            stock_check = {"available": float(sum(b.qty_on_hand for b in fefo_batches))} if fefo_batches else {"available": 0}
             
             prescriptions_with_stock.append({
                 "prescription": prescription,
@@ -1109,6 +1153,7 @@ def dispense_patient_prescriptions(
         "request": request,
         "title": f"Dispense All Prescriptions - {patient.first_name} {patient.last_name}",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         "patient": patient,
         "prescriptions_with_stock": prescriptions_with_stock,
         "drug_interactions": drug_interactions,
@@ -1262,11 +1307,11 @@ async def create_dispense_for_patient(
             # Update existing charge with new quantity
             existing_charge.quantity = qty
             existing_charge.unit_price = unit_price
-            existing_charge.amount = qty * unit_price
+            existing_charge.total_amount = qty * unit_price
             existing_charge.description = f"Medication: {prescription.medication_name} ({qty} units @ GHS {float(unit_price)})"
             
             # Recalculate totals
-            subtotal = existing_charge.amount - existing_charge.discount
+            subtotal = existing_charge.total_amount - existing_charge.discount
             tax_amount = subtotal * (existing_charge.tax_rate / Decimal('100')) if existing_charge.tax_rate else Decimal('0')
             existing_charge.tax_amount = tax_amount
             existing_charge.total_amount = subtotal + tax_amount
@@ -1277,7 +1322,7 @@ async def create_dispense_for_patient(
                 if invoice:
                     # Recalculate entire invoice
                     all_charges = db.query(Charge).filter(Charge.invoice_id == invoice.id).all()
-                    invoice.subtotal = sum(float(c.amount) for c in all_charges)
+                    invoice.subtotal = sum(float(c.total_amount) for c in all_charges)
                     invoice.tax_amount = sum(float(c.tax_amount) for c in all_charges)
                     invoice.total_amount = invoice.subtotal - float(invoice.discount_amount) + invoice.tax_amount
                     invoice.balance = invoice.total_amount - float(invoice.paid_amount)
@@ -1287,16 +1332,12 @@ async def create_dispense_for_patient(
                 encounter_id=prescription.encounter_id,
                 prescription_id=prescription.id,
                 charge_type=ChargeType.PHARMACY,
-                service_name=prescription.medication_name,
                 quantity=qty,
                 unit_price=unit_price,
-                amount=qty * unit_price,
+                total_amount=Decimal(str(qty * unit_price)),
                 tax_rate=Decimal('0'),
                 tax_amount=Decimal('0'),
-                total_amount=Decimal(str(qty * unit_price)),
                 description=f"Medication: {prescription.medication_name} ({qty} units @ GHS {float(unit_price)})",
-                status="Pending",
-                created_by=current_user.id
             )
             db.add(charge)
     
@@ -1316,6 +1357,13 @@ async def create_dispense_for_patient(
             Charge.prescription_id.in_(prescription_ids_list),
             Charge.charge_type == ChargeType.PHARMACY
         ).all()
+        
+        # Block if payment required but no charges exist
+        if not charges:
+            return RedirectResponse(
+                url=f"/pharmacy/ghana/prescriptions/by-patient/{patient_id}?error=Payment+required+-+No+charges+found.+Please+visit+billing+first.",
+                status_code=302
+            )
         
         unpaid_balance = 0
         for charge in charges:
@@ -1385,15 +1433,28 @@ def pending_prescriptions(
     from app.models.encounter_models import Prescription, Encounter, OrderStatus
     from app.models.patient_models import Patient
     
-    query = db.query(Prescription).join(Encounter).join(Patient)
+    # Use outerjoin to include walk-in prescriptions (encounter_id = None)
+    # Join Patient via both paths: directly (walk-in) and through encounter (regular)
+    query = db.query(Prescription).outerjoin(
+        Encounter, Prescription.encounter_id == Encounter.id
+    ).outerjoin(
+        Patient, Patient.id == Prescription.patient_id  # Direct patient link for walk-in
+    )
     
     # Filter by patient_number if provided (e.g., DGMS000019)
     if patient_number and patient_number.strip():
         query = query.filter(Patient.patient_number.ilike(f"%{patient_number.strip()}%"))
     
-    # Filter by patient id if provided
+    # Filter by patient id if provided - handle both walk-in and regular prescriptions
     if patient_id:
-        query = query.filter(Encounter.patient_id == patient_id)
+        # For walk-in: check Prescription.patient_id, for regular: check Encounter.patient_id
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                Prescription.patient_id == patient_id,
+                Encounter.patient_id == patient_id
+            )
+        )
     
     # Filter by encounter if provided (handle empty string)
     if encounter_id and encounter_id.strip():
@@ -1423,6 +1484,7 @@ def pending_prescriptions(
         "request": request,
         "title": "Pending Prescriptions",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         "prescriptions": prescriptions,
         "status_filter": status_filter,
         "patient_id": patient_id,
@@ -1457,7 +1519,7 @@ def dispense_prescription_page(
     prescription = db.query(Prescription).options(
         joinedload(Prescription.encounter).joinedload(Encounter.patient),
         joinedload(Prescription.prescribed_by),
-        joinedload(Prescription.pharmacy_drug).joinedload(PharmacyDrug.dosage_form)
+        joinedload(Prescription.pharmacy_drug),
     ).filter(Prescription.id == prescription_id).first()
     
     if not prescription:
@@ -1465,13 +1527,12 @@ def dispense_prescription_page(
     
     patient = prescription.encounter.patient if prescription.encounter else None
     
-    # Get FEFO batches for this drug
+    # Get FEFO batches for the drug
     fefo_batches = []
-    stock_check = None
+    stock_check = {"available": 0}
     default_price = None
     
     if prescription.pharmacy_drug_id:
-        # Use Ghana pharmacy system
         fefo_batches = db.query(PharmacyBatch).filter(
             PharmacyBatch.drug_id == prescription.pharmacy_drug_id,
             PharmacyBatch.status == "ACTIVE",
@@ -1479,58 +1540,34 @@ def dispense_prescription_page(
             PharmacyBatch.qty_on_hand > 0
         ).order_by(PharmacyBatch.expiry_date.asc()).all()
         
-        if fefo_batches:
-            default_price = fefo_batches[0].selling_price
-            stock_check = {"available": sum(b.qty_on_hand for b in fefo_batches)}
-    elif prescription.medication_id:
-        # Fallback to legacy inventory
-        from app.models.inventory_models import Medication
-        medication = db.query(Medication).filter(Medication.id == prescription.medication_id).first()
-        if medication:
-            stock_check = inventory_crud.check_stock_availability(
-                db, medication.id, prescription.quantity or 1
-            )
+        stock_check = {"available": float(sum(b.qty_on_hand for b in fefo_batches))}
+        default_price = fefo_batches[0].selling_price if fefo_batches else None
     
     # Check drug interactions
     drug_interactions = []
-    if prescription.pharmacy_drug_id and patient:
-        # Get other active prescriptions for this patient
-        other_prescriptions = db.query(Prescription).join(Encounter).filter(
-            Encounter.patient_id == patient.id,
-            Prescription.id != prescription_id,
-            Prescription.status.in_([OrderStatus.PENDING, OrderStatus.IN_PROGRESS, OrderStatus.COMPLETED])
+    if prescription.pharmacy_drug_id:
+        interactions = db.query(PharmacyDrugInteraction).filter(
+            or_(
+                PharmacyDrugInteraction.drug_a_id == prescription.pharmacy_drug_id,
+                PharmacyDrugInteraction.drug_b_id == prescription.pharmacy_drug_id
+            ),
+            PharmacyDrugInteraction.is_active == True
         ).all()
         
-        other_drug_ids = []
-        for op in other_prescriptions:
-            if op.pharmacy_drug_id:
-                other_drug_ids.append(op.pharmacy_drug_id)
-        
-        if other_drug_ids:
-            interactions = db.query(PharmacyDrugInteraction).filter(
-                or_(
-                    and_(PharmacyDrugInteraction.drug_a_id == prescription.pharmacy_drug_id,
-                         PharmacyDrugInteraction.drug_b_id.in_(other_drug_ids)),
-                    and_(PharmacyDrugInteraction.drug_b_id == prescription.pharmacy_drug_id,
-                         PharmacyDrugInteraction.drug_a_id.in_(other_drug_ids))
-                ),
-                PharmacyDrugInteraction.is_active == True
-            ).all()
+        for inter in interactions:
+            other_drug = None
+            if inter.drug_a_id == prescription.pharmacy_drug_id:
+                other_drug = db.query(PharmacyDrug).filter(PharmacyDrug.id == inter.drug_b_id).first()
+            else:
+                other_drug = db.query(PharmacyDrug).filter(PharmacyDrug.id == inter.drug_a_id).first()
             
-            for inter in interactions:
-                other_drug = None
-                if inter.drug_a_id == prescription.pharmacy_drug_id:
-                    other_drug = db.query(PharmacyDrug).filter(PharmacyDrug.id == inter.drug_b_id).first()
-                else:
-                    other_drug = db.query(PharmacyDrug).filter(PharmacyDrug.id == inter.drug_a_id).first()
-                
-                if other_drug:
-                    drug_interactions.append({
-                        "severity": inter.severity,
-                        "other_drug": other_drug.generic_name,
-                        "description": inter.description,
-                        "recommendation": inter.recommendation
-                    })
+            if other_drug:
+                drug_interactions.append({
+                    "severity": inter.severity,
+                    "other_drug": other_drug.generic_name,
+                    "description": inter.description,
+                    "recommendation": inter.recommendation
+                })
     
     # Check payment status - use requires_payment_before_service to properly handle IPD patients
     payment_required = False
@@ -1587,6 +1624,7 @@ def dispense_prescription_page(
         "request": request,
         "title": f"Dispense Prescription #{prescription_id}",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         "prescription": prescription,
         "patient": patient,
         "fefo_batches": fefo_batches,
@@ -1795,7 +1833,9 @@ def dispense_prescription_page(
         
         if fefo_batches:
             default_price = fefo_batches[0].selling_price
-            stock_check = {"available": sum(b.qty_on_hand for b in fefo_batches)}
+            stock_check = {"available": float(sum(b.qty_on_hand for b in fefo_batches))}
+        else:
+            stock_check = {"available": 0}
     elif prescription.medication_id:
         # Fallback to legacy inventory
         from app.models.inventory_models import Medication
@@ -1804,6 +1844,9 @@ def dispense_prescription_page(
             stock_check = inventory_crud.check_stock_availability(
                 db, medication.id, prescription.quantity or 1
             )
+            # Convert StockCheckResponse to dict for template compatibility
+            if stock_check:
+                stock_check = {"available": stock_check.available_quantity}
     
     # Check drug interactions
     drug_interactions = []
@@ -1905,6 +1948,7 @@ def dispense_prescription_page(
         "request": request,
         "title": f"Dispense Prescription #{prescription_id}",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         "prescription": prescription,
         "patient": patient,
         "fefo_batches": fefo_batches,
@@ -1968,6 +2012,13 @@ async def dispense_prescription_ghana(
             Charge.prescription_id == prescription_id,
             Charge.charge_type == ChargeType.PHARMACY
         ).first()
+        
+        # Block if payment required but no charge exists
+        if not charge:
+            return RedirectResponse(
+                url=f"/pharmacy/ghana/prescriptions/{prescription_id}?error=Payment+required+-+No+charge+found.+Please+visit+billing+first.",
+                status_code=302
+            )
         
         if charge:
             invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
@@ -2179,6 +2230,8 @@ def print_dispense_receipt(
     context = {
         "request": request,
         "title": f"Dispense Receipt #{prescription_id}",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
         "prescription": prescription,
         "patient": patient,
         "dispenses": dispenses,
@@ -2268,20 +2321,23 @@ def pharmacy_stock_ledger_report(
         entry.running_balance = running_balances[key]
     
     total_transactions = len(ledger_entries)
-    total_qty_in = sum(e.qty_in for e in ledger_entries if e.qty_in)
-    total_qty_out = sum(e.qty_out for e in ledger_entries if e.qty_out)
-    total_value = sum(
+    total_qty_in = float(sum(e.qty_in for e in ledger_entries if e.qty_in))
+    total_qty_out = float(sum(e.qty_out for e in ledger_entries if e.qty_out))
+    total_value = float(sum(
         (e.selling_price_snapshot or 0) * (e.qty_out or 0) 
         for e in ledger_entries if e.qty_out
-    )
+    ))
     
     drugs = db.query(PharmacyDrug).filter(PharmacyDrug.is_active == True).order_by(PharmacyDrug.generic_name).all()
     stores = db.query(PharmacyStore).order_by(PharmacyStore.name).all()
+    
+    from app.crud import hospital_settings_crud
     
     context = {
         "request": request,
         "title": "Stock Ledger Report",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         "ledger_entries": ledger_entries,
         "drugs": drugs,
         "stores": stores,
@@ -2294,6 +2350,7 @@ def pharmacy_stock_ledger_report(
         "total_qty_in": total_qty_in,
         "total_qty_out": total_qty_out,
         "total_value": round(total_value, 2),
+        "hospital_settings": hospital_settings_crud.get_hospital_settings(db),
     }
     return templates.TemplateResponse("pharmacy_ghana/stock_ledger_report.html", context)
 
@@ -2339,14 +2396,18 @@ def pharmacy_profit_report(
     
     items = query.all()
     
-    total_revenue = sum(i.total_amount for i, d in items if i.total_amount)
-    profit = total_revenue * Decimal('0.25')  # Approximate 25% margin
+    total_revenue = float(sum(i.total_amount for i, d in items if i.total_amount))
+    profit = total_revenue * 0.25  # Approximate 25% margin
     margin = 25.0
+    
+    from app.crud import hospital_settings_crud
+    hospital_settings = hospital_settings_crud.get_hospital_settings(db)
     
     context = {
         "request": request,
         "title": "Profit & Margin Report",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         "items": items,
         "from_date": from_date,
         "to_date": to_date,
@@ -2354,5 +2415,6 @@ def pharmacy_profit_report(
         "total_cost": total_revenue - profit,
         "profit": profit,
         "margin": margin,
+        "hospital_settings": hospital_settings,
     }
     return templates.TemplateResponse("pharmacy_ghana/profit_report.html", context)

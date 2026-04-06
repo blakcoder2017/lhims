@@ -1,8 +1,10 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
+from uuid import UUID
 from app.models.lab_catalog_models import LabTest
 from app.models.lab_models import ReferenceRange
+from app.models.lab_template_models import LabReferenceRange
 from app.models.encounter_models import LabOrder
 from app.schemas.lab_catalog_schemas import LabTestCreate, LabTestUpdate, ReferenceRangeCreate, ReferenceRangeUpdate
 
@@ -233,3 +235,139 @@ def get_all_lab_tests(db: Session, skip: int = 0, limit: int = 100, search: Opti
         query = query.filter(LabTest.test_category == category)
     
     return query.order_by(LabTest.test_name).offset(skip).limit(limit).all()
+
+
+def get_template_reference_ranges(
+    db: Session, 
+    field_code: Optional[str] = None,
+    limit: int = 500
+) -> List[LabReferenceRange]:
+    """Get template field reference ranges (parameter-level reference ranges)"""
+    query = db.query(LabReferenceRange)
+    
+    if field_code:
+        query = query.filter(LabReferenceRange.field_code == field_code)
+    
+    return query.order_by(LabReferenceRange.field_code).limit(limit).all()
+
+
+def get_all_template_field_codes(db: Session) -> set:
+    """Get all unique field codes from published lab template versions"""
+    from app.models.lab_template_models import LabTemplateVersion
+    
+    # Get all published template versions
+    templates = db.query(LabTemplateVersion).filter(
+        LabTemplateVersion.status == "PUBLISHED"
+    ).all()
+    
+    field_codes = set()
+    for template in templates:
+        schema = template.schema_json
+        if schema and "fields" in schema:
+            for field_id, field_def in schema["fields"].items():
+                if isinstance(field_def, dict):
+                    code = field_def.get("code") or field_id
+                    field_codes.add(code)
+    
+    return field_codes
+
+
+def get_missing_reference_ranges(db: Session) -> dict:
+    """
+    Find template field codes that don't have reference ranges defined.
+    Returns a dict with 'all_fields' and 'missing_ranges' lists.
+    """
+    # Get all field codes from templates
+    all_fields = get_all_template_field_codes(db)
+    
+    # Get all field codes that already have reference ranges
+    existing_ranges = db.query(LabReferenceRange.field_code).distinct().all()
+    existing_codes = set([r[0] for r in existing_ranges])
+    
+    # Find missing ones
+    missing_codes = all_fields - existing_codes
+    
+    return {
+        "total_template_fields": len(all_fields),
+        "fields_with_ranges": len(existing_codes),
+        "missing_ranges": sorted(list(missing_codes))
+    }
+
+
+def create_template_reference_range(
+    db: Session,
+    field_code: str,
+    sex: str = "ANY",
+    age_min_days: Optional[int] = None,
+    age_max_days: Optional[int] = None,
+    low: Optional[float] = None,
+    high: Optional[float] = None,
+    critical_low: Optional[float] = None,
+    critical_high: Optional[float] = None,
+    text_range: Optional[str] = None,
+    unit: Optional[str] = None
+) -> LabReferenceRange:
+    """Create a new template reference range"""
+    new_range = LabReferenceRange(
+        field_code=field_code,
+        sex=sex,
+        age_min_days=age_min_days,
+        age_max_days=age_max_days,
+        low=low,
+        high=high,
+        critical_low=critical_low,
+        critical_high=critical_high,
+        text_range=text_range,
+        unit=unit
+    )
+    db.add(new_range)
+    db.commit()
+    db.refresh(new_range)
+    return new_range
+
+
+def update_template_reference_range(
+    db: Session,
+    range_id: UUID,
+    field_code: Optional[str] = None,
+    sex: Optional[str] = None,
+    age_min_days: Optional[int] = None,
+    age_max_days: Optional[int] = None,
+    low: Optional[float] = None,
+    high: Optional[float] = None,
+    critical_low: Optional[float] = None,
+    critical_high: Optional[float] = None,
+    text_range: Optional[str] = None,
+    unit: Optional[str] = None
+) -> Optional[LabReferenceRange]:
+    """Update a template reference range"""
+    from app.models.lab_template_models import LabReferenceRange as LabRefRange
+    
+    range_obj = db.query(LabRefRange).filter(LabRefRange.id == range_id).first()
+    if not range_obj:
+        return None
+    
+    if field_code is not None:
+        range_obj.field_code = field_code
+    if sex is not None:
+        range_obj.sex = sex
+    if age_min_days is not None:
+        range_obj.age_min_days = age_min_days
+    if age_max_days is not None:
+        range_obj.age_max_days = age_max_days
+    if low is not None:
+        range_obj.low = low
+    if high is not None:
+        range_obj.high = high
+    if critical_low is not None:
+        range_obj.critical_low = critical_low
+    if critical_high is not None:
+        range_obj.critical_high = critical_high
+    if text_range is not None:
+        range_obj.text_range = text_range
+    if unit is not None:
+        range_obj.unit = unit
+    
+    db.commit()
+    db.refresh(range_obj)
+    return range_obj

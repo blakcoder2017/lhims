@@ -41,10 +41,12 @@ async def login_post(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
+    next_url: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
-    Handle form-based login. Sets token as HTTP-only cookie and redirects to dashboard.
+    Handle form-based login. Sets token as HTTP-only cookie and redirects.
+    Supports 'next' parameter to redirect back to original URL.
     """
     user = db.query(User).filter(User.username == username).first()
     if not user:
@@ -57,8 +59,14 @@ async def login_post(
     
     access_token = create_access_token(data={"user_id": user.id})
     
+    # Determine redirect URL - use next parameter if provided, otherwise dashboard
+    if next_url:
+        redirect_url = next_url
+    else:
+        redirect_url = request.url_for("dashboard")
+    
     # Create redirect response
-    response = RedirectResponse(url=request.url_for("dashboard"), status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
     
     # Set token as HTTP-only cookie
     response.set_cookie(
@@ -66,7 +74,8 @@ async def login_post(
         value=access_token,
         httponly=True,
         secure=False,  # Set to True in production with HTTPS
-        samesite="lax",
+        samesite="lax",  # Allow cookies for same-site requests including PUT
+        path="/",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
     

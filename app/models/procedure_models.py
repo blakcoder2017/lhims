@@ -49,11 +49,11 @@ class Procedure(Base):
     procedure_number = Column(String(50), unique=True, nullable=False, index=True)  # Unique procedure number
     procedure_name = Column(String(200), nullable=False)  # Name of the procedure
     procedure_code = Column(String(50), nullable=True)  # Procedure code (e.g., CPT, ICD-10-PCS)
-    procedure_type = Column(Enum(ProcedureType), nullable=False)  # Type of procedure
+    procedure_type = Column(Enum(ProcedureType, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False)  # Type of procedure
     description = Column(Text, nullable=True)  # Detailed description
     
     # Status and Timing
-    status = Column(Enum(ProcedureStatus), nullable=False, default=ProcedureStatus.SCHEDULED)
+    status = Column(Enum(ProcedureStatus, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=ProcedureStatus.SCHEDULED)
     scheduled_date = Column(DateTime, nullable=True)  # Scheduled date/time
     start_time = Column(DateTime, nullable=True)  # Actual start time
     end_time = Column(DateTime, nullable=True)  # Actual end time

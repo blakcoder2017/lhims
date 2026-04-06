@@ -8,6 +8,7 @@ from decimal import Decimal
 class LabTestBase(BaseModel):
     test_name: str = Field(..., max_length=255)
     test_code: Optional[str] = Field(None, max_length=50)
+    loinc_code: Optional[str] = Field(None, max_length=20, description="LOINC code for interoperability")
     test_category: Optional[str] = Field(None, max_length=100)
     test_type: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
@@ -30,6 +31,7 @@ class LabTestCreate(LabTestBase):
 class LabTestUpdate(BaseModel):
     test_name: Optional[str] = Field(None, max_length=255)
     test_code: Optional[str] = Field(None, max_length=50)
+    loinc_code: Optional[str] = Field(None, max_length=20)
     test_category: Optional[str] = Field(None, max_length=100)
     test_type: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None

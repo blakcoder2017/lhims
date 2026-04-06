@@ -18,6 +18,7 @@ class LabTest(Base):
     # Test Information
     test_name = Column(String(255), nullable=False, index=True)  # Test name
     test_code = Column(String(50), unique=True, nullable=True, index=True)  # Test code (e.g., LOINC, internal code)
+    loinc_code = Column(String(20), nullable=True, index=True)  # LOINC code for interoperability
     test_category = Column(String(100), nullable=True)  # Category (e.g., Hematology, Chemistry, Microbiology)
     test_type = Column(String(100), nullable=True)  # Type (e.g., Quantitative, Qualitative, Culture)
     

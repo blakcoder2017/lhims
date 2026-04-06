@@ -98,6 +98,8 @@ def search_patients(
                 Patient.national_id.ilike(search_term),
                 Patient.phone_number.ilike(search_term),
                 Patient.patient_number.ilike(search_term),
+                Patient.nhis_number.ilike(search_term),
+                Patient.insurance_policy_number.ilike(search_term),
                 func.concat(Patient.first_name, " ", Patient.last_name).ilike(search_term),
                 func.cast(Patient.id, String).ilike(search_term)  # Search by numeric ID as string
             )

@@ -35,6 +35,7 @@ class DischargeStatus(str, enum.Enum):
     NORMAL = "normal"  # Normal discharge
     DEATH = "death"  # Patient died
     REFERRAL = "referral"  # Referred to another facility
+    ABSCONDED = "absconded"  # Patient absconded
 
 
 class DepartmentType(str, enum.Enum):
@@ -318,7 +319,7 @@ class AdmissionDiagnosis(Base):
     # Diagnosis Details
     diagnosis = Column(Text, nullable=False)  # The diagnosis description
     icd_code = Column(String(20), nullable=True)  # ICD-10 code (optional)
-    diagnosis_type = Column(Enum(DiagnosisType), nullable=False, default=DiagnosisType.ADMISSION)
+    diagnosis_type = Column(Enum(DiagnosisType, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=DiagnosisType.ADMISSION)
     
     # Timestamps
     diagnosed_at = Column(DateTime, server_default=func.now())
@@ -369,13 +370,13 @@ class WoundCare(Base):
     
     # Wound Details
     wound_location = Column(String(200), nullable=False)  # e.g., "Left leg", "Surgical site", "Back"
-    wound_type = Column(Enum(WoundCareType), nullable=False, default=WoundCareType.OTHER)
+    wound_type = Column(Enum(WoundCareType, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=WoundCareType.OTHER)
     wound_description = Column(Text, nullable=True)  # Detailed description of wound
     
     # Care Details
     dressing_date = Column(DateTime, server_default=func.now())
     dressing_type = Column(String(100), nullable=True)  # e.g., "Sterile gauze", "Transparent dressing"
-    wound_condition = Column(Enum(WoundCondition), nullable=True)
+    wound_condition = Column(Enum(WoundCondition, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=True)
     
     # Measurements
     length_cm = Column(Numeric(5, 2), nullable=True)

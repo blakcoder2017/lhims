@@ -11,6 +11,11 @@ class HospitalSettingsBase(BaseModel):
     hospital_website: Optional[str] = None
     logo_path: Optional[str] = None
     logo_url: Optional[str] = None
+    # Laboratory-specific settings
+    lab_contact_email: Optional[EmailStr] = None  # Lab contact email for queries
+    lab_contact_phone: Optional[str] = None  # Lab contact phone
+    accreditation: Optional[str] = None  # Accreditation body name
+    accreditation_number: Optional[str] = None  # ISO/Accreditation number
     # Insurance activation settings
     nhis_enabled: Optional[bool] = True
     private_insurance_enabled: Optional[bool] = True

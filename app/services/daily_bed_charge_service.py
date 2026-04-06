@@ -63,7 +63,7 @@ def generate_daily_bed_charges_for_admission(
         ward_charge_per_day = Decimal(str(admission.ward.charge_per_day))
     
     if ward_charge_per_day > 0:
-        ward_description = f"Ward Charges: {admission.ward.name} ({date_str})"
+        ward_description = f"Admission Fee : {admission.ward.name} ({date_str})"
         
         # Check if ward charge already exists for this date
         existing_ward_charge = db.query(Charge).filter(
@@ -85,33 +85,33 @@ def generate_daily_bed_charges_for_admission(
             ward_charge = billing_crud.add_charge_to_invoice(db, invoice.id, ward_charge_data)
             charges.append(ward_charge)
     
-    # Bed charges
-    bed_charge_per_day = Decimal('0.00')
-    if admission.bed and admission.bed.charge_per_day:
-        bed_charge_per_day = Decimal(str(admission.bed.charge_per_day))
+    # Bed charges - COMMENTED OUT: Patients should not be charged for bed charges
+    # bed_charge_per_day = Decimal('0.00')
+    # if admission.bed and admission.bed.charge_per_day:
+    #     bed_charge_per_day = Decimal(str(admission.bed.charge_per_day))
     
-    if bed_charge_per_day > 0:
-        bed_description = f"Bed Charges: {admission.bed.bed_number} ({date_str})"
-        
-        # Check if bed charge already exists for this date
-        existing_bed_charge = db.query(Charge).filter(
-            Charge.invoice_id == invoice.id,
-            Charge.description == bed_description,
-            Charge.charge_type == ChargeType.ADMISSION
-        ).first()
-        
-        if not existing_bed_charge:
-            bed_charge_data = ChargeCreate(
-                charge_type=ChargeType.ADMISSION,
-                description=bed_description,
-                quantity=1,
-                unit_price=bed_charge_per_day,
-                discount=Decimal('0.00'),
-                tax_rate=Decimal('0.00'),
-                encounter_id=admission.encounter_id,
-            )
-            bed_charge = billing_crud.add_charge_to_invoice(db, invoice.id, bed_charge_data)
-            charges.append(bed_charge)
+    # if bed_charge_per_day > 0:
+    #     bed_description = f"Bed Charges: {admission.bed.bed_number} ({date_str})"
+    #     
+    #     # Check if bed charge already exists for this date
+    #     existing_bed_charge = db.query(Charge).filter(
+    #         Charge.invoice_id == invoice.id,
+    #         Charge.description == bed_description,
+    #         Charge.charge_type == ChargeType.ADMISSION
+    #     ).first()
+    #     
+    #     if not existing_bed_charge:
+    #         bed_charge_data = ChargeCreate(
+    #             charge_type=ChargeType.ADMISSION,
+    #             description=bed_description,
+    #             quantity=1,
+    #             unit_price=bed_charge_per_day,
+    #             discount=Decimal('0.00'),
+    #             tax_rate=Decimal('0.00'),
+    #             encounter_id=admission.encounter_id,
+    #         )
+    #         bed_charge = billing_crud.add_charge_to_invoice(db, invoice.id, bed_charge_data)
+    #         charges.append(bed_charge)
     
     return charges
 

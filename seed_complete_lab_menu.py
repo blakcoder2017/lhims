@@ -180,16 +180,18 @@ def get_test_menu():
             }
         },
         {
-            "test_name": "Hb Electrophoresis",
+            "test_name": "HB ELECTROPHORESIS (HB PHENOTYPE)",
             "test_code": "HBELEC",
             "test_category": "Haematology",
             "test_type": "Qualitative",
             "specimen_type": "EDTA Blood",
-            "description": "Haemoglobin electrophoresis (Hb phenotype)",
+            "description": "Haemoglobin electrophoresis for sickle cell screening and phenotype determination",
             "template": {
                 "discipline": "HEMATOLOGY",
                 "fields": {
-                    "hb_phenotype": {"code": "hb_phenotype", "type": "choice", "label": "Hb Phenotype", 
+                    "sickle_cell_screening": {"code": "sickle_cell_screening", "type": "choice", "label": "Sickle Cell Screening", 
+                                            "options": ["Negative", "Positive", "Not Done"]},
+                    "hb_phenotype": {"code": "hb_phenotype", "type": "choice", "label": "HB-Phenotype", 
                                    "options": ["AA", "AS", "SS", "AC", "SC", "CC", "Other"]}
                 }
             }

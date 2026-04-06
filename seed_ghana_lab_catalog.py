@@ -49,7 +49,6 @@ def create_option_sets(db):
         ("RH_FACTOR", '["Positive", "Negative"]'),
         ("SICKLING_RESULT", '["Positive", "Negative"]'),
         ("HB_PHENOTYPE", '["AA", "AS", "SS", "SC", "AC", "CC", "Other"]'),
-        ("G6PD_RESULT", '["Normal", "Deficient", "Intermediate"]'),
         ("COOMBS_RESULT", '["Positive", "Negative"]'),
         ("MICROSCOPY_HPF", '["0-1", "1-5", "5-10", "10-20", ">20"]'),
         ("MICROSCOPY_LPF", '["0-1", "1-5", "5-10", "10-20", ">20"]'),
@@ -410,8 +409,8 @@ def create_reference_ranges(db):
         ("calcium", "ANY", 0, None, 2.10, 2.55, 1.5, 3.0, "mmol/L"),
         ("magnesium", "ANY", 0, None, 0.66, 1.07, None, None, "mmol/L"),
         ("phosphate", "ANY", 6570, None, 0.81, 1.45, None, None, "mmol/L"),
-        ("uric_acid", "M", 6570, None, 210, 430, None, None, "µmol/L"),
-        ("uric_acid", "F", 6570, None, 140, 360, None, None, "µmol/L"),
+        ("uric_acid", "M", 6570, None, 142, 339, None, None, "µmol/L"),
+        ("uric_acid", "F", 6570, None, 202, 416, None, None, "µmol/L"),
         
         # Hormonal
         ("tsh", "ANY", 6570, None, 0.4, 4.0, None, None, "mIU/L"),

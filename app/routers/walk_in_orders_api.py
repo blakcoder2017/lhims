@@ -16,12 +16,11 @@ from app.core.templates import templates
 from app.models.user_models import User
 from app.models.patient_models import Patient, PaymentMechanism
 from app.models.encounter_models import (
+    Encounter,
     LabOrder,
     RadiologyOrder,
     OrderStatus,
     Prescription,
-    EncounterStatus,
-    Encounter,
 )
 from app.models.procedure_models import Procedure, ProcedureStatus
 from app.models.billing_models import Charge, Invoice
@@ -32,6 +31,8 @@ from app.schemas.encounter_schemas import (
     EncounterCreate,
     EncounterUpdate,
     PrescriptionCreate,
+    PrescriptionListCreate,
+    PrescriptionItemCreate,
 )
 from app.schemas.procedure_schemas import ProcedureCreate
 from app.schemas.patient_schemas import PatientCreate
@@ -356,59 +357,98 @@ def create_walk_in_pharmacy_sale(
     walk_in_first_name: Optional[str] = Form(None),
     walk_in_last_name: Optional[str] = Form(None),
     walk_in_phone: Optional[str] = Form(None),
-    medication_name: str = Form(...),
-    dosage: str = Form(...),
-    frequency: str = Form(...),
-    duration: str = Form(...),
-    quantity: int = Form(1),
-    medication_code: Optional[str] = Form(None),
-    instructions: Optional[str] = Form(None),
+    prescriptions_json: str = Form(...),
 ):
-    """Create a walk-in pharmacy sale (prescription without consultation)."""
+    """Create a walk-in pharmacy sale with multiple prescriptions (prescription without consultation)."""
     import traceback
+    import json
     try:
-        print(f"[DEBUG] create_walk_in_pharmacy_sale called with medication_name={medication_name}")
+        # Parse the prescriptions JSON
+        try:
+            prescriptions_data = json.loads(prescriptions_json)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid prescriptions JSON: {str(e)}")
+        
+        if not prescriptions_data or not isinstance(prescriptions_data, list):
+            raise HTTPException(status_code=400, detail="Prescriptions must be a non-empty list")
+        
+        if len(prescriptions_data) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 prescriptions allowed per request")
+        
+        print(f"[DEBUG] create_walk_in_pharmacy_sale called with {len(prescriptions_data)} prescriptions")
+        
+        # Ensure patient exists
         patient = ensure_patient(db, patient_id, walk_in_first_name, walk_in_last_name, walk_in_phone)
         
-        encounter_data = EncounterCreate(
-            patient_id=patient.id,
-            clinician_id=current_user.id,
-            chief_complaint=f"Walk-in pharmacy sale: {medication_name}",
-            status=EncounterStatus.IN_PROGRESS
-        )
-        encounter = encounter_crud.create_encounter(db, encounter_data)
-        encounter_crud.update_encounter(
-            db,
-            encounter.id,
-            EncounterUpdate(status=EncounterStatus.COMPLETED)
-        )
+        # Track created prescriptions and charges for reporting
+        created_count = 0
+        failed_count = 0
         
-        prescription_data = PrescriptionCreate(
-            encounter_id=encounter.id,
-            prescribed_by_id=current_user.id,
-            medication_name=medication_name,
-            medication_code=medication_code if medication_code else None,
-            dosage=dosage,
-            frequency=frequency,
-            duration=duration,
-            quantity=quantity,
-            instructions=instructions if instructions else None,
-            is_walk_in=True
-        )
+        for idx, prescr_data in enumerate(prescriptions_data):
+            try:
+                # Validate required fields
+                pharmacy_drug_uuid = None
+                if prescr_data.get('pharmacy_drug_id'):
+                    try:
+                        from uuid import UUID
+                        pharmacy_drug_uuid = UUID(prescr_data['pharmacy_drug_id'])
+                    except (ValueError, TypeError):
+                        pass
+                
+                if not pharmacy_drug_uuid:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Prescription #{idx + 1}: Please select a medication from the pharmacy formulary. Free text medications are not allowed."
+                    )
+                    
+                if not prescr_data.get('frequency'):
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Prescription #{idx + 1}: Frequency is required."
+                    )
+                
+                # Walk-in pharmacy sale - no encounter created, set encounter_id=None
+                prescription_data = PrescriptionCreate(
+                    encounter_id=None,  # No encounter for walk-in pharmacy sale
+                    patient_id=patient.id,
+                    prescribed_by_id=current_user.id,
+                    pharmacy_drug_id=str(pharmacy_drug_uuid),  # Ghana pharmacy - required
+                    medication_name=prescr_data.get('medication_name', ''),
+                    medication_code=prescr_data.get('medication_code') if prescr_data.get('medication_code') else None,
+                    dosage=prescr_data.get('dosage', ''),
+                    frequency=prescr_data.get('frequency', ''),
+                    duration=prescr_data.get('duration') if prescr_data.get('duration') else None,
+                    quantity=prescr_data.get('quantity', 1),
+                    instructions=prescr_data.get('instructions') if prescr_data.get('instructions') else None,
+                    is_walk_in=True
+                )
+                
+                new_prescription = encounter_crud.create_prescription(db, prescription_data)
+                
+                # Create charge for the prescription
+                try:
+                    create_charge_for_prescription(db, new_prescription, current_user.id, check_payment_required=False)
+                except Exception as billing_error:
+                    print(f"Warning: Unable to create walk-in pharmacy charge for prescription {new_prescription.id}: {billing_error}")
+                    # Don't fail the prescription creation if charge creation fails - can be created manually later
+                
+                created_count += 1
+                
+            except Exception as prescr_error:
+                print(f"[ERROR] Error creating prescription {idx}: {prescr_error}")
+                failed_count += 1
+                continue
         
-        new_prescription = encounter_crud.create_prescription(db, prescription_data)
+        if created_count == 0:
+            raise HTTPException(status_code=400, detail="Failed to create any prescriptions. Please check the data and try again.")
         
-        # Create charge for the prescription
-        try:
-            create_charge_for_prescription(db, new_prescription, current_user.id, check_payment_required=False)
-        except Exception as billing_error:
-            import traceback
-            print(f"Warning: Unable to create walk-in pharmacy charge for prescription {new_prescription.id}: {billing_error}")
-            print(traceback.format_exc())
-            # Don't fail the prescription creation if charge creation fails - can be created manually later
+        # Build status message
+        status_msg = f"pharmacy_sale_created&count={created_count}"
+        if failed_count > 0:
+            status_msg += f"&failed={failed_count}"
         
         return RedirectResponse(
-            url=str(request.url_for("walk_in_orders_dashboard")) + "?status=pharmacy_sale_created",
+            url=str(request.url_for("walk_in_orders_dashboard")) + f"?status={status_msg}",
             status_code=status.HTTP_302_FOUND
         )
     except HTTPException as http_exc:

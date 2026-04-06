@@ -19,8 +19,9 @@ router = APIRouter(tags=["Diseases"])
 def diseases_management(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     search: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200)
 ):
@@ -28,7 +29,16 @@ def diseases_management(
     skip = (page - 1) * per_page
     
     diseases = disease_crud.get_diseases(db, skip=skip, limit=per_page, search=search)
-    total = len(disease_crud.get_diseases(db, skip=0, limit=10000, search=search))
+    
+    # Filter by category if provided
+    if category:
+        diseases = [d for d in diseases if (d.category.value if hasattr(d.category, 'value') else d.category) == category]
+    
+    # Get total count for pagination
+    all_diseases = disease_crud.get_diseases(db, skip=0, limit=10000, search=search)
+    if category:
+        all_diseases = [d for d in all_diseases if (d.category.value if hasattr(d.category, 'value') else d.category) == category]
+    total = len(all_diseases)
     
     context = {
         "request": request,
@@ -37,6 +47,7 @@ def diseases_management(
         "user_role": current_user.role.name,
         "diseases": diseases,
         "search": search,
+        "category": category,
         "page": page,
         "per_page": per_page,
         "total": total,
@@ -56,7 +67,8 @@ def create_disease_page(
         "request": request,
         "title": "Create Disease",
         "current_user": current_user,
-        "user_role": current_user.role.name
+        "user_role": current_user.role.name,
+        "category": "other"
     }
     return templates.TemplateResponse("admin/create_disease.html", context)
 
@@ -98,7 +110,10 @@ def create_disease(
             "error": str(e),
             "name": name,
             "code": code,
-            "description": description
+            "description": description,
+            "category": category,
+            "dhis2_data_element_uid": dhis2_data_element_uid,
+            "dhis2_category_option_combo_uid": dhis2_category_option_combo_uid
         }
         return templates.TemplateResponse("admin/create_disease.html", context)
     except Exception as e:
@@ -110,7 +125,10 @@ def create_disease(
             "error": f"Error creating disease: {str(e)}",
             "name": name,
             "code": code,
-            "description": description
+            "description": description,
+            "category": category,
+            "dhis2_data_element_uid": dhis2_data_element_uid,
+            "dhis2_category_option_combo_uid": dhis2_category_option_combo_uid
         }
         return templates.TemplateResponse("admin/create_disease.html", context)
 

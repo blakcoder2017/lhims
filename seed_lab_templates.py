@@ -1462,8 +1462,8 @@ def create_reference_ranges(db: Session):
         {"field_code": "potassium", "sex": "ANY", "low": 3.5, "high": 5.0, "unit": "mmol/L"},
         {"field_code": "chloride", "sex": "ANY", "low": 98.0, "high": 106.0, "unit": "mmol/L"},
         {"field_code": "bicarbonate", "sex": "ANY", "low": 22.0, "high": 29.0, "unit": "mmol/L"},
-        {"field_code": "uric_acid", "sex": "M", "low": 200.0, "high": 430.0, "unit": "μmol/L"},
-        {"field_code": "uric_acid", "sex": "F", "low": 140.0, "high": 360.0, "unit": "μmol/L"},
+        {"field_code": "uric_acid", "sex": "M", "low": 142.0, "high": 339.0, "unit": "μmol/L"},
+        {"field_code": "uric_acid", "sex": "F", "low": 202.0, "high": 416.0, "unit": "μmol/L"},
     ]
     
     # Reference ranges for Lipid Profile

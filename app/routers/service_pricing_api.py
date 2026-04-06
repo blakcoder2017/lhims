@@ -17,14 +17,15 @@ router = APIRouter(tags=["Service Pricing"])
 def service_pricing_management(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
-    charge_type_filter: Optional[str] = Query(None)
+    current_user = Depends(role_required(["Admin", "Management"])),
+    charge_type_filter: Optional[str] = Query(None),
+    include_inactive: bool = Query(False)
 ):
     """Service pricing management dashboard"""
     from app.models.billing_models import ChargeType
     from app.utils.charge_types_utils import get_charge_types
     
-    pricing_list = service_pricing_crud.get_all_service_pricing(db, limit=1000, include_inactive=False)
+    pricing_list = service_pricing_crud.get_all_service_pricing(db, limit=1000, include_inactive=include_inactive)
     
     if charge_type_filter:
         pricing_list = [p for p in pricing_list if p.charge_type == charge_type_filter]
@@ -39,7 +40,8 @@ def service_pricing_management(
         "user_role": current_user.role.name,
         "pricing_list": pricing_list,
         "charge_types": charge_types,
-        "charge_type_filter": charge_type_filter
+        "charge_type_filter": charge_type_filter,
+        "include_inactive": include_inactive
     }
     return templates.TemplateResponse("admin/service_pricing.html", context)
 
@@ -177,8 +179,12 @@ def update_service_pricing(
             update_data['description'] = description
         elif description == '':
             update_data['description'] = None
+        # Handle checkbox: sends 'on' when checked, None when unchecked
+        # If is_active is present (checked), set to True; if None (unchecked), set to False
         if is_active is not None:
-            update_data['is_active'] = is_active
+            update_data['is_active'] = True
+        else:
+            update_data['is_active'] = False
         
         pricing_update = ServicePricingUpdate(**update_data)
         service_pricing_crud.update_service_pricing(db, pricing_id, pricing_update, current_user.id)
@@ -203,4 +209,31 @@ def update_service_pricing(
             "error": f"Error updating service pricing: {str(e)}"
         }
         return templates.TemplateResponse("admin/edit_service_pricing.html", context)
+
+
+@router.get("/admin/service-pricing/{pricing_id}/toggle", name="toggle_service_pricing")
+def toggle_service_pricing(
+    pricing_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin"]))
+):
+    """Toggle the active status of a service pricing"""
+    pricing = service_pricing_crud.get_service_pricing(db, pricing_id)
+    if not pricing:
+        raise HTTPException(status_code=404, detail="Service pricing not found")
+    
+    # Toggle the status
+    new_status = not pricing.is_active
+    service_pricing_crud.update_service_pricing(
+        db, 
+        pricing_id, 
+        ServicePricingUpdate(is_active=new_status), 
+        current_user.id
+    )
+    
+    status_msg = "activated" if new_status else "deactivated"
+    return RedirectResponse(
+        url=f"/admin/service-pricing?status={status_msg}",
+        status_code=302
+    )
 

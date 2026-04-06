@@ -15,6 +15,11 @@ class HospitalSettings(Base):
     hospital_website = Column(String(255), nullable=True)
     logo_path = Column(String(500), nullable=True)  # Path to logo file in static/uploads/logos/
     logo_url = Column(String(500), nullable=True)  # Full URL to logo
+    # Laboratory-specific settings
+    lab_contact_email = Column(String(255), nullable=True)  # Lab contact email for queries
+    lab_contact_phone = Column(String(50), nullable=True)  # Lab contact phone
+    accreditation = Column(String(255), nullable=True)  # Accreditation body name
+    accreditation_number = Column(String(100), nullable=True)  # ISO/Accreditation number
     # Revisit/follow-up consultation discount: percentage of department consultation fee (e.g. 50 = 50%)
     revisit_follow_up_percentage = Column(Numeric(5, 2), nullable=True)
     # Insurance activation settings - enable/disable NHIS and Private Insurance

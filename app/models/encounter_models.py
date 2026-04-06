@@ -79,6 +79,7 @@ class Encounter(Base):
     diseases = relationship("EncounterDisease", back_populates="encounter", cascade="all, delete-orphan")
     antenatal_visits = relationship("AntenatalVisit", back_populates="encounter", foreign_keys="AntenatalVisit.encounter_id")
     birth_records = relationship("BirthRecord", back_populates="encounter", foreign_keys="BirthRecord.encounter_id")
+    documents = relationship("EncounterDocument", back_populates="encounter", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Encounter(id={self.id}, patient_id={self.patient_id}, status={self.status.value})>"
@@ -140,6 +141,7 @@ class LabOrder(Base):
     result_json = Column(postgresql.JSONB, nullable=True)  # Structured result keyed by field code
     result_status = Column(String(50), nullable=True)  # DRAFT, SUBMITTED, VERIFIED, AUTHORIZED, RELEASED, AMENDED
     flags_json = Column(postgresql.JSONB, nullable=True)  # Abnormal/critical flags per field
+    reference_ranges_json = Column(postgresql.JSONB, nullable=True)  # Reference ranges used for interpretation
     verified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     verified_at = Column(DateTime, nullable=True)
     authorized_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -239,7 +241,8 @@ class Prescription(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # Foreign Keys
-    encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=False)
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)  # Direct patient link for walk-in pharmacy sales
+    encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=True)  # Nullable for walk-in pharmacy sales
     prescribed_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Clinician who prescribed
     medication_id = Column(Integer, ForeignKey("medications.id"), nullable=True)  # Legacy: inventory medication
     pharmacy_drug_id = Column(postgresql.UUID(as_uuid=True), ForeignKey("pharmacy_drug.id"), nullable=True)  # Ghana: exact formulation (REQUIRED for new presc)
@@ -259,9 +262,9 @@ class Prescription(Base):
     concentration_unit = Column(String(100), nullable=True)
     
     # Dose input
-    dosage = Column(String(100), nullable=False)  # e.g., "500mg", "10ml"
-    frequency = Column(String(100), nullable=False)  # e.g., "twice daily", "every 8 hours"
-    duration = Column(String(100), nullable=False)  # e.g., "7 days", "2 weeks"
+    dosage = Column(String(100), nullable=True)  # e.g., "500mg", "10ml"
+    frequency = Column(String(100), nullable=True)  # e.g., "twice daily", "every 8 hours"
+    duration = Column(String(100), nullable=True)  # e.g., "7 days", "2 weeks"
     quantity = Column(Integer, nullable=True)  # Number of units to dispense - pharmacy decides actual quantity
     instructions = Column(Text, nullable=True)  # Patient instructions
     
@@ -282,6 +285,7 @@ class Prescription(Base):
     
     # Relationships
     encounter = relationship("Encounter", back_populates="prescriptions")
+    patient = relationship("Patient", foreign_keys=[patient_id])  # Direct patient link for walk-in pharmacy sales
     prescribed_by = relationship("User", foreign_keys=[prescribed_by_id])
     dispensed_by = relationship("User", foreign_keys=[dispensed_by_id])
     checked_in_by = relationship("User", foreign_keys=[checked_in_by_id])
@@ -302,6 +306,14 @@ class EncounterAddendum(Base):
     Each addendum is a separate entry, allowing for history tracking.
     """
     __tablename__ = "encounter_addendums"
+    
+    # Note type enum
+    NOTE_TYPES = [
+        ("progress", "Progress Note"),
+        ("followup", "Follow-up Note"),
+        ("consultation", "Consultation Note"),
+        ("discharge", "Discharge Note")
+    ]
 
     id = Column(Integer, primary_key=True, index=True)
     
@@ -312,8 +324,15 @@ class EncounterAddendum(Base):
     # Addendum Content
     content = Column(Text, nullable=False)  # The addendum text
     
+    # Note Type for categorization
+    note_type = Column(String(50), default="progress")  # progress, followup, consultation, discharge
+    
+    # Tags for quick filtering (comma-separated)
+    tags = Column(String(500), nullable=True)  # e.g., "urgent,follow-up-required"
+    
     # Timestamps
     created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
     # Soft delete
     is_active = Column(Boolean, default=True)
@@ -324,3 +343,40 @@ class EncounterAddendum(Base):
     
     def __repr__(self):
         return f"<EncounterAddendum(id={self.id}, encounter_id={self.encounter_id})>"
+
+
+class EncounterDocument(Base):
+    """
+    SQLAlchemy Model for document/file attachments to encounters.
+    Allows doctors to upload patient-related files during encounters.
+    """
+    __tablename__ = "encounter_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    encounter_id = Column(Integer, ForeignKey("encounters.id"), nullable=False)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # User who uploaded
+    
+    # Document Details
+    filename = Column(String(255), nullable=False)  # Original filename
+    file_path = Column(String(500), nullable=False)  # Path to stored file
+    file_size = Column(Integer, nullable=True)  # File size in bytes
+    mime_type = Column(String(100), nullable=True)  # MIME type (e.g., application/pdf)
+    
+    # Optional description/category
+    description = Column(Text, nullable=True)  # Description of the document
+    category = Column(String(50), nullable=True)  # Category: LAB_RESULT, IMAGING, REFERRAL, CONSENT, OTHER
+    
+    # Timestamps
+    uploaded_at = Column(DateTime, server_default=func.now())
+    
+    # Soft delete
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    encounter = relationship("Encounter", back_populates="documents")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+    
+    def __repr__(self):
+        return f"<EncounterDocument(id={self.id}, filename='{self.filename}', encounter_id={self.encounter_id})>"

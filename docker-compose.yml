@@ -53,7 +53,7 @@ services:
       # Application Settings
       APP_TITLE: ${APP_TITLE:-LHIMS}
       VERSION: ${VERSION:-2.0}
-      DEBUG: ${DEBUG:-False}
+      DEBUG: "False"
       
       # Database Settings (using service names in Docker network)
       SQLALCHEMY_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password123}@postgres:5432/${POSTGRES_DB:-lhims}

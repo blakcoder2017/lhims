@@ -604,7 +604,8 @@ def get_template_definitions():
         "description": "Inflammation marker",
         "layout": {"sections": [{"id": "sec_result", "title": "Result", "rows": [{"columns": [{"items": ["crp_value"], "width": 12}]}]}]},
         "fields": {
-            "crp_value": {"code": "crp_value", "label": "CRP", "type": "numeric", "unit": "mg/L", "decimals": 1}
+            "crp_value": {"code": "crp_value", "label": "CRP", "type": "numeric", "unit": "mg/L", "decimals": 1,
+                         "reference_range": "< 1.0 mg/L Low CVD (no inflammation)\n1.0-3.0 mg/L Moderate CVD risk (No inflammation situation)\n> 3.0 mg/L High CVD risk (No inflammation situation)\n> 10 There may be other infections (bacteria infections or viral infections)"}
         }
     }
     
@@ -1056,7 +1057,8 @@ def get_template_definitions():
             "creat": {"code": "creat", "label": "Creatinine", "type": "numeric", "unit": "μmol/L", "decimals": 0},
             "alt": {"code": "alt", "label": "ALT", "type": "numeric", "unit": "U/L", "decimals": 0},
             "ast": {"code": "ast", "label": "AST", "type": "numeric", "unit": "U/L", "decimals": 0},
-            "crp": {"code": "crp", "label": "CRP", "type": "numeric", "unit": "mg/L", "decimals": 1},
+            "crp": {"code": "crp", "label": "CRP", "type": "numeric", "unit": "mg/L", "decimals": 1,
+                   "reference_range": "< 1.0 mg/L Low CVD (no inflammation)\n1.0-3.0 mg/L Moderate CVD risk (No inflammation situation)\n> 3.0 mg/L High CVD risk (No inflammation situation)\n> 10 There may be other infections (bacteria infections or viral infections)"},
             "malaria": {"code": "malaria", "label": "Malaria RDT", "type": "select", "options": ["Negative", "Positive"]},
             "widal": {"code": "widal", "label": "Widal", "type": "text"}
         }

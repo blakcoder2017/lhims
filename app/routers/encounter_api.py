@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, status, HTTPException, Form, Request, Query
+from fastapi import APIRouter, Depends, status, HTTPException, Form, Request, Query, UploadFile, File
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import datetime, date
 from decimal import Decimal
-
+import os
+from pathlib import Path
 from app.db.database import get_db
 from app.core.deps import role_required, get_current_user, permission_required
 from app.crud import encounter_crud, billing_crud, service_pricing_crud, appointment_crud
@@ -14,10 +15,11 @@ from app.schemas.encounter_schemas import (
     RadiologyOrderCreate, RadiologyOrderUpdate, RadiologyOrder,
     PrescriptionCreate, PrescriptionUpdate, Prescription,
     DifferentialInput, DifferentialResponse, DifferentialSaveRequest,
-    AddendumCreate, Addendum
+    AddendumCreate, AddendumUpdate, Addendum,
+    EncounterDocumentCreate, EncounterDocument
 )
 from app.schemas.appointment_schemas import AppointmentCreate, AppointmentUpdate
-from app.models.encounter_models import EncounterStatus, OrderStatus, LabOrder as LabOrderModel, RadiologyOrder as RadiologyOrderModel, EncounterAddendum
+from app.models.encounter_models import EncounterStatus, OrderStatus, LabOrder as LabOrderModel, RadiologyOrder as RadiologyOrderModel, EncounterAddendum, EncounterDocument as EncounterDocumentModel
 from app.models.procedure_models import ProcedureStatus
 from app.models.billing_models import InvoiceStatus, ChargeType
 from app.models.scheduled_appointment_models import AppointmentType, AppointmentStatus
@@ -99,6 +101,7 @@ def create_encounter_form(
     Only doctors/clinicians (or admins) can start encounters. Front desk and nurses must check in patients instead.
     
     For cash patients: Checks if consultation fee has been paid before allowing encounter creation.
+    For IPD encounters: Skips vitals/payment check as patient is already admitted.
     """
     from app.utils.payment_verification import (
         verify_encounter_workflow,
@@ -106,22 +109,31 @@ def create_encounter_form(
     )
     from app.models.billing_models import ChargeType
     
-    # Verify complete workflow: vitals + check-in + payment (for ALL users including admins)
-    workflow_complete, missing_step, vitals_record, appointment_record, payment_info = verify_encounter_workflow(
-        db, patient_id, check_vitals=True, check_checkin=True, check_payment=True
-    )
+    # Check if this is an IPD encounter (has admission_id)
+    # For IPD, skip vitals/payment check as patient is already admitted
+    is_ipd_encounter = admission_id is not None
     
-    if not workflow_complete:
-        triage_url = request.url_for("patient_triage", patient_id=patient_id)
-        status_param = "checkin_required"
-        if missing_step == "vitals":
-            status_param = "vitals_required"
-        elif missing_step == "payment":
-            status_param = "payment_required"
-        return RedirectResponse(
-            url=f"{triage_url}?status={status_param}",
-            status_code=status.HTTP_302_FOUND
+    if not is_ipd_encounter:
+        # Verify complete workflow: vitals + check-in + payment (for OPD encounters only)
+        workflow_complete, missing_step, vitals_record, appointment_record, payment_info = verify_encounter_workflow(
+            db, patient_id, check_vitals=True, check_checkin=True, check_payment=True
         )
+        
+        if not workflow_complete:
+            triage_url = request.url_for("patient_triage", patient_id=patient_id)
+            status_param = "checkin_required"
+            if missing_step == "vitals":
+                status_param = "vitals_required"
+            elif missing_step == "payment":
+                status_param = "payment_required"
+            return RedirectResponse(
+                url=f"{triage_url}?status={status_param}",
+                status_code=status.HTTP_302_FOUND
+            )
+    else:
+        # IPD encounter - initialize variables to avoid UnboundLocalError
+        appointment_record = None
+        payment_info = None
     
     # Use the verified appointment record
     if appointment_record:
@@ -258,31 +270,33 @@ def create_encounter_form(
                     department = "Emergency"
             
             # Create appointment automatically to add patient to doctor queue
-            appointment_data = AppointmentCreate(
-                patient_id=patient_id,
-                department=department,
-                department_type="opd",
-                appointment_type=AppointmentType.WALK_IN,
-                scheduled_date=datetime.now(),
-                chief_complaint=chief_complaint,
-                notes="Auto-created from encounter by nurse",
-                priority=5,
-                assigned_clinician_id=None,  # Will be auto-assigned
-                created_by_id=current_user.id
-            )
-            
-            new_appointment = appointment_crud.create_appointment(db, appointment_data)
-            
-            # Check in the patient automatically so they appear in doctor queue
-            appointment_crud.update_appointment(
-                db, 
-                new_appointment.id, 
-                AppointmentUpdate(status=AppointmentStatus.CHECKED_IN, checked_in_at=datetime.now())
-            )
-            
-            # Link encounter to appointment
-            new_encounter.appointment_id = new_appointment.id
-            db.commit()
+            # Skip for IPD encounters - patient is already admitted
+            if not is_ipd_encounter:
+                appointment_data = AppointmentCreate(
+                    patient_id=patient_id,
+                    department=department,
+                    department_type="opd",
+                    appointment_type=AppointmentType.WALK_IN,
+                    scheduled_date=datetime.now(),
+                    chief_complaint=chief_complaint,
+                    notes="Auto-created from encounter by nurse",
+                    priority=5,
+                    assigned_clinician_id=None,  # Will be auto-assigned
+                    created_by_id=current_user.id
+                )
+                
+                new_appointment = appointment_crud.create_appointment(db, appointment_data)
+                
+                # Check in the patient automatically so they appear in doctor queue
+                appointment_crud.update_appointment(
+                    db, 
+                    new_appointment.id, 
+                    AppointmentUpdate(status=AppointmentStatus.CHECKED_IN, checked_in_at=datetime.now())
+                )
+                
+                # Link encounter to appointment
+                new_encounter.appointment_id = new_appointment.id
+                db.commit()
             db.refresh(new_encounter)
         
         # Redirect to view encounter page
@@ -497,15 +511,18 @@ def update_encounter_endpoint(
                 RadiologyOrderModel.status.in_([OrderStatus.PENDING, OrderStatus.ORDERED, OrderStatus.IN_PROGRESS])
             ).count()
             
-            # Validate force_close permission
-            if force_close and current_user.role.name != "Admin":
+            # Validate force_close permission - allow Admin, Doctor, and Clinician to force close
+            user_role = current_user.role.name
+            can_force_close = force_close and user_role in ["Admin", "Doctor", "Clinician"]
+            
+            if force_close and not can_force_close:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only Administrators can force close encounters with pending orders."
+                    detail="Only Administrators, Doctors, and Clinicians can force close encounters with pending orders."
                 )
             
-            # Check for pending orders (unless force_close is enabled for Admin)
-            if (pending_lab_orders > 0 or pending_radiology_orders > 0) and not (force_close and current_user.role.name == "Admin"):
+            # Check for pending orders (unless force_close is enabled for allowed roles)
+            if (pending_lab_orders > 0 or pending_radiology_orders > 0) and not can_force_close:
                 error_details = []
                 if pending_lab_orders > 0:
                     error_details.append(f"{pending_lab_orders} pending lab order(s)")
@@ -514,9 +531,9 @@ def update_encounter_endpoint(
                 
                 error_message = f"Cannot close encounter. There are {', '.join(error_details)}. Please complete all orders before closing the encounter."
                 
-                # If user is Admin, suggest force close option
-                if current_user.role.name == "Admin":
-                    error_message += " As an Administrator, you can use the 'Force Close' option if necessary."
+                # If user is Admin, Doctor, or Clinician, suggest force close option
+                if user_role in ["Admin", "Doctor", "Clinician"]:
+                    error_message += f" As a {user_role}, you can use the 'Force Close' option if necessary."
                 
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -560,7 +577,6 @@ def update_encounter_endpoint(
         existing_encounter = encounter_crud.get_encounter(db, encounter_id)
         if existing_encounter and existing_encounter.addendum != encounter_update.addendum:
             # Addendum changed - update the tracking fields
-            from datetime import datetime
             existing_encounter.addendum_by_id = current_user.id
             existing_encounter.addendum_at = datetime.now()
             db.commit()
@@ -588,7 +604,27 @@ def update_encounter_endpoint(
             if queue_entry:
                 queue_entry.status = QueueStatus.COMPLETED
                 queue_entry.completed_at = datetime.now()
+                queue_entry.is_active = False  # Mark queue entry as inactive
                 db.commit()
+        
+        # Complete the linked OPD visit if exists (for OPD encounters)
+        if encounter.opd_visit_id:
+            from app.crud import opd_crud
+            from app.models.opd_models import OPDVisit, OPDVisitStatus
+            
+            # Check if OPD visit is still active before completing
+            opd_visit = db.query(OPDVisit).filter(
+                OPDVisit.id == encounter.opd_visit_id,
+                OPDVisit.status == OPDVisitStatus.ACTIVE,
+                OPDVisit.is_active == True
+            ).first()
+            
+            if opd_visit:
+                opd_crud.complete_opd_visit(db, encounter.opd_visit_id)
+        
+        # Sync payment status for the OPD visit (in case invoice was paid after encounter started)
+        if encounter.opd_visit_id:
+            opd_crud.sync_opd_visit_payment_status(db, encounter.opd_visit_id)
     
     return encounter
 
@@ -1213,6 +1249,35 @@ def update_lab_order_endpoint(
     current_user = Depends(role_required(["Clinician", "Lab Staff", "Admin"]))
 ):
     """Update a lab order (e.g., enter results)."""
+    # Check if this update includes entering results (either result, result_json, or completing the order)
+    is_entering_result = bool(lab_order_update.result or lab_order_update.result_json or lab_order_update.status == OrderStatus.COMPLETED.value)
+    
+    # If entering results, check payment status for cash OPD patients
+    if is_entering_result:
+        from app.utils.payment_verification import is_cash_patient, has_visit_invoice_been_paid
+        from app.crud import ipd_crud
+        
+        # Get the lab order to find patient
+        lab_order_check = db.query(LabOrderModel).filter(LabOrderModel.id == lab_order_id).first()
+        if not lab_order_check:
+            raise HTTPException(status_code=404, detail="Lab order not found")
+        
+        patient_id = None
+        if lab_order_check.encounter:
+            patient_id = lab_order_check.encounter.patient_id
+        elif lab_order_check.patient_id:
+            patient_id = lab_order_check.patient_id
+        
+        if patient_id and is_cash_patient(db, patient_id):
+            current_admission = ipd_crud.get_current_admission(db, patient_id)
+            if not current_admission:
+                # OPD cash patient: check if visit invoice is paid
+                if lab_order_check.encounter_id and not has_visit_invoice_been_paid(db, encounter_id=lab_order_check.encounter_id):
+                    raise HTTPException(
+                        status_code=402,
+                        detail="Payment required. Please pay the visit bill before entering lab results for OPD cash patients."
+                    )
+    
     # If updating result, set result_entered_by_id
     if lab_order_update.result and not lab_order_update.result_entered_by_id:
         lab_order_update.result_entered_by_id = current_user.id
@@ -1363,7 +1428,7 @@ def update_radiology_order_endpoint(
 
 
 # Prescription Endpoints
-@router.post("/{encounter_id}/prescriptions", response_model=Prescription, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("pharmacy_dispense"))])
+@router.post("/{encounter_id}/prescriptions", response_model=Prescription, status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("prescription_create"))])
 def create_prescription_endpoint(
     encounter_id: int,
     prescription: PrescriptionCreate,
@@ -1380,11 +1445,14 @@ def create_prescription_endpoint(
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
     
-    # STOCK CHECK: Verify medication is available in pharmacy inventory
-    stock_warning = None
-    pharmacy_drug_uuid = None
-    
     # Ghana: Require pharmacy_drug_id - must select a specific formulation
+    if not prescription.pharmacy_drug_id:
+        raise HTTPException(
+            status_code=400, 
+            detail="pharmacy_drug_id is required. Please select a medication from the pharmacy formulary."
+        )
+    
+    pharmacy_drug_uuid = None
     if prescription.pharmacy_drug_id:
         try:
             pharmacy_drug_uuid = UUID(prescription.pharmacy_drug_id)
@@ -1432,7 +1500,7 @@ def create_prescription_endpoint(
                     ).all()
                     
                     required_qty = prescription.quantity if prescription.quantity else 1
-                    total_available = sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0)
+                    total_available = float(sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0))
                     
                     if total_available == 0:
                         stock_warning = {
@@ -1451,6 +1519,10 @@ def create_prescription_endpoint(
                         }
         except (ValueError, TypeError):
             pass  # Invalid UUID, ignore
+    
+    # Validate: pharmacy_drug_id is required for Ghana pharmacy system (no free text)
+    if not prescription.pharmacy_drug_id:
+        raise HTTPException(status_code=422, detail="Please select a medication from the formulary (specific formulation with strength and dosage form). Free text is not allowed.")
     
     # Override encounter_id and prescribed_by_id
     prescription.encounter_id = encounter_id
@@ -1495,7 +1567,7 @@ def create_prescription_endpoint(
     return JSONResponse(content=response_data, status_code=201)
 
 
-@router.post("/{encounter_id}/prescriptions/create", name="create_prescription_form", status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("pharmacy_dispense"))])
+@router.post("/{encounter_id}/prescriptions/create", name="create_prescription_form", status_code=status.HTTP_201_CREATED, dependencies=[Depends(permission_required("prescription_create"))])
 def create_prescription_form(
     request: Request,
     encounter_id: int,
@@ -1555,12 +1627,8 @@ def create_prescription_form(
         # Validate required fields
         if not medication_name or not medication_name.strip():
             raise HTTPException(status_code=422, detail="Medication name is required")
-        if not dosage or not dosage.strip():
-            raise HTTPException(status_code=422, detail="Dosage is required")
         if not frequency or not frequency.strip():
             raise HTTPException(status_code=422, detail="Frequency is required")
-        if not duration or not duration.strip():
-            raise HTTPException(status_code=422, detail="Duration is required")
         
         # Fetch pharmacy drug for name/code and snapshot fields (Ghana formulation)
         medication_name_final = medication_name.strip()
@@ -1626,7 +1694,7 @@ def create_prescription_form(
                         PharmacyBatch.expiry_date >= date.today(),
                     ).all()
                     
-                    total_available = sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0)
+                    total_available = float(sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0))
                     
                     if total_available == 0:
                         stock_warnings.append({
@@ -2055,19 +2123,43 @@ def delete_lab_order(
     current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
 ):
     """Delete a lab order. Only pending/in_progress orders can be deleted."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Attempting to delete lab order {lab_order_id} for encounter {encounter_id}")
+    
     lab_order = encounter_crud.get_lab_order(db, lab_order_id)
     if not lab_order:
+        logger.warning(f"Lab order {lab_order_id} not found")
         raise HTTPException(status_code=404, detail="Lab order not found")
+    
+    logger.info(f"Found lab order {lab_order_id}, encounter_id in DB: {lab_order.encounter_id}, status: {lab_order.status}")
     
     # Verify it belongs to the encounter
     if lab_order.encounter_id != encounter_id:
+        logger.warning(f"Lab order {lab_order_id} does not belong to encounter {encounter_id}, belongs to {lab_order.encounter_id}")
         raise HTTPException(status_code=400, detail="Lab order does not belong to this encounter")
     
+    # Safely get status value with fallback
+    try:
+        status_value = lab_order.status.value if lab_order.status else None
+    except Exception as e:
+        logger.error(f"Error getting lab order status: {e}")
+        status_value = None
+    
     # Only allow deletion of pending or in_progress orders
-    if lab_order.status.value in [OrderStatus.COMPLETED.value]:
+    if status_value == OrderStatus.COMPLETED.value:
+        logger.warning(f"Cannot delete completed lab order {lab_order_id}")
         raise HTTPException(
             status_code=400,
             detail="Cannot delete completed lab orders. Only pending or in-progress orders can be removed."
+        )
+    
+    if status_value == OrderStatus.CANCELLED.value:
+        logger.warning(f"Cannot delete cancelled lab order {lab_order_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete cancelled lab orders."
         )
     
     # Check for associated charges and handle them
@@ -2075,10 +2167,12 @@ def delete_lab_order(
     associated_charges = db.query(Charge).filter(Charge.lab_order_id == lab_order_id).all()
     
     if associated_charges:
+        logger.info(f"Found {len(associated_charges)} associated charges for lab order {lab_order_id}")
         # Check if any invoice is paid - if so, prevent deletion
         for charge in associated_charges:
             invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
             if invoice and invoice.status == InvoiceStatus.PAID:
+                logger.warning(f"Cannot delete lab order {lab_order_id} - associated invoice {invoice.id} is PAID")
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot delete lab order. Associated charges have been paid. Please contact Finance department."
@@ -2099,6 +2193,8 @@ def delete_lab_order(
     db.delete(lab_order)
     db.commit()
     
+    logger.info(f"Successfully deleted lab order {lab_order_id}")
+    
     return JSONResponse(
         status_code=200,
         content={"message": "Lab order deleted successfully", "lab_order_id": lab_order_id}
@@ -2113,19 +2209,43 @@ def delete_radiology_order(
     current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
 ):
     """Delete a radiology order. Only pending/in_progress orders can be deleted."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Attempting to delete radiology order {radiology_order_id} for encounter {encounter_id}")
+    
     radiology_order = db.query(RadiologyOrderModel).filter(RadiologyOrderModel.id == radiology_order_id).first()
     if not radiology_order:
+        logger.warning(f"Radiology order {radiology_order_id} not found")
         raise HTTPException(status_code=404, detail="Radiology order not found")
+    
+    logger.info(f"Found radiology order {radiology_order_id}, encounter_id in DB: {radiology_order.encounter_id}, status: {radiology_order.status}")
     
     # Verify it belongs to the encounter
     if radiology_order.encounter_id != encounter_id:
+        logger.warning(f"Radiology order {radiology_order_id} does not belong to encounter {encounter_id}, belongs to {radiology_order.encounter_id}")
         raise HTTPException(status_code=400, detail="Radiology order does not belong to this encounter")
     
+    # Safely get status value with fallback
+    try:
+        status_value = radiology_order.status.value if radiology_order.status else None
+    except Exception as e:
+        logger.error(f"Error getting radiology order status: {e}")
+        status_value = None
+    
     # Only allow deletion of pending or in_progress orders
-    if radiology_order.status.value in [OrderStatus.COMPLETED.value]:
+    if status_value == OrderStatus.COMPLETED.value:
+        logger.warning(f"Cannot delete completed radiology order {radiology_order_id}")
         raise HTTPException(
             status_code=400,
             detail="Cannot delete completed radiology orders. Only pending or in-progress orders can be removed."
+        )
+    
+    if status_value == OrderStatus.CANCELLED.value:
+        logger.warning(f"Cannot delete cancelled radiology order {radiology_order_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete cancelled radiology orders."
         )
     
     # Check for associated charges and handle them
@@ -2133,10 +2253,12 @@ def delete_radiology_order(
     associated_charges = db.query(Charge).filter(Charge.radiology_order_id == radiology_order_id).all()
     
     if associated_charges:
+        logger.info(f"Found {len(associated_charges)} associated charges for radiology order {radiology_order_id}")
         # Check if any invoice is paid - if so, prevent deletion
         for charge in associated_charges:
             invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
             if invoice and invoice.status == InvoiceStatus.PAID:
+                logger.warning(f"Cannot delete radiology order {radiology_order_id} - associated invoice {invoice.id} is PAID")
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot delete radiology order. Associated charges have been paid. Please contact Finance department."
@@ -2150,6 +2272,8 @@ def delete_radiology_order(
     # Delete the radiology order
     db.delete(radiology_order)
     db.commit()
+    
+    logger.info(f"Successfully deleted radiology order {radiology_order_id}")
     
     return JSONResponse(
         status_code=200,
@@ -2166,20 +2290,43 @@ def delete_prescription(
 ):
     """Delete a prescription. Only pending/in_progress prescriptions can be deleted."""
     from app.models.encounter_models import Prescription as PrescriptionModel
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Attempting to delete prescription {prescription_id} for encounter {encounter_id}")
     
     prescription = db.query(PrescriptionModel).filter(PrescriptionModel.id == prescription_id).first()
     if not prescription:
+        logger.warning(f"Prescription {prescription_id} not found")
         raise HTTPException(status_code=404, detail="Prescription not found")
+    
+    logger.info(f"Found prescription {prescription_id}, encounter_id in DB: {prescription.encounter_id}, status: {prescription.status}")
     
     # Verify it belongs to the encounter
     if prescription.encounter_id != encounter_id:
+        logger.warning(f"Prescription {prescription_id} does not belong to encounter {encounter_id}, belongs to {prescription.encounter_id}")
         raise HTTPException(status_code=400, detail="Prescription does not belong to this encounter")
     
+    # Safely get status value with fallback
+    try:
+        status_value = prescription.status.value if prescription.status else None
+    except Exception as e:
+        logger.error(f"Error getting prescription status: {e}")
+        status_value = None
+    
     # Only allow deletion of pending or in_progress prescriptions
-    if prescription.status.value in [OrderStatus.COMPLETED.value]:
+    if status_value == OrderStatus.COMPLETED.value:
+        logger.warning(f"Cannot delete completed prescription {prescription_id}")
         raise HTTPException(
             status_code=400,
             detail="Cannot delete completed prescriptions. Only pending or in-progress prescriptions can be removed."
+        )
+    
+    if status_value == OrderStatus.CANCELLED.value:
+        logger.warning(f"Cannot delete cancelled prescription {prescription_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete cancelled prescriptions."
         )
     
     # Check for associated charges and handle them
@@ -2187,10 +2334,12 @@ def delete_prescription(
     associated_charges = db.query(Charge).filter(Charge.prescription_id == prescription_id).all()
     
     if associated_charges:
+        logger.info(f"Found {len(associated_charges)} associated charges for prescription {prescription_id}")
         # Check if any invoice is paid - if so, prevent deletion
         for charge in associated_charges:
             invoice = db.query(Invoice).filter(Invoice.id == charge.invoice_id).first()
             if invoice and invoice.status == InvoiceStatus.PAID:
+                logger.warning(f"Cannot delete prescription {prescription_id} - associated invoice {invoice.id} is PAID")
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot delete prescription. Associated charges have been paid. Please contact Finance department."
@@ -2204,6 +2353,8 @@ def delete_prescription(
     # Delete the prescription
     db.delete(prescription)
     db.commit()
+    
+    logger.info(f"Successfully deleted prescription {prescription_id}")
     
     return JSONResponse(
         status_code=200,
@@ -2220,20 +2371,43 @@ def delete_procedure(
 ):
     """Delete a procedure. Only pending/in_progress procedures can be deleted."""
     from app.models.procedure_models import Procedure as ProcedureModel
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Attempting to delete procedure {procedure_id} for encounter {encounter_id}")
     
     procedure = db.query(ProcedureModel).filter(ProcedureModel.id == procedure_id).first()
     if not procedure:
+        logger.warning(f"Procedure {procedure_id} not found")
         raise HTTPException(status_code=404, detail="Procedure not found")
+    
+    logger.info(f"Found procedure {procedure_id}, encounter_id in DB: {procedure.encounter_id}, status: {procedure.status}")
     
     # Verify it belongs to the encounter
     if procedure.encounter_id != encounter_id:
+        logger.warning(f"Procedure {procedure_id} does not belong to encounter {encounter_id}, belongs to {procedure.encounter_id}")
         raise HTTPException(status_code=400, detail="Procedure does not belong to this encounter")
     
+    # Safely get status value with fallback
+    try:
+        status_value = procedure.status.value if procedure.status else None
+    except Exception as e:
+        logger.error(f"Error getting procedure status: {e}")
+        status_value = None
+    
     # Only allow deletion of pending or in_progress procedures
-    if procedure.status.value in [ProcedureStatus.COMPLETED.value]:
+    if status_value == ProcedureStatus.COMPLETED.value:
+        logger.warning(f"Cannot delete completed procedure {procedure_id}")
         raise HTTPException(
             status_code=400,
             detail="Cannot delete completed procedures. Only pending or in-progress procedures can be removed."
+        )
+    
+    if status_value == ProcedureStatus.CANCELLED.value:
+        logger.warning(f"Cannot delete cancelled procedure {procedure_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete cancelled procedures."
         )
     
     # Check for associated charges and handle them
@@ -2356,6 +2530,82 @@ def get_encounter_addendums(
     return encounter_crud.get_addendums_by_encounter(db, encounter_id)
 
 
+# Addendum Edit Endpoint - placed BEFORE the encounter_id route to avoid conflict
+@router.put("/addendums/{addendum_id}", response_model=Addendum, name="update_addendum")
+def update_addendum_endpoint(
+    addendum_id: int,
+    addendum: AddendumUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """Update an addendum. Only allowed within 10 minutes of creation."""
+    print(f"[DEBUG] Update addendum called with ID: {addendum_id}")
+    
+    # Get the addendum
+    db_addendum = db.query(EncounterAddendum).filter(EncounterAddendum.id == addendum_id).first()
+    if not db_addendum:
+        print(f"[DEBUG] Addendum {addendum_id} not found")
+        raise HTTPException(status_code=404, detail="Addendum not found")
+    
+    print(f"[DEBUG] Addendum found, created_at: {db_addendum.created_at}")
+    
+    # Check if within 10 minute window
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    time_diff = now - db_addendum.created_at
+    print(f"[DEBUG] Time diff: {time_diff}")
+    
+    if time_diff > timedelta(minutes=10):
+        print(f"[DEBUG] Edit window expired")
+        raise HTTPException(
+            status_code=403, 
+            detail="Cannot edit notes after 10 minutes of creation. Please create a new note instead."
+        )
+    
+    print(f"[DEBUG] Updating addendum with: {addendum}")
+    # Update the addendum
+    updated_addendum = encounter_crud.update_addendum(db, addendum_id, addendum)
+    print(f"[DEBUG] Updated: {updated_addendum}")
+    return updated_addendum
+
+
+# Addendum Delete Endpoint
+@router.delete("/addendums/{addendum_id}", status_code=204, name="delete_addendum")
+def delete_addendum_endpoint(
+    addendum_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Nurse", "Clinician", "Admin"]))
+):
+    """Delete (soft-delete) an addendum. Only allowed within 10 minutes of creation."""
+    print(f"[DEBUG] Delete addendum called with ID: {addendum_id}")
+    
+    # Get the addendum
+    db_addendum = db.query(EncounterAddendum).filter(EncounterAddendum.id == addendum_id).first()
+    if not db_addendum:
+        print(f"[DEBUG] Addendum {addendum_id} not found")
+        raise HTTPException(status_code=404, detail="Addendum not found")
+    
+    print(f"[DEBUG] Addendum found, created_at: {db_addendum.created_at}")
+    
+    # Check if within 10 minute window
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    time_diff = now - db_addendum.created_at
+    print(f"[DEBUG] Time diff: {time_diff}")
+    
+    if time_diff > timedelta(minutes=10):
+        print(f"[DEBUG] Delete window expired")
+        raise HTTPException(
+            status_code=403, 
+            detail="Cannot delete notes after 10 minutes of creation."
+        )
+    
+    print(f"[DEBUG] Deleting addendum ID: {addendum_id}")
+    # Soft delete the addendum
+    encounter_crud.soft_delete_addendum(db, addendum_id)
+    return None
+
+
 # Auto-Close Endpoints
 @router.post("/auto-close", name="auto_close_encounters")
 def auto_close_encounters(
@@ -2392,3 +2642,193 @@ def preview_stale_encounters(
     
     result = get_stale_encounters_preview(db)
     return result
+
+
+# Configure upload directory
+UPLOAD_DIR = Path("uploads/encounter_documents")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Allowed file types
+ALLOWED_EXTENSIONS = {
+    'pdf': 'application/pdf',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'txt': 'text/plain',
+}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+def _allowed_file(filename: str) -> bool:
+    """Check if file extension is allowed"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@router.post("/{encounter_id}/documents", response_model=EncounterDocument, status_code=status.HTTP_201_CREATED)
+async def upload_encounter_document(
+    encounter_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    description: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Nurse", "Admin"]))
+):
+    """
+    Upload a document/file attachment to an encounter.
+    
+    Allowed file types: PDF, JPG, JPEG, PNG, DOC, DOCX, TXT
+    Maximum file size: 10 MB
+    
+    Requires authentication as Doctor, Clinician, Nurse, or Admin.
+    """
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # Validate file
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    
+    if not _allowed_file(file.filename):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS.keys())}"
+        )
+    
+    # Read file content
+    content = await file.read()
+    file_size = len(content)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)} MB")
+    
+    # Generate unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_ext = file.filename.rsplit('.', 1)[1].lower()
+    unique_filename = f"{encounter_id}_{timestamp}_{file.filename}"
+    file_path = UPLOAD_DIR / unique_filename
+    
+    # Save file
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    # Get MIME type
+    mime_type = ALLOWED_EXTENSIONS.get(file_ext, "application/octet-stream")
+    
+    # Create database record
+    document = EncounterDocumentModel(
+        encounter_id=encounter_id,
+        uploaded_by_id=current_user.id,
+        filename=file.filename,
+        file_path=str(file_path),
+        file_size=file_size,
+        mime_type=mime_type,
+        description=description,
+        category=category
+    )
+    
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    
+    return document
+
+
+@router.get("/{encounter_id}/documents", response_model=List[EncounterDocument])
+def get_encounter_documents(
+    encounter_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """
+    Get all document attachments for an encounter.
+    
+    Requires Doctor, Clinician, or Admin role.
+    """
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    return db.query(EncounterDocumentModel).filter(
+        EncounterDocumentModel.encounter_id == encounter_id,
+        EncounterDocumentModel.is_active == True
+    ).order_by(EncounterDocumentModel.uploaded_at.desc()).all()
+
+
+@router.get("/{encounter_id}/documents/{document_id}")
+def download_encounter_document(
+    encounter_id: int,
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """
+    Download a document attachment from an encounter.
+    
+    Requires Doctor, Clinician, or Admin role.
+    """
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # Get document
+    document = db.query(EncounterDocumentModel).filter(
+        EncounterDocumentModel.id == document_id,
+        EncounterDocumentModel.encounter_id == encounter_id,
+        EncounterDocumentModel.is_active == True
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Check if file exists
+    if not os.path.exists(document.file_path):
+        raise HTTPException(status_code=404, detail="File not found on server")
+    
+    # Return file
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        document.file_path, 
+        media_type=document.mime_type,
+        filename=document.filename
+    )
+
+
+@router.delete("/{encounter_id}/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_encounter_document(
+    encounter_id: int,
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+):
+    """
+    Soft-delete a document attachment from an encounter.
+    
+    Requires authentication as Doctor, Clinician, or Admin.
+    """
+    # Verify encounter exists
+    encounter = encounter_crud.get_encounter(db, encounter_id)
+    if not encounter:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    
+    # Get document
+    document = db.query(EncounterDocumentModel).filter(
+        EncounterDocumentModel.id == document_id,
+        EncounterDocumentModel.encounter_id == encounter_id,
+        EncounterDocumentModel.is_active == True
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Soft delete
+    document.is_active = False
+    db.commit()
+    
+    return None

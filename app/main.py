@@ -140,8 +140,13 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
     if exc.status_code == status.HTTP_401_UNAUTHORIZED:
         # Check if the request is for a UI path (not starting with /api/)
         if not request.url.path.startswith("/api/"):
-            # Redirect to the login page
-            return RedirectResponse(request.url_for("login"), status_code=status.HTTP_302_FOUND)
+            # Redirect to the login page, preserving the original URL
+            from urllib.parse import urlencode
+            login_url = request.url_for("login")
+            # Build the redirect URL with the original path as 'next' parameter
+            redirect_params = urlencode({"next": str(request.url)})
+            full_redirect_url = f"{login_url}?{redirect_params}"
+            return RedirectResponse(full_redirect_url, status_code=status.HTTP_302_FOUND)
         
         # If it's an API call, return standard JSON 401
         return JSONResponse(
@@ -457,6 +462,10 @@ from app.routers import billing_api
 app.include_router(billing_api.router, prefix="", tags=["Billing"])  # /billing routes
 app.include_router(payment_ui_routes.router, prefix="", tags=["Payment UI"])  # /patients/{patient_id}/pay/* routes
 
+# 7a. Consolidated Receipt Routers
+from app.routers import consolidated_receipt_api
+app.include_router(consolidated_receipt_api.router, prefix="", tags=["Consolidated Receipts"])  # /billing/consolidated routes
+
 # 8. Appointments Management Routers
 from app.routers import scheduled_appointment_api, appointments_ui_routes, queue_api
 app.include_router(scheduled_appointment_api.router, prefix="", tags=["Scheduled Appointments"])  # /api/v1/appointments routes
@@ -514,7 +523,11 @@ app.include_router(lab_catalog_api.router, prefix="", tags=["Lab Catalog"])  # /
 from app.routers import lab_template_api
 app.include_router(lab_template_api.router, prefix="", tags=["Lab Templates"])  # /lab/templates routes
 
-# 12b. Lab Demo (Development Testing)
+# 12b. Lab Reference Range Audit (Read-only diagnostics)
+from app.routers import lab_reference_range_audit_api
+app.include_router(lab_reference_range_audit_api.router, prefix="", tags=["Lab Reference Range Audit"])  # /lab/audit routes
+
+# 12c. Lab Demo (Development Testing)
 from app.routers import lab_demo_api
 app.include_router(lab_demo_api.router, prefix="", tags=["Lab Demo"])  # /lab/demo routes
 
@@ -585,6 +598,9 @@ app.include_router(walk_in_orders_api.router, prefix="", tags=["Walk-in Orders"]
 # 22. Direct Service Requests from Patient Profile
 from app.routers import direct_service_requests_api
 app.include_router(direct_service_requests_api.router, prefix="", tags=["Direct Service Requests"])  # /patients/{id}/direct-requests routes
+
+from app.routers import direct_service_registration_api
+app.include_router(direct_service_registration_api.router, prefix="", tags=["Direct Service Registration"])  # /direct-service-registration routes
 
 # Debug Router for testing permissions
 from app.routers import debug_permissions_api

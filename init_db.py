@@ -212,8 +212,8 @@ def init_db():
         
         # Create sample service pricing
         sample_services = [
-            ("General Consultation", "Standard doctor consultation", "consultation", "Consultation", 150.00),
-            ("Specialist Consultation", "Consultation with specialist doctor", "consultation", "Consultation", 250.00),
+            ("General Consultation", "Standard doctor consultation", "opd", "Consultation", 150.00),
+            ("Specialist Consultation", "Consultation with specialist doctor", "opd", "Consultation", 250.00),
             ("Blood Test - CBC", "Complete Blood Count test", "lab_test", "Laboratory", 80.00),
             ("Malaria Test", "Rapid diagnostic test for malaria", "lab_test", "Laboratory", 50.00),
             ("X-Ray - Chest", "Chest X-ray imaging", "radiology", "Imaging", 200.00),

@@ -10,7 +10,7 @@ from app.schemas.encounter_schemas import (
     LabOrderCreate, LabOrderUpdate,
     RadiologyOrderCreate, RadiologyOrderUpdate,
     PrescriptionCreate, PrescriptionUpdate,
-    AddendumCreate
+    AddendumCreate, AddendumUpdate
 )
 
 
@@ -21,9 +21,14 @@ def create_encounter(db: Session, encounter: EncounterCreate):
     Validates OPD/IPD linkage before creation.
     Auto-creates OPD visit if needed for OPD encounters.
     Handles diagnoses by creating EncounterDisease records.
+    
+    Business Rule: For cash patients, encounter can only be created if OPD payment is made.
+    Insurance patients are exempt from this requirement.
     """
     from app.services.opd_validation import validate_encounter_creation, auto_link_opd_visit
     from app.models.scheduled_appointment_models import ScheduledAppointment
+    from app.models.patient_models import Patient, PaymentMechanism
+    from app.models.opd_models import OPDVisit
     
     # Validate appointment_id if provided
     if encounter.appointment_id:
@@ -49,6 +54,24 @@ def create_encounter(db: Session, encounter: EncounterCreate):
     
     if not is_valid:
         raise ValueError(error_message)
+    
+    # Check if OPD payment is made for cash patients (not insurance)
+    if encounter.opd_visit_id and not encounter.admission_id:
+        # Get patient to check payment mechanism
+        patient = db.query(Patient).filter(Patient.id == encounter.patient_id).first()
+        # Insurance patients (NHIS, PRIVATE_INSURANCE) are exempt from payment requirement
+        is_insurance = patient and (
+            patient.payment_mechanism == PaymentMechanism.NHIS or 
+            patient.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE
+        )
+        if patient and not is_insurance:
+            # This is a cash/self-pay patient - check if OPD visit is paid or emergency
+            opd_visit = db.query(OPDVisit).filter(OPDVisit.id == encounter.opd_visit_id).first()
+            if opd_visit and opd_visit.payment_status not in ['paid', 'emergency']:
+                raise ValueError(
+                    "Cannot create encounter: Patient has not paid OPD consultation fee. "
+                    "Please make payment at the front office first."
+                )
     
     # Extract diagnoses before creating encounter
     diagnoses = encounter.diagnoses
@@ -422,9 +445,28 @@ def create_addendum(db: Session, addendum: AddendumCreate, encounter_id: int, ad
     db_addendum = EncounterAddendum(
         encounter_id=encounter_id,
         added_by_id=added_by_id,
-        content=addendum.content
+        content=addendum.content,
+        note_type=addendum.note_type,
+        tags=addendum.tags
     )
     db.add(db_addendum)
+    db.commit()
+    db.refresh(db_addendum)
+    return db_addendum
+
+
+def update_addendum(db: Session, addendum_id: int, addendum_update: AddendumUpdate):
+    """Updates an existing addendum."""
+    db_addendum = db.query(EncounterAddendum).filter(EncounterAddendum.id == addendum_id).first()
+    if not db_addendum:
+        return None
+    
+    db_addendum.content = addendum_update.content
+    if addendum_update.note_type is not None:
+        db_addendum.note_type = addendum_update.note_type
+    if addendum_update.tags is not None:
+        db_addendum.tags = addendum_update.tags
+    
     db.commit()
     db.refresh(db_addendum)
     return db_addendum
@@ -438,4 +480,81 @@ def get_addendums_by_encounter(db: Session, encounter_id: int):
         EncounterAddendum.encounter_id == encounter_id,
         EncounterAddendum.is_active == True
     ).order_by(EncounterAddendum.created_at.desc()).all()
+
+
+def soft_delete_addendum(db: Session, addendum_id: int):
+    """Soft deletes an addendum by setting is_active to false."""
+    db_addendum = db.query(EncounterAddendum).filter(EncounterAddendum.id == addendum_id).first()
+    if not db_addendum:
+        return None
+    
+    db_addendum.is_active = False
+    db.commit()
+    db.refresh(db_addendum)
+    return db_addendum
+
+
+def auto_close_uncompleted_encounters(
+    db: Session, 
+    hours_threshold: int = 48,
+    dry_run: bool = False
+):
+    """
+    Auto-close uncompleted encounters that have been in progress for longer than 
+    the specified threshold (default 48 hours).
+    
+    This function:
+    1. Finds encounters with status IN_PROGRESS that started before the threshold
+    2. Marks them as AUTO_CLOSED
+    3. Sets completed_at timestamp
+    
+    Args:
+        db: Database session
+        hours_threshold: Hours after which to auto-close encounters (default 48)
+        dry_run: If True, only return the entries that would be closed without actually closing them
+    
+    Returns:
+        Tuple of (count of closed encounters, list of details)
+    """
+    from datetime import datetime, timedelta
+    from typing import Tuple, List
+    
+    # Calculate the threshold time
+    threshold_time = datetime.now() - timedelta(hours=hours_threshold)
+    
+    # Find all uncompleted encounters that started before the threshold
+    stale_encounters = db.query(Encounter).options(
+        joinedload(Encounter.patient)
+    ).filter(
+        Encounter.started_at < threshold_time,
+        Encounter.status == EncounterStatus.IN_PROGRESS,
+        Encounter.is_active == True
+    ).all()
+    
+    closed_encounters = []
+    closed_count = 0
+    
+    for encounter in stale_encounters:
+        encounter_details = {
+            "encounter_id": encounter.id,
+            "patient_id": encounter.patient_id,
+            "patient_name": f"{encounter.patient.first_name} {encounter.patient.last_name}" if encounter.patient else "Unknown",
+            "patient_number": encounter.patient.patient_number if encounter.patient else "Unknown",
+            "started_at": encounter.started_at.isoformat() if encounter.started_at else None,
+            "status": encounter.status.value,
+            "clinician_id": encounter.clinician_id
+        }
+        
+        if not dry_run:
+            # Mark as AUTO_CLOSED
+            encounter.status = EncounterStatus.AUTO_CLOSED
+            encounter.completed_at = datetime.now()
+            encounter.notes = (encounter.notes or "") + f" [Auto-closed: No activity after {hours_threshold} hours]"
+            db.commit()
+            db.refresh(encounter)
+        
+        closed_encounters.append(encounter_details)
+        closed_count += 1
+    
+    return closed_count, closed_encounters
 

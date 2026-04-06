@@ -29,7 +29,7 @@ router = APIRouter(tags=["Admin"])
 def users_management(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -79,7 +79,7 @@ def users_management(
 def create_user_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"]))
+    current_user = Depends(role_required(["Admin", "Management"]))
 ):
     """Create user page"""
     # Exclude "Clinician" role from selection (use Doctor or Nurse instead)
@@ -99,7 +99,7 @@ def create_user_page(
 def create_user(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     username: str = Form(...),
     password: str = Form(...),
     confirm_password: str = Form(...),
@@ -240,7 +240,7 @@ def edit_user_page(
     request: Request,
     user_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"]))
+    current_user = Depends(role_required(["Admin", "Management"]))
 ):
     """Edit user page"""
     from app.crud import user_crud
@@ -270,7 +270,7 @@ def update_user(
     request: Request,
     user_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     username: str = Form(...),
     full_name: Optional[str] = Form(None),
     email: Optional[str] = Form(None),
@@ -396,7 +396,7 @@ def delete_user(
     request: Request,
     user_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"]))
+    current_user = Depends(role_required(["Admin", "Management"]))
 ):
     """Delete a user (soft delete - sets is_active to False)"""
     from app.crud import user_crud
@@ -448,7 +448,7 @@ def delete_user(
 def audit_logs(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     user_id: Optional[int] = Query(None),
     action: Optional[str] = Query(None),
     resource_type: Optional[str] = Query(None),
@@ -604,7 +604,7 @@ def export_data(
 def hospital_settings_page(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"]))
+    current_user = Depends(role_required(["Admin", "Management"]))
 ):
     """Hospital settings page"""
     from app.crud.hospital_settings_crud import get_hospital_settings
@@ -626,7 +626,7 @@ def hospital_settings_page(
 def update_hospital_settings(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     hospital_name: Optional[str] = Form(None),
     hospital_address: Optional[str] = Form(None),
     hospital_phone: Optional[str] = Form(None),
@@ -694,7 +694,7 @@ def update_hospital_settings(
 async def upload_hospital_logo(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     logo: UploadFile = File(None)
 ):
     """Upload hospital logo"""
@@ -805,7 +805,7 @@ DEFAULT_CHARGE_TYPES = [
 def charge_types_management(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"]))
+    current_user = Depends(role_required(["Admin", "Management"]))
 ):
     """Charge types management dashboard"""
     from app.models.billing_models import ChargeType
@@ -837,7 +837,7 @@ def charge_types_management(
 def add_charge_type(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     charge_type: str = Form(...)
 ):
     """Add a new charge type"""
@@ -849,8 +849,11 @@ def add_charge_type(
     # Get current settings
     settings = hospital_settings_crud.get_hospital_settings(db)
     
-    # Get current charge types
-    current_types = settings.charge_types_config if settings and settings.charge_types_config else DEFAULT_CHARGE_TYPES.copy()
+    # Get current charge types - create a NEW list to avoid reference issues
+    if settings and settings.charge_types_config:
+        current_types = list(settings.charge_types_config)  # Create a copy
+    else:
+        current_types = DEFAULT_CHARGE_TYPES.copy()
     
     # Check if already exists
     if charge_type in current_types:
@@ -860,7 +863,10 @@ def add_charge_type(
     current_types.append(charge_type)
     
     # Update settings
-    hospital_settings_crud.update_charge_types(db, current_types)
+    try:
+        hospital_settings_crud.update_charge_types(db, current_types)
+    except Exception as e:
+        return RedirectResponse(url="/admin/charge-types?error=Failed+to+save:+{str(e)}", status_code=302)
     
     return RedirectResponse(url="/admin/charge-types?success=Charge+type+added+successfully", status_code=302)
 
@@ -869,7 +875,7 @@ def add_charge_type(
 def remove_charge_type(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     charge_type: str = Form(...)
 ):
     """Remove a charge type"""
@@ -878,8 +884,11 @@ def remove_charge_type(
     # Get current settings
     settings = hospital_settings_crud.get_hospital_settings(db)
     
-    # Get current charge types
-    current_types = settings.charge_types_config if settings and settings.charge_types_config else DEFAULT_CHARGE_TYPES.copy()
+    # Get current charge types - create a NEW list to avoid reference issues
+    if settings and settings.charge_types_config:
+        current_types = list(settings.charge_types_config)
+    else:
+        current_types = DEFAULT_CHARGE_TYPES.copy()
     
     # Check if it exists
     if charge_type not in current_types:
@@ -889,7 +898,10 @@ def remove_charge_type(
     current_types.remove(charge_type)
     
     # Update settings
-    hospital_settings_crud.update_charge_types(db, current_types)
+    try:
+        hospital_settings_crud.update_charge_types(db, current_types)
+    except Exception as e:
+        return RedirectResponse(url="/admin/charge-types?error=Failed+to+remove:+{str(e)}", status_code=302)
     
     return RedirectResponse(url="/admin/charge-types?success=Charge+type+removed+successfully", status_code=302)
 
@@ -898,11 +910,14 @@ def remove_charge_type(
 def reset_charge_types(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"]))
+    current_user = Depends(role_required(["Admin", "Management"]))
 ):
     """Reset charge types to default"""
     # Reset to default charge types
-    hospital_settings_crud.update_charge_types(db, DEFAULT_CHARGE_TYPES.copy())
+    try:
+        hospital_settings_crud.update_charge_types(db, DEFAULT_CHARGE_TYPES.copy())
+    except Exception as e:
+        return RedirectResponse(url="/admin/charge-types?error=Failed+to+reset:+{str(e)}", status_code=302)
     
     return RedirectResponse(url="/admin/charge-types?success=Charge+types+reset+to+default", status_code=302)
 
@@ -911,7 +926,7 @@ def reset_charge_types(
 def edit_charge_type(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin"])),
+    current_user = Depends(role_required(["Admin", "Management"])),
     old_charge_type: str = Form(...),
     new_charge_type: str = Form(...)
 ):
@@ -925,8 +940,11 @@ def edit_charge_type(
     # Get current settings
     settings = hospital_settings_crud.get_hospital_settings(db)
     
-    # Get current charge types
-    current_types = settings.charge_types_config if settings and settings.charge_types_config else DEFAULT_CHARGE_TYPES.copy()
+    # Get current charge types - create a NEW list to avoid reference issues
+    if settings and settings.charge_types_config:
+        current_types = list(settings.charge_types_config)
+    else:
+        current_types = DEFAULT_CHARGE_TYPES.copy()
     
     # Check if old charge type exists
     if old_charge_type not in current_types:
@@ -941,7 +959,10 @@ def edit_charge_type(
     current_types[index] = new_charge_type
     
     # Update settings
-    hospital_settings_crud.update_charge_types(db, current_types)
+    try:
+        hospital_settings_crud.update_charge_types(db, current_types)
+    except Exception as e:
+        return RedirectResponse(url="/admin/charge-types?error=Failed+to+update:+{str(e)}", status_code=302)
     
     return RedirectResponse(url="/admin/charge-types?success=Charge+type+updated+successfully", status_code=302)
 

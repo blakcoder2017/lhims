@@ -15,6 +15,118 @@ DISCIPLINES = {
 }
 
 
+def normalize_template_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize template schema to ensure consistent structure.
+    This ensures fields can be accessed uniformly regardless of how they were originally created.
+    Returns a normalized copy of the schema.
+    """
+    # Handle case where schema is a JSON string instead of a dict
+    if isinstance(schema, str):
+        import json
+        try:
+            schema = json.loads(schema)
+        except (json.JSONDecodeError, TypeError):
+            # If parsing fails, return empty schema
+            return {
+                "meta": {"name": "Unknown", "discipline": "GENERAL", "version": 1},
+                "layout": {"sections": []},
+                "fields": {},
+                "rules": {"visibility": [], "requiredIf": []},
+                "calculated": []
+            }
+    
+    if not schema:
+        return {
+            "meta": {"name": "Unknown", "discipline": "GENERAL", "version": 1},
+            "layout": {"sections": []},
+            "fields": {},
+            "rules": {"visibility": [], "requiredIf": []},
+            "calculated": []
+        }
+    
+    # Create a normalized copy
+    normalized = dict(schema)
+    
+    # Ensure required top-level keys exist
+    if "meta" not in normalized:
+        normalized["meta"] = {"name": "Unknown", "discipline": "GENERAL"}
+    if "layout" not in normalized:
+        normalized["layout"] = {"sections": []}
+    if "fields" not in normalized:
+        normalized["fields"] = {}
+    if "rules" not in normalized:
+        normalized["rules"] = {"visibility": [], "requiredIf": []}
+    if "calculated" not in normalized:
+        normalized["calculated"] = []
+    
+    # Normalize fields: convert list to dict if needed
+    fields = normalized.get("fields", {})
+    if isinstance(fields, list):
+        # Convert list of fields to dict
+        fields_dict = {}
+        for fld in fields:
+            if isinstance(fld, dict):
+                # Use field_name, code, or id as key
+                field_id = fld.get("field_name") or fld.get("code") or fld.get("id")
+                if field_id:
+                    fields_dict[field_id] = fld
+        normalized["fields"] = fields_dict
+    elif not isinstance(fields, dict):
+        normalized["fields"] = {}
+    
+    # Ensure each field has a 'code' for result storage (fallback to field key)
+    for field_id, field_def in normalized["fields"].items():
+        if isinstance(field_def, dict) and not field_def.get("code"):
+            field_def["code"] = field_id
+    
+    # Ensure layout sections exist
+    layout = normalized.get("layout")
+    if layout and isinstance(layout, dict):
+        sections = layout.get("sections")
+        if not sections:
+            layout["sections"] = []
+        elif not isinstance(sections, list):
+            layout["sections"] = []
+    
+    return normalized
+
+
+def get_field_by_code(schema: Dict[str, Any], code: str) -> Optional[Dict[str, Any]]:
+    """
+    Get a field definition by its code, with normalization.
+    This is the recommended way to look up fields in templates.
+    """
+    normalized = normalize_template_schema(schema)
+    fields = normalized.get("fields", {})
+    
+    # First try direct lookup by code
+    if code in fields:
+        return fields[code]
+    
+    # Otherwise search for field with matching code property
+    for field_id, field_def in fields.items():
+        if isinstance(field_def, dict) and field_def.get("code") == code:
+            return field_def
+    
+    return None
+
+
+def get_all_field_codes(schema: Dict[str, Any]) -> List[str]:
+    """
+    Get all field codes from a normalized schema.
+    """
+    normalized = normalize_template_schema(schema)
+    fields = normalized.get("fields", {})
+    
+    codes = []
+    for field_id, field_def in fields.items():
+        if isinstance(field_def, dict):
+            code = field_def.get("code") or field_id
+            codes.append(code)
+    return codes
+
+
 def validate_template_schema(schema: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """
     Validate template schema_json structure.

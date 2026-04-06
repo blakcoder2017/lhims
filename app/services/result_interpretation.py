@@ -33,6 +33,7 @@ class ResultFlag(str, Enum):
     CRITICAL_HIGH = "CRITICAL_HIGH"
     INVALID = "INVALID"
     NOT_DONE = "NOT_DONE"
+    NOT_APPLICABLE = "NOT_APPLICABLE"  # No reference range defined for this test
 
 
 class ResultInterpretation:
@@ -98,10 +99,10 @@ def interpret_numeric_result(
     Returns:
         ResultInterpretation with flag and details
     """
-    # Handle missing reference range
+    # Handle missing reference range - don't flag as abnormal if no reference range exists
     if reference_low is None and reference_high is None:
         return ResultInterpretation(
-            flag=ResultFlag.NORMAL,
+            flag=ResultFlag.NOT_APPLICABLE,  # No reference range - no flag
             value=value,
             unit=unit,
             interpretation="No reference range available"
@@ -424,26 +425,42 @@ def interpret_results_batch(
                 patient_sex=patient_sex
             )
         
-        # Interpret based on type
-        if field_type == "numeric" and isinstance(value, (int, float)):
+        # Interpret based on type.
+        # Values from JSON form submissions arrive as strings even for numeric fields,
+        # so always attempt float conversion rather than relying on isinstance checks.
+        numeric_value = None
+        if field_type == "numeric":
+            try:
+                numeric_value = float(value)
+            except (ValueError, TypeError):
+                pass
+
+        if field_type == "numeric" and numeric_value is not None:
+            # Check if reference range exists before interpreting
+            has_reference_range = ref_range is not None and (ref_range.low is not None or ref_range.high is not None)
+
             interpretation = interpret_numeric_result(
-                value=float(value),
+                value=numeric_value,
                 reference_low=float(ref_range.low) if ref_range and ref_range.low else None,
                 reference_high=float(ref_range.high) if ref_range and ref_range.high else None,
                 critical_low=float(ref_range.critical_low) if ref_range and ref_range.critical_low else None,
                 critical_high=float(ref_range.critical_high) if ref_range and ref_range.critical_high else None,
                 unit=ref_range.unit if ref_range else None
             )
+
+            interpreted_results[field_code] = interpretation.to_dict()
+            # Only store a flag when there is an actual reference range to compare against
+            if has_reference_range:
+                flags[field_code] = interpretation.flag.value if isinstance(interpretation.flag, Enum) else interpretation.flag
         else:
-            # Qualitative interpretation
+            # Qualitative interpretation (text, choice, or un-parseable numeric)
             field_code_for_lookup = field_def.get("code", field_code) if field_def else field_code
             interpretation = interpret_qualitative_result(
                 value=str(value),
                 field_code=field_code_for_lookup
             )
-        
-        interpreted_results[field_code] = interpretation.to_dict()
-        flags[field_code] = interpretation.flag.value if isinstance(interpretation.flag, Enum) else interpretation.flag
+            interpreted_results[field_code] = interpretation.to_dict()
+            flags[field_code] = interpretation.flag.value if isinstance(interpretation.flag, Enum) else interpretation.flag
     
     return {
         "interpreted_results": interpreted_results,

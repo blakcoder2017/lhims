@@ -69,8 +69,6 @@ def update_hospital_settings(
         settings.nhis_enabled = nhis_enabled
     if private_insurance_enabled is not None:
         settings.private_insurance_enabled = private_insurance_enabled
-    if charge_types_config is not None:
-        settings.charge_types_config = charge_types_config
     
     db.commit()
     db.refresh(settings)
@@ -79,14 +77,24 @@ def update_hospital_settings(
 
 def update_charge_types(db: Session, charge_types_config: list) -> HospitalSettings:
     """Update charge types configuration"""
-    settings = get_hospital_settings(db)
-    
-    # If no settings exist, create them
-    if not settings:
-        settings = create_hospital_settings(db)
-    
-    settings.charge_types_config = charge_types_config
-    db.commit()
-    db.refresh(settings)
-    return settings
+    try:
+        settings = get_hospital_settings(db)
+        
+        # If no settings exist, create them
+        if not settings:
+            settings = create_hospital_settings(db)
+        
+        # Create a new list to ensure SQLAlchemy detects the change
+        settings.charge_types_config = list(charge_types_config)
+        
+        db.commit()
+        
+        # Refresh to get the latest data from database
+        db.expire_all()
+        settings = get_hospital_settings(db)
+        
+        return settings
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Failed to update charge types: {str(e)}") from e
 

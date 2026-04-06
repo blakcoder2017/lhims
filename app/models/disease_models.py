@@ -71,6 +71,7 @@ class EncounterDisease(Base):
     """
     Junction table for many-to-many relationship between Encounters and Diseases.
     Allows multiple diseases per encounter and tracks if it's primary or secondary.
+    Also tracks which eye the diagnosis applies to (OD/OS/OU) for eye conditions.
     """
     __tablename__ = "encounter_diseases"
 
@@ -83,6 +84,10 @@ class EncounterDisease(Base):
     # Classification
     is_primary = Column(Boolean, default=False, server_default='false')  # True if primary diagnosis
     custom_name = Column(String(500), nullable=True)  # If disease was added custom during encounter
+    
+    # Eye-specific diagnosis (OD=right eye, OS=left eye, OU=both eyes)
+    # For non-eye conditions, this can be null
+    eye = Column(String(5), nullable=True)  # OD/OS/OU
     
     # Timestamps
     created_at = Column(DateTime, server_default=func.now())

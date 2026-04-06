@@ -30,8 +30,11 @@ from app.models.opd_models import OPDVisit, OPDVisitStatus
 from app.models.disease_models import Disease, EncounterDisease
 from app.models.pharmacy_models import PharmacyDispense, PharmacyDispenseItem
 from app.models.department_models import Department
+from app.models.appointment_models import OPDQueue, QueueStatus
+from app.models.optical_models import OpticalShopPrescription, OpticalOrder, OpticalPayment, OrderStatus, PaymentStatus
 from app.crud import hospital_settings_crud, opd_crud, user_crud, service_pricing_crud
 from app.models.user_models import User, Role
+from app.models.hospital_settings_models import HospitalSettings
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -55,7 +58,7 @@ templates.env.filters["age"] = calculate_age
 def reports_dashboard(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Finance", "Management", "Doctor"]))
+    current_user = Depends(role_required(["Admin", "Finance", "Management", "Doctor", "Nurse"]))
 ):
     """Reports dashboard - lists all available reports.
     Note: Financial reports section is restricted to Admin, Management, Finance in template."""
@@ -98,6 +101,7 @@ def referral_report(
         "request": request,
         "title": f"Referral Report - {report_data['admission'].admission_number}",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         **report_data
     }
     
@@ -210,6 +214,7 @@ def admission_report(
         "request": request,
         "title": f"Admission Report - {admission.admission_number}",
         "current_user": current_user,
+        "user_role": current_user.role.name,
         "admission": admission,
         "patient": admission.patient,  # Add patient to context for template
         "drug_administrations": administrations,
@@ -291,7 +296,22 @@ def financial_report(
     total_outstanding = total_revenue - total_paid
     
     # Breakdown by service type
+    # Track unique encounters/admissions for accurate count
     service_breakdown = {}
+    
+    # First, collect all unique admission IDs from both charges AND invoices
+    # This ensures we capture all IPD visits even without explicit admission charges
+    admission_ids_from_invoices = {inv.admission_id for inv in invoices if inv.admission_id}
+    
+    # Also query admissions directly to include any admissions in date range that may not have invoices
+    # (e.g., currently admitted patients or those with no charges yet)
+    admissions_in_range = db.query(Admission.id).filter(
+        Admission.is_active == True,
+        func.date(Admission.admission_date) >= start,
+        func.date(Admission.admission_date) <= end
+    ).all()
+    admission_ids_from_admissions_table = {adm.id for adm in admissions_in_range}
+    
     for charge in charges:
         if service_type and charge.charge_type.value != service_type:
             continue
@@ -301,16 +321,56 @@ def financial_report(
             service_breakdown[ct] = {
                 "count": 0,
                 "total": Decimal('0.00'),
-                "paid": Decimal('0.00')
+                "paid": Decimal('0.00'),
+                "unique_ids": set()  # Track unique encounter/admission IDs
             }
         
-        service_breakdown[ct]["count"] += 1
+        # Count unique visits/admissions instead of just charges
+        if ct == "admission":
+            # For admission charges, count unique admissions
+            if charge.admission_id:
+                service_breakdown[ct]["unique_ids"].add(charge.admission_id)
+        else:
+            # For other charge types, count unique encounters
+            if charge.encounter_id:
+                service_breakdown[ct]["unique_ids"].add(charge.encounter_id)
+            elif charge.opd_visit_id:
+                service_breakdown[ct]["unique_ids"].add(f"opd_{charge.opd_visit_id}")
+            elif charge.admission_id:
+                service_breakdown[ct]["unique_ids"].add(f"adm_{charge.admission_id}")
+        
         service_breakdown[ct]["total"] += charge.total_amount
         
-        # Find payments for this charge's invoice
+        # Find the invoice for this charge
         invoice = next((inv for inv in invoices if inv.id == charge.invoice_id), None)
-        if invoice:
-            service_breakdown[ct]["paid"] += invoice.paid_amount or Decimal('0.00')
+        if invoice and invoice.total_amount > 0:
+            # Calculate proportional payment for this charge based on its share of the invoice
+            # This prevents double-counting payments across charge types
+            charge_proportion = charge.total_amount / invoice.total_amount
+            service_breakdown[ct]["paid"] += (invoice.paid_amount or Decimal('0.00')) * charge_proportion
+    
+    # For admission count, include:
+    # 1. Admission IDs from invoices
+    # 2. Any admission charges  
+    # 3. All admissions in the date range (from direct query)
+    if "admission" not in service_breakdown:
+        service_breakdown["admission"] = {
+            "count": 0,
+            "total": Decimal('0.00'),
+            "paid": Decimal('0.00'),
+            "unique_ids": set()
+        }
+    
+    # Add admission IDs from invoices
+    service_breakdown["admission"]["unique_ids"].update(admission_ids_from_invoices)
+    
+    # Also add all admissions from the admissions table in the date range
+    service_breakdown["admission"]["unique_ids"].update(admission_ids_from_admissions_table)
+    
+    # Convert unique_ids sets to counts
+    for ct in service_breakdown:
+        service_breakdown[ct]["count"] = len(service_breakdown[ct]["unique_ids"])
+        del service_breakdown[ct]["unique_ids"]
     
     # Breakdown by payment mechanism
     payment_breakdown = {}
@@ -576,7 +636,7 @@ def patient_demographics_report(
     end_date: Optional[str] = Query(None),
     format: str = Query("html", regex="^(html|pdf|excel)$"),
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Management", "Doctor"]))
+    current_user = Depends(role_required(["Admin", "Management", "Doctor", "Nurse"]))
 ):
     """Generate patient demographics report."""
     # Parse dates
@@ -866,25 +926,96 @@ def opd_detailed_report(
         joinedload(OPDVisit.appointment)
     ).filter(*filters).order_by(OPDVisit.visit_date.desc()).all()
     
+    # Calculate total charges for each visit from the Charge table
+    # (since the total_charges field on OPDVisit may not be updated)
+    # Also include charges linked via encounter_id that belong to the OPD visit
+    visit_charges_map = {}
+    for visit in visits:
+        # Method 1: Direct link via opd_visit_id on Charge
+        direct_charges = db.query(Charge).filter(
+            Charge.opd_visit_id == visit.id,
+            Charge.is_active == True
+        ).all()
+        direct_total = sum([c.total_amount for c in direct_charges])
+        
+        # Method 2: Via encounter - charges linked to encounters that belong to this OPD visit
+        encounter_charges = db.query(Charge).join(
+            Encounter, Charge.encounter_id == Encounter.id
+        ).filter(
+            Encounter.opd_visit_id == visit.id,
+            Charge.is_active == True
+        ).all()
+        encounter_total = sum([c.total_amount for c in encounter_charges])
+        
+        # Method 3: Via invoice - charges on invoices linked to this OPD visit
+        invoice_charges = db.query(Charge).join(
+            Invoice, Charge.invoice_id == Invoice.id
+        ).filter(
+            Invoice.opd_visit_id == visit.id,
+            Charge.is_active == True
+        ).all()
+        invoice_total = sum([c.total_amount for c in invoice_charges])
+        
+        # Combine all charges (avoid double counting by using charge IDs)
+        all_charge_ids = set()
+        all_total = Decimal('0.00')
+        for c in direct_charges + encounter_charges + invoice_charges:
+            if c.id not in all_charge_ids:
+                all_charge_ids.add(c.id)
+                all_total += c.total_amount
+        
+        visit_charges_map[visit.id] = all_total
+    
+    # Attach calculated charges to each visit object for template access
+    for visit in visits:
+        visit.calculated_total_charges = visit_charges_map.get(visit.id, Decimal('0.00'))
+    
     # Calculate statistics
     total_visits = len(visits)
     active_visits = len([v for v in visits if v.status == OPDVisitStatus.ACTIVE])
     completed_visits = len([v for v in visits if v.status == OPDVisitStatus.COMPLETED])
     
     # Calculate revenue from charges linked to OPD visits
-    total_revenue = Decimal('0.00')
-    for visit in visits:
-        # Get charges linked to this OPD visit
-        charges = db.query(Charge).filter(
-            Charge.opd_visit_id == visit.id
-        ).all()
-        total_revenue += sum([c.total_amount for c in charges])
+    # Use the pre-calculated map for efficiency
+    total_revenue = sum(visit_charges_map.values())
     
-    # Breakdown by visit type
-    visit_type_breakdown = {}
+    # Breakdown by visit type - using patient history to determine revisit
+    # For consistency with consultation breakdown, check if patient has ANY previous visit
+    # (not just within the date range)
+    visit_type_breakdown = {"New": 0, "Revisit": 0}
+    
+    # First, get all patient IDs from visits
+    patient_ids = list(set([v.patient_id for v in visits if v.patient_id]))
+    
+    # For each patient, find their earliest visit date (anytime in the system)
+    if patient_ids:
+        # Get earliest visit for each patient
+        earliest_visits = db.query(
+            OPDVisit.patient_id,
+            func.min(OPDVisit.visit_date).label('earliest')
+        ).filter(
+            OPDVisit.patient_id.in_(patient_ids),
+            OPDVisit.is_active == True
+        ).group_by(OPDVisit.patient_id).all()
+        
+        patient_first_ever_visit = {v.patient_id: v.earliest for v in earliest_visits}
+    else:
+        patient_first_ever_visit = {}
+    
+    # Now categorize each visit in the report based on whether it's the patient's first ever visit
     for visit in visits:
-        vt = visit.visit_type or "unknown"
-        visit_type_breakdown[vt] = visit_type_breakdown.get(vt, 0) + 1
+        pid = visit.patient_id
+        if pid and pid in patient_first_ever_visit:
+            # Check if this is the patient's first ever visit
+            if visit.visit_date <= patient_first_ever_visit[pid]:
+                # This is the patient's first ever visit
+                visit_type_breakdown["New"] += 1
+            else:
+                # Patient has visited before
+                visit_type_breakdown["Revisit"] += 1
+        else:
+            # No patient_id or no history, count as New
+            visit_type_breakdown["New"] += 1
     
     # Breakdown by payment status (with revenue)
     payment_breakdown = {}
@@ -893,17 +1024,11 @@ def opd_detailed_report(
         ps = visit.payment_status or "unknown"
         payment_status_breakdown[ps] = payment_status_breakdown.get(ps, 0) + 1
         
-        # Calculate revenue for this payment status
+        # Calculate revenue for this payment status using the pre-calculated map
         if ps not in payment_breakdown:
             payment_breakdown[ps] = {"count": 0, "total": Decimal('0.00')}
         payment_breakdown[ps]["count"] += 1
-        
-        # Get charges for this visit
-        visit_charges = db.query(Charge).filter(
-            Charge.opd_visit_id == visit.id
-        ).all()
-        visit_revenue = sum([c.total_amount for c in visit_charges])
-        payment_breakdown[ps]["total"] += visit_revenue
+        payment_breakdown[ps]["total"] += visit_charges_map.get(visit.id, Decimal('0.00'))
 
     # New vs Revisit: consultation revenue by visit type
     # follow_up = Revisit; routine, walk_in, emergency = New
@@ -912,16 +1037,63 @@ def opd_detailed_report(
     new_visit_count = 0
     revisit_visit_count = 0
     for visit in visits:
-        consult_charges = db.query(Charge).filter(
+        # Use the pre-calculated charges from the map
+        all_charges = db.query(Charge).filter(Charge.is_active == True).all()
+        # Filter charges that belong to this visit via any method
+        visit_charge_ids = set()
+        visit_charge_total = Decimal('0.00')
+        
+        # Direct charges
+        direct = db.query(Charge).filter(
             Charge.opd_visit_id == visit.id,
-            Charge.charge_type == ChargeType.CONSULTATION
+            Charge.is_active == True
         ).all()
-        consult_total = sum([c.total_amount for c in consult_charges])
-        vt = (visit.visit_type or "").lower()
-        if vt == "follow_up":
+        for c in direct:
+            if c.id not in visit_charge_ids:
+                visit_charge_ids.add(c.id)
+                if c.charge_type == ChargeType.CONSULTATION:
+                    visit_charge_total += c.total_amount
+        
+        # Via encounter
+        enc = db.query(Charge).join(Encounter, Charge.encounter_id == Encounter.id).filter(
+            Encounter.opd_visit_id == visit.id,
+            Charge.is_active == True
+        ).all()
+        for c in enc:
+            if c.id not in visit_charge_ids:
+                visit_charge_ids.add(c.id)
+                if c.charge_type == ChargeType.CONSULTATION:
+                    visit_charge_total += c.total_amount
+        
+        # Via invoice
+        inv = db.query(Charge).join(Invoice, Charge.invoice_id == Invoice.id).filter(
+            Invoice.opd_visit_id == visit.id,
+            Charge.is_active == True
+        ).all()
+        for c in inv:
+            if c.id not in visit_charge_ids:
+                visit_charge_ids.add(c.id)
+                if c.charge_type == ChargeType.CONSULTATION:
+                    visit_charge_total += c.total_amount
+        
+        consult_total = visit_charge_total
+        
+        # Determine if this is a NEW or REVISIT patient
+        # A revisit is a patient who has visited the hospital before (any previous OPD visit exists)
+        # regardless of the visit_type field
+        # Check if patient has any visits BEFORE this visit date
+        previous_visit = db.query(OPDVisit).filter(
+            OPDVisit.patient_id == visit.patient_id,
+            OPDVisit.visit_date < visit.visit_date,
+            OPDVisit.is_active == True
+        ).first()
+        
+        if previous_visit:
+            # Patient has visited before → Revisit
             revisit_consultation_revenue += consult_total
             revisit_visit_count += 1
         else:
+            # First time ever visiting → New patient
             new_consultation_revenue += consult_total
             new_visit_count += 1
 
@@ -2038,7 +2210,7 @@ def disease_report(
     end_date: Optional[str] = Query(None),
     format: str = Query("html", regex="^(html|pdf|excel)$"),
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Management", "Doctor"]))
+    current_user = Depends(role_required(["Admin", "Management", "Doctor", "Nurse"]))
 ):
     """Generate disease report based on diseases form/database."""
     # Parse dates
@@ -2903,7 +3075,7 @@ def dhims_lab_report(
     period: Optional[str] = Query(None),
     format: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Lab Staff", "Management", "DHIMS2Preparer"]))
+    current_user = Depends(role_required(["Admin", "Lab Staff", "Management", "Doctor", "Nurse", "DHIMS2Preparer"]))
 ):
     """
     DHIMS2-style Lab Report for Ghana Health Service reporting.
@@ -4543,3 +4715,1354 @@ def refund_analysis_report(
     }
     
     return templates.TemplateResponse("reports/refund_analysis.html", context)
+
+
+# ==================== REVENUE REPORT ====================
+
+@router.get("/revenue", name="revenue_report")
+def revenue_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    period: str = Query("daily", regex="^(daily|monthly|yearly)$"),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance", "Management", "Front Office"]))
+):
+    """
+    Generate revenue report with breakdown by period and payment method.
+    """
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=30)  # Default: last 30 days
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Get all payments in date range
+    payments_query = db.query(Payment).filter(
+        Payment.is_active == True,
+        Payment.status == PaymentStatus.COMPLETED,
+        func.date(Payment.payment_date) >= start,
+        func.date(Payment.payment_date) <= end
+    ).order_by(Payment.payment_date)
+    
+    all_payments = payments_query.all()
+    
+    # Calculate total revenue
+    total_revenue = sum([p.amount for p in all_payments])
+    
+    # Group payments by period
+    payments_by_period = {}
+    if period == "daily":
+        for payment in all_payments:
+            period_key = payment.payment_date.date() if payment.payment_date else None
+            if period_key:
+                if period_key not in payments_by_period:
+                    payments_by_period[period_key] = {"count": 0, "total": Decimal('0.00')}
+                payments_by_period[period_key]["count"] += 1
+                payments_by_period[period_key]["total"] += payment.amount
+    elif period == "monthly":
+        for payment in all_payments:
+            if payment.payment_date:
+                period_key = date(payment.payment_date.year, payment.payment_date.month, 1)
+                if period_key not in payments_by_period:
+                    payments_by_period[period_key] = {"count": 0, "total": Decimal('0.00')}
+                payments_by_period[period_key]["count"] += 1
+                payments_by_period[period_key]["total"] += payment.amount
+    else:  # yearly
+        for payment in all_payments:
+            if payment.payment_date:
+                period_key = payment.payment_date.year
+                if period_key not in payments_by_period:
+                    payments_by_period[period_key] = {"count": 0, "total": Decimal('0.00')}
+                payments_by_period[period_key]["count"] += 1
+                payments_by_period[period_key]["total"] += payment.amount
+    
+    # Format payments for template
+    payments = []
+    for period_val, data in sorted(payments_by_period.items()):
+        payments.append(type('obj', (object,), {
+            'period': period_val,
+            'count': data["count"],
+            'total': data["total"]
+        }))
+    
+    # Payment method breakdown
+    payment_method_breakdown = []
+    method_totals = {}
+    for payment in all_payments:
+        method = payment.payment_method or "unknown"
+        if method not in method_totals:
+            method_totals[method] = {"total": Decimal('0.00'), "count": 0}
+        method_totals[method]["total"] += payment.amount
+        method_totals[method]["count"] += 1
+    
+    for method, data in method_totals.items():
+        payment_method_breakdown.append((method, data["total"], data["count"]))
+    
+    # Get hospital settings
+    hospital_settings = db.query(HospitalSettings).first()
+    
+    context = {
+        "request": request,
+        "title": "Revenue Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "period": period,
+        "total_revenue": total_revenue,
+        "payments": payments,
+        "payment_method_breakdown": payment_method_breakdown,
+        "hospital_settings": hospital_settings,
+        "report_date": datetime.now()
+    }
+    
+    if format == "pdf":
+        # PDF generation - can be implemented similarly to other reports
+        pass
+    elif format == "excel":
+        # Excel generation - can be implemented similarly to other reports
+        pass
+    
+    return templates.TemplateResponse("reports/revenue_report.html", context)
+
+
+# ==================== INVOICE REPORT ====================
+
+@router.get("/invoices", name="invoice_report")
+def invoice_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, description="Filter by invoice status"),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance", "Management"]))
+):
+    """
+    Generate invoice report with status breakdown and details.
+    """
+    from app.models.billing_models import InvoiceStatus
+    
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=30)  # Default: last 30 days
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Build query filters
+    invoice_filters = [
+        Invoice.is_active == True,
+        func.date(Invoice.invoice_date) >= start,
+        func.date(Invoice.invoice_date) <= end
+    ]
+    
+    if status_filter:
+        try:
+            invoice_status = InvoiceStatus(status_filter)
+            invoice_filters.append(Invoice.status == invoice_status)
+        except ValueError:
+            pass  # Invalid status, ignore filter
+    
+    # Get all invoices in date range
+    invoices = db.query(Invoice).filter(*invoice_filters).options(
+        joinedload(Invoice.patient)
+    ).order_by(Invoice.invoice_date.desc()).all()
+    
+    # Calculate totals
+    total_invoices = len(invoices)
+    total_amount = sum([inv.total_amount for inv in invoices])
+    total_paid = sum([inv.paid_amount for inv in invoices])
+    total_balance = sum([inv.balance for inv in invoices])
+    
+    # Status breakdown
+    status_breakdown = []
+    status_totals = {}
+    for invoice in invoices:
+        status = invoice.status
+        if status not in status_totals:
+            status_totals[status] = {"count": 0, "total": Decimal('0.00')}
+        status_totals[status]["count"] += 1
+        status_totals[status]["total"] += invoice.total_amount
+    
+    for status, data in status_totals.items():
+        status_breakdown.append((status, data["count"], data["total"]))
+    
+    # Get hospital settings
+    hospital_settings = db.query(HospitalSettings).first()
+    
+    context = {
+        "request": request,
+        "title": "Invoice Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "status_filter": status_filter or "",
+        "total_invoices": total_invoices,
+        "total_amount": total_amount,
+        "total_paid": total_paid,
+        "total_balance": total_balance,
+        "status_breakdown": status_breakdown,
+        "invoices": invoices,
+        "hospital_settings": hospital_settings,
+        "report_date": datetime.now()
+    }
+    
+    if format == "pdf":
+        # PDF generation - can be implemented similarly to other reports
+        pass
+    elif format == "excel":
+        # Excel generation - can be implemented similarly to other reports
+        pass
+    
+    return templates.TemplateResponse("reports/invoice_report.html", context)
+
+
+# ==================== PHARMACY STOCK/EXPIRY REPORT ====================
+
+@router.get("/pharmacy/stock-expiry", name="pharmacy_stock_expiry_report")
+def pharmacy_stock_expiry_report(
+    request: Request,
+    days_until_expiry: int = Query(90, description="Show items expiring within days"),
+    store_id: Optional[str] = Query(None, description="Filter by store ID"),
+    show_expired: bool = Query(False, description="Include expired items"),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Management", "Pharmacy Staff"]))
+):
+    """
+    Generate pharmacy stock and expiry report.
+    Shows current stock levels and items approaching expiry.
+    """
+    from app.models.pharmacy_models import PharmacyBatch, PharmacyDrug, PharmacyStore
+    from sqlalchemy.orm import joinedload
+    
+    today = date.today()
+    expiry_threshold = today + timedelta(days=days_until_expiry)
+    
+    # Build query with eager loading
+    batch_query = db.query(PharmacyBatch).options(
+        joinedload(PharmacyBatch.drug),
+        joinedload(PharmacyBatch.store)
+    ).join(PharmacyDrug)
+    
+    if not show_expired:
+        batch_query = batch_query.filter(PharmacyBatch.expiry_date > today)
+    
+    if store_id:
+        batch_query = batch_query.filter(PharmacyBatch.store_id == store_id)
+    
+    batches = batch_query.all()
+    
+    # Categorize batches
+    expired_items = []
+    expiring_soon = []  # Within threshold
+    good_stock = []
+    
+    for batch in batches:
+        if batch.expiry_date <= today:
+            expired_items.append(batch)
+        elif batch.expiry_date <= expiry_threshold:
+            expiring_soon.append(batch)
+        else:
+            good_stock.append(batch)
+    
+    # Get stores for filter dropdown
+    stores = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).all()
+    
+    # Calculate totals
+    total_expired_value = sum([(b.qty_on_hand or 0) * (b.unit_cost or 0) for b in expired_items])
+    total_expiring_value = sum([(b.qty_on_hand or 0) * (b.unit_cost or 0) for b in expiring_soon])
+    
+    context = {
+        "request": request,
+        "title": "Pharmacy Stock & Expiry Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "today": today.strftime("%Y-%m-%d"),
+        "today_date": today,
+        "days_until_expiry": days_until_expiry,
+        "show_expired": show_expired,
+        "selected_store": store_id,
+        "stores": stores,
+        "expired_items": expired_items,
+        "expiring_soon": expiring_soon,
+        "good_stock": good_stock,
+        "total_expired": len(expired_items),
+        "total_expiring": len(expiring_soon),
+        "total_good": len(good_stock),
+        "total_expired_value": total_expired_value,
+        "total_expiring_value": total_expiring_value,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    if format == "pdf":
+        pass  # Can be implemented
+    elif format == "excel":
+        pass  # Can be implemented
+    
+    return templates.TemplateResponse("reports/pharmacy_stock_expiry.html", context)
+
+
+# ==================== PATIENT VISIT HISTORY REPORT ====================
+
+@router.get("/patients/visit-history", name="patient_visit_history_report")
+def patient_visit_history_report(
+    request: Request,
+    patient_id: Optional[int] = Query(None, description="Filter by patient ID"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Management", "Doctor", "Front Office"]))
+):
+    """
+    Generate patient visit history report.
+    Shows individual patient encounter history or all visits in a period.
+    """
+    from app.models.encounter_models import Encounter
+    from app.models.opd_models import OPDVisit
+    from app.models.ipd_models import Admission
+    from app.models.disease_models import EncounterDisease
+    
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=30)
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Build query
+    encounter_query = db.query(Encounter).filter(
+        Encounter.is_active == True,
+        func.date(Encounter.created_at) >= start,
+        func.date(Encounter.created_at) <= end
+    )
+    
+    if patient_id:
+        encounter_query = encounter_query.filter(Encounter.patient_id == patient_id)
+    
+    encounters = encounter_query.options(
+        joinedload(Encounter.patient),
+        joinedload(Encounter.opd_visit),
+        joinedload(Encounter.admission),
+        joinedload(Encounter.clinician),
+        joinedload(Encounter.diseases).joinedload(EncounterDisease.disease)
+    ).order_by(Encounter.created_at.desc()).all()
+    
+    # Get patient list for dropdown
+    patients = db.query(Patient).filter(Patient.is_active == True).order_by(Patient.last_name).limit(100).all()
+    
+    # Statistics - Count unique OPD visits and IPD admissions (not encounters)
+    # A patient can have multiple encounters per visit (different clinical notes)
+    total_encounters = len(encounters)
+    
+    # Get unique OPD visits by opd_visit_id (excluding None)
+    opd_visit_ids = set(e.opd_visit_id for e in encounters if e.opd_visit_id is not None)
+    opd_visits = len(opd_visit_ids)
+    
+    # Get unique IPD admissions by admission_id (excluding None)
+    admission_ids = set(e.admission_id for e in encounters if e.admission_id is not None)
+    ipd_admissions = len(admission_ids)
+    
+    # General visits (encounters without opd_visit_id or admission_id)
+    general_visits = total_encounters - opd_visits - ipd_admissions
+    
+    # Group by patient and count unique visits (OPD + IPD)
+    patient_visits = {}
+    for enc in encounters:
+        pid = enc.patient_id
+        if pid not in patient_visits:
+            patient_visits[pid] = {"patient": enc.patient, "visits": 0}
+        # Only count each unique visit once
+        if enc.opd_visit_id:
+            patient_visits[pid][f"opd_{enc.opd_visit_id}"] = True
+        if enc.admission_id:
+            patient_visits[pid][f"ipd_{enc.admission_id}"] = True
+    
+    # Calculate actual visit counts per patient
+    for pid, data in patient_visits.items():
+        opd_count = sum(1 for k in data.keys() if k.startswith("opd_"))
+        ipd_count = sum(1 for k in data.keys() if k.startswith("ipd_"))
+        data["visits"] = opd_count + ipd_count
+    
+    context = {
+        "request": request,
+        "title": "Patient Visit History Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "selected_patient": patient_id,
+        "patients": patients,
+        "encounters": encounters,
+        "patient_visits": patient_visits,
+        "total_visits": opd_visits + ipd_admissions,
+        "opd_visits": opd_visits,
+        "ipd_admissions": ipd_admissions,
+        "general_visits": general_visits,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    return templates.TemplateResponse("reports/patient_visit_history.html", context)
+
+
+# ==================== BED OCCUPANCY REPORT ====================
+
+@router.get("/bed-occupancy", name="bed_occupancy_report")
+def bed_occupancy_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    ward_id: Optional[int] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Management", "Nurse"]))
+):
+    """
+    Generate bed occupancy report.
+    Shows bed utilization rates by ward.
+    """
+    from app.models.ipd_models import Bed, Ward
+    from app.models.bed_type_models import BedType
+    
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=30)
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Get all wards
+    ward_query = db.query(Ward).filter(Ward.is_active == True)
+    if ward_id:
+        ward_query = ward_query.filter(Ward.id == ward_id)
+    wards = ward_query.all()
+    
+    # Calculate occupancy for each ward
+    ward_data = []
+    total_beds = 0
+    total_occupied = 0
+    
+    for ward in wards:
+        beds = db.query(Bed).filter(
+            Bed.ward_id == ward.id,
+            Bed.is_active == True
+        ).all()
+        
+        bed_count = len(beds)
+        # For simplicity, count currently occupied beds
+        occupied = sum(1 for b in beds if b.status == "OCCUPIED")
+        
+        # Calculate average occupancy rate (simplified - uses current snapshot)
+        occupancy_rate = (occupied / bed_count * 100) if bed_count > 0 else 0
+        
+        ward_data.append({
+            "ward": ward,
+            "bed_count": bed_count,
+            "occupied": occupied,
+            "available": bed_count - occupied,
+            "occupancy_rate": occupancy_rate
+        })
+        
+        total_beds += bed_count
+        total_occupied += occupied
+    
+    overall_occupancy = (total_occupied / total_beds * 100) if total_beds > 0 else 0
+    
+    # Daily breakdown (simplified)
+    days_in_period = (end - start).days + 1
+    
+    context = {
+        "request": request,
+        "title": "Bed Occupancy Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "selected_ward": ward_id,
+        "wards": wards,
+        "ward_data": ward_data,
+        "total_beds": total_beds,
+        "total_occupied": total_occupied,
+        "total_available": total_beds - total_occupied,
+        "overall_occupancy": overall_occupancy,
+        "days_in_period": days_in_period,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    return templates.TemplateResponse("reports/bed_occupancy.html", context)
+
+
+# ==================== MORTALITY/MORBIDITY REPORT ====================
+
+@router.get("/mortality-morbidity", name="mortality_morbidity_report")
+def mortality_morbidity_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    ward_id: Optional[int] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Management", "Doctor"]))
+):
+    """
+    Generate Mortality/Morbidity report.
+    Shows death cases and discharge outcomes for IPD patients.
+    """
+    from app.models.ipd_models import Admission, DischargeStatus
+    
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=365)  # Default: last year
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Get all wards
+    from app.models.ipd_models import Ward
+    ward_query = db.query(Ward).filter(Ward.is_active == True)
+    if ward_id:
+        ward_query = ward_query.filter(Ward.id == ward_id)
+    wards = ward_query.all()
+    
+    # Get discharged patients in date range with discharge status
+    admission_query = db.query(Admission).filter(
+        Admission.is_active == True,
+        Admission.discharge_date.isnot(None),
+        func.date(Admission.discharge_date) >= start,
+        func.date(Admission.discharge_date) <= end
+    )
+    
+    if ward_id:
+        admission_query = admission_query.filter(Admission.ward_id == ward_id)
+    
+    admissions = admission_query.options(
+        joinedload(Admission.patient),
+        joinedload(Admission.ward)
+    ).all()
+    
+    # Categorize by discharge status
+    deaths = []
+    referrals = []
+    normal_discharges = []
+    absconded = []
+    
+    for adm in admissions:
+        if adm.discharge_status == DischargeStatus.DEATH:
+            deaths.append(adm)
+        elif adm.discharge_status == DischargeStatus.REFERRAL:
+            referrals.append(adm)
+        elif adm.discharge_status == DischargeStatus.ABSCONDED:
+            absconded.append(adm)
+        else:
+            normal_discharges.append(adm)
+    
+    # Calculate statistics
+    total_discharged = len(admissions)
+    death_count = len(deaths)
+    death_rate = (death_count / total_discharged * 100) if total_discharged > 0 else 0
+    
+    # Group deaths by diagnosis
+    death_by_diagnosis = {}
+    for death in deaths:
+        diag = death.discharge_diagnosis or "Unknown"
+        if diag not in death_by_diagnosis:
+            death_by_diagnosis[diag] = 0
+        death_by_diagnosis[diag] += 1
+    
+    # Sort by count
+    top_causes = sorted(death_by_diagnosis.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    # Group by ward
+    deaths_by_ward = {}
+    for death in deaths:
+        ward_name = death.ward.name if death.ward else "Unknown"
+        if ward_name not in deaths_by_ward:
+            deaths_by_ward[ward_name] = 0
+        deaths_by_ward[ward_name] += 1
+    
+    context = {
+        "request": request,
+        "title": "Mortality/Morbidity Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "selected_ward": ward_id,
+        "wards": wards,
+        "total_discharged": total_discharged,
+        "death_count": death_count,
+        "death_rate": death_rate,
+        "referral_count": len(referrals),
+        "normal_discharges": len(normal_discharges),
+        "absconded_count": len(absconded),
+        "deaths": deaths,
+        "referrals": referrals,
+        "normal_discharges_list": normal_discharges,
+        "top_causes": top_causes,
+        "deaths_by_ward": deaths_by_ward,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    return templates.TemplateResponse("reports/mortality_morbidity.html", context)
+
+
+@router.get("/waiting-time", name="waiting_time_report")
+def waiting_time_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    department: Optional[str] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Doctor", "Nurse", "Front Office", "Management"]))
+):
+    """Generate waiting time report for OPD visits.
+    Tracks time from queue entry to being seen by clinician."""
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=30)
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Build query filters
+    filters = [
+        OPDQueue.is_active == True,
+        func.date(OPDQueue.created_at) >= start,
+        func.date(OPDQueue.created_at) <= end
+    ]
+    
+    if department:
+        filters.append(OPDQueue.department == department)
+    
+    # Get queue entries
+    queue_entries = db.query(OPDQueue).options(
+        joinedload(OPDQueue.patient),
+        joinedload(OPDQueue.assigned_clinician)
+    ).filter(*filters).order_by(OPDQueue.created_at.desc()).all()
+    
+    # Calculate waiting times
+    waiting_times = []
+    total_wait_minutes = 0
+    total_service_minutes = 0
+    total_visit_minutes = 0
+    
+    for entry in queue_entries:
+        # Time from entry to checked in (vitals)
+        wait_to_checked = None
+        if entry.created_at and entry.checked_in_at:
+            wait_to_checked = (entry.checked_in_at - entry.created_at).total_seconds() / 60
+        
+        # Time from checked in to started (seen by clinician)
+        checked_to_started = None
+        if entry.checked_in_at and entry.started_at:
+            checked_to_started = (entry.started_at - entry.checked_in_at).total_seconds() / 60
+        
+        # Total wait time (entry to started)
+        total_wait = None
+        if entry.created_at and entry.started_at:
+            total_wait = (entry.started_at - entry.created_at).total_seconds() / 60
+        elif entry.created_at and entry.checked_in_at:
+            total_wait = (entry.checked_in_at - entry.created_at).total_seconds() / 60
+        
+        # Service time (started to completed)
+        service_time = None
+        if entry.started_at and entry.completed_at:
+            service_time = (entry.completed_at - entry.started_at).total_seconds() / 60
+        
+        # Total visit time (entry to completed)
+        total_visit = None
+        if entry.created_at and entry.completed_at:
+            total_visit = (entry.completed_at - entry.created_at).total_seconds() / 60
+        
+        if total_wait and total_wait > 0:
+            total_wait_minutes += total_wait
+        if service_time and service_time > 0:
+            total_service_minutes += service_time
+        if total_visit and total_visit > 0:
+            total_visit_minutes += total_visit
+        
+        waiting_times.append({
+            "entry": entry,
+            "wait_to_checked": wait_to_checked,
+            "checked_to_started": checked_to_started,
+            "total_wait": total_wait,
+            "service_time": service_time,
+            "total_visit": total_visit
+        })
+    
+    # Statistics
+    total_entries = len(queue_entries)
+    avg_wait = total_wait_minutes / total_entries if total_entries > 0 else 0
+    avg_service = total_service_minutes / total_entries if total_entries > 0 else 0
+    avg_visit = total_visit_minutes / total_entries if total_entries > 0 else 0
+    
+    # Breakdown by status
+    status_breakdown = {}
+    for entry in queue_entries:
+        status = entry.status.value if entry.status else "unknown"
+        if status not in status_breakdown:
+            status_breakdown[status] = {"count": 0, "total_wait": 0}
+        status_breakdown[status]["count"] += 1
+    
+    # Breakdown by department
+    dept_breakdown = {}
+    for entry in queue_entries:
+        dept = entry.department or "Unknown"
+        if dept not in dept_breakdown:
+            dept_breakdown[dept] = {"count": 0, "total_wait": 0}
+        dept_breakdown[dept]["count"] += 1
+    
+    # Breakdown by visit type
+    visit_type_breakdown = {}
+    for entry in queue_entries:
+        vt = entry.visit_type.value if entry.visit_type else "unknown"
+        if vt not in visit_type_breakdown:
+            visit_type_breakdown[vt] = {"count": 0}
+        visit_type_breakdown[vt]["count"] += 1
+    
+    # Get unique departments for filter
+    departments = db.query(OPDQueue.department).filter(
+        OPDQueue.is_active == True
+    ).distinct().all()
+    department_list = [d[0] for d in departments if d[0]]
+    
+    context = {
+        "request": request,
+        "title": "Waiting Time Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d") if start_date else start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d") if end_date else end.strftime("%Y-%m-%d"),
+        "department": department,
+        "departments": department_list,
+        "waiting_times": waiting_times,
+        "total_entries": total_entries,
+        "avg_wait": avg_wait,
+        "avg_service": avg_service,
+        "avg_visit": avg_visit,
+        "status_breakdown": status_breakdown,
+        "dept_breakdown": dept_breakdown,
+        "visit_type_breakdown": visit_type_breakdown,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    if format == "pdf":
+        from app.utils.pdf_generator import generate_waiting_time_report_pdf
+        pdf_content = generate_waiting_time_report_pdf(context)
+        filename_safe = f"waiting_time_report_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    elif format == "excel":
+        from app.utils.excel_generator import generate_waiting_time_report_excel
+        excel_content = generate_waiting_time_report_excel(context)
+        filename_safe = f"waiting_time_report_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.xlsx"
+        return Response(
+            content=excel_content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    
+    return templates.TemplateResponse("reports/waiting_time_report.html", context)
+
+
+@router.get("/glasses-prescription", name="glasses_prescription_report")
+def glasses_prescription_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance", "Management", "Doctor", "Front Office"]))
+):
+    """Generate report on glasses prescriptions vs actual payments.
+    Tracks patients prescribed glasses vs those who actually paid for them."""
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=90)
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Get all optical prescriptions in date range
+    prescription_filters = [
+        OpticalShopPrescription.is_active == True,
+        func.date(OpticalShopPrescription.prescription_date) >= start,
+        func.date(OpticalShopPrescription.prescription_date) <= end
+    ]
+    
+    prescriptions = db.query(OpticalShopPrescription).options(
+        joinedload(OpticalShopPrescription.patient),
+        joinedload(OpticalShopPrescription.prescribed_by)
+    ).filter(*prescription_filters).order_by(OpticalShopPrescription.prescription_date.desc()).all()
+    
+    # Get all optical orders in date range for payment tracking
+    order_filters = [
+        func.date(OpticalOrder.order_date) >= start,
+        func.date(OpticalOrder.order_date) <= end
+    ]
+    
+    if status:
+        order_filters.append(OpticalOrder.payment_status == status)
+    
+    orders = db.query(OpticalOrder).options(
+        joinedload(OpticalOrder.patient),
+        joinedload(OpticalOrder.prescription)
+    ).filter(*order_filters).order_by(OpticalOrder.order_date.desc()).all()
+    
+    # Map prescription to orders
+    prescription_to_orders = {}
+    for order in orders:
+        if order.prescription_id:
+            if order.prescription_id not in prescription_to_orders:
+                prescription_to_orders[order.prescription_id] = []
+            prescription_to_orders[order.prescription_id].append(order)
+    
+    # Build prescription data with payment status
+    prescription_data = []
+    total_prescribed = 0
+    total_paid = 0
+    total_unpaid = 0
+    total_partial = 0
+    
+    for rx in prescriptions:
+        rx_orders = prescription_to_orders.get(rx.id, [])
+        
+        # Determine if paid
+        payment_status = "not_ordered"
+        amount_paid = Decimal('0.00')
+        order_number = None
+        order_status = None
+        total_amount = Decimal('0.00')
+        
+        if rx_orders:
+            order = rx_orders[0]  # Take first order
+            order_number = order.order_number
+            order_status = order.payment_status
+            total_amount = order.total_amount or Decimal('0.00')
+            amount_paid = order.amount_paid or Decimal('0.00')
+            
+            if order.payment_status == PaymentStatus.PAID.value:
+                payment_status = "paid"
+                total_paid += 1
+            elif order.payment_status == PaymentStatus.PARTIAL.value:
+                payment_status = "partial"
+                total_partial += 1
+            elif order.payment_status == PaymentStatus.UNPAID.value:
+                payment_status = "unpaid"
+                total_unpaid += 1
+            else:
+                payment_status = "pending"
+        else:
+            total_prescribed += 1
+        
+        prescription_data.append({
+            "prescription": rx,
+            "payment_status": payment_status,
+            "order_number": order_number,
+            "order_status": order_status,
+            "total_amount": total_amount,
+            "amount_paid": amount_paid
+        })
+    
+    # Calculate statistics
+    total_prescriptions = len(prescriptions)
+    has_order = total_paid + total_partial + total_unpaid
+    no_order = total_prescriptions - has_order
+    
+    # Payment conversion rate
+    conversion_rate = (total_paid / total_prescriptions * 100) if total_prescriptions > 0 else 0
+    
+    # Breakdown by prescription source
+    source_breakdown = {}
+    for rx in prescriptions:
+        source = rx.source or "unknown"
+        if source not in source_breakdown:
+            source_breakdown[source] = {"total": 0, "paid": 0, "partial": 0, "unpaid": 0, "not_ordered": 0}
+        source_breakdown[source]["total"] += 1
+        
+        rx_orders = prescription_to_orders.get(rx.id, [])
+        if rx_orders:
+            order = rx_orders[0]
+            if order.payment_status == PaymentStatus.PAID.value:
+                source_breakdown[source]["paid"] += 1
+            elif order.payment_status == PaymentStatus.PARTIAL.value:
+                source_breakdown[source]["partial"] += 1
+            elif order.payment_status == PaymentStatus.UNPAID.value:
+                source_breakdown[source]["unpaid"] += 1
+            else:
+                source_breakdown[source]["not_ordered"] += 1
+        else:
+            source_breakdown[source]["not_ordered"] += 1
+    
+    # Breakdown by payment status
+    status_summary = {
+        "paid": total_paid,
+        "partial": total_partial,
+        "unpaid": total_unpaid,
+        "not_ordered": no_order
+    }
+    
+    # Total revenue from glasses
+    total_revenue = sum([o.total_amount for o in orders])
+    total_collected = sum([o.amount_paid for o in orders])
+    total_outstanding = total_revenue - total_collected
+    
+    context = {
+        "request": request,
+        "title": "Glasses Prescription vs Payment Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d") if start_date else start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d") if end_date else end.strftime("%Y-%m-%d"),
+        "status": status,
+        "prescription_data": prescription_data,
+        "orders": orders,
+        "total_prescriptions": total_prescriptions,
+        "total_paid": total_paid,
+        "total_partial": total_partial,
+        "total_unpaid": total_unpaid,
+        "no_order": no_order,
+        "conversion_rate": conversion_rate,
+        "source_breakdown": source_breakdown,
+        "status_summary": status_summary,
+        "total_revenue": total_revenue,
+        "total_collected": total_collected,
+        "total_outstanding": total_outstanding,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    if format == "pdf":
+        from app.utils.pdf_generator import generate_glasses_prescription_report_pdf
+        pdf_content = generate_glasses_prescription_report_pdf(context)
+        filename_safe = f"glasses_prescription_report_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    elif format == "excel":
+        from app.utils.excel_generator import generate_glasses_prescription_report_excel
+        excel_content = generate_glasses_prescription_report_excel(context)
+        filename_safe = f"glasses_prescription_report_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.xlsx"
+        return Response(
+            content=excel_content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    
+    return templates.TemplateResponse("reports/glasses_prescription_report.html", context)
+
+
+@router.get("/new-vs-old-visits", name="new_vs_old_visits_report")
+def new_vs_old_visits_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    department: Optional[str] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Doctor", "Nurse", "Front Office", "Management"]))
+):
+    """Generate report on new vs old (revisit) patient visits.
+    Classifies visits based on patient's history with the facility."""
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=30)
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Build query filters
+    filters = [
+        OPDVisit.is_active == True,
+        func.date(OPDVisit.visit_date) >= start,
+        func.date(OPDVisit.visit_date) <= end
+    ]
+    
+    if department:
+        filters.append(OPDVisit.department == department)
+    
+    # Get OPD visits with patient data
+    visits = db.query(OPDVisit).options(
+        joinedload(OPDVisit.patient)
+    ).filter(*filters).order_by(OPDVisit.visit_date.desc()).all()
+    
+    # Get all patient IDs
+    patient_ids = list(set([v.patient_id for v in visits if v.patient_id]))
+    
+    # For each patient, find their earliest visit (anytime in the system)
+    patient_first_visit = {}
+    if patient_ids:
+        earliest = db.query(
+            OPDVisit.patient_id,
+            func.min(OPDVisit.visit_date).label('first_visit')
+        ).filter(
+            OPDVisit.patient_id.in_(patient_ids),
+            OPDVisit.is_active == True
+        ).group_by(OPDVisit.patient_id).all()
+        patient_first_visit = {row.patient_id: row.first_visit for row in earliest}
+    
+    # Classify each visit
+    new_visits = []
+    old_visits = []
+    visit_data = []
+    
+    for visit in visits:
+        pid = visit.patient_id
+        is_new = False
+        
+        if pid and pid in patient_first_visit:
+            first_visit_date = patient_first_visit[pid]
+            if first_visit_date and visit.visit_date <= first_visit_date:
+                is_new = True
+        
+        if is_new:
+            new_visits.append(visit)
+        else:
+            old_visits.append(visit)
+        
+        visit_data.append({
+            "visit": visit,
+            "is_new": is_new,
+            "patient": visit.patient
+        })
+    
+    # Statistics
+    total_visits = len(visits)
+    total_new = len(new_visits)
+    total_old = len(old_visits)
+    new_percentage = (total_new / total_visits * 100) if total_visits > 0 else 0
+    old_percentage = (total_old / total_visits * 100) if total_visits > 0 else 0
+    
+    # Breakdown by department
+    dept_breakdown = {}
+    for visit in visits:
+        dept = visit.department or "Unknown"
+        if dept not in dept_breakdown:
+            dept_breakdown[dept] = {"new": 0, "old": 0}
+        
+        pid = visit.patient_id
+        is_new = False
+        if pid and pid in patient_first_visit:
+            first = patient_first_visit[pid]
+            if first and visit.visit_date <= first:
+                is_new = True
+        
+        if is_new:
+            dept_breakdown[dept]["new"] += 1
+        else:
+            dept_breakdown[dept]["old"] += 1
+    
+    # Breakdown by visit type
+    visit_type_breakdown = {}
+    for visit in visits:
+        vt = visit.visit_type or "Unknown"
+        if vt not in visit_type_breakdown:
+            visit_type_breakdown[vt] = {"new": 0, "old": 0}
+        
+        pid = visit.patient_id
+        is_new = False
+        if pid and pid in patient_first_visit:
+            first = patient_first_visit[pid]
+            if first and visit.visit_date <= first:
+                is_new = True
+        
+        if is_new:
+            visit_type_breakdown[vt]["new"] += 1
+        else:
+            visit_type_breakdown[vt]["old"] += 1
+    
+    # Breakdown by payment status
+    payment_breakdown = {}
+    for visit in visits:
+        ps = visit.payment_status or "unknown"
+        if ps not in payment_breakdown:
+            payment_breakdown[ps] = {"new": 0, "old": 0, "total": Decimal('0.00')}
+        
+        pid = visit.patient_id
+        is_new = False
+        if pid and pid in patient_first_visit:
+            first = patient_first_visit[pid]
+            if first and visit.visit_date <= first:
+                is_new = True
+        
+        if is_new:
+            payment_breakdown[ps]["new"] += 1
+        else:
+            payment_breakdown[ps]["old"] += 1
+        payment_breakdown[ps]["total"] += visit.total_charges or Decimal('0.00')
+    
+    # Get departments for filter
+    departments = db.query(OPDVisit.department).filter(
+        OPDVisit.is_active == True
+    ).distinct().all()
+    department_list = [d[0] for d in departments if d[0]]
+    
+    context = {
+        "request": request,
+        "title": "New vs Old Visits Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "department": department,
+        "departments": department_list,
+        "visit_data": visit_data,
+        "total_visits": total_visits,
+        "total_new": total_new,
+        "total_old": total_old,
+        "new_percentage": new_percentage,
+        "old_percentage": old_percentage,
+        "dept_breakdown": dept_breakdown,
+        "visit_type_breakdown": visit_type_breakdown,
+        "payment_breakdown": payment_breakdown,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    if format == "pdf":
+        from app.utils.pdf_generator import generate_new_old_visits_report_pdf
+        pdf_content = generate_new_old_visits_report_pdf(context)
+        filename_safe = f"new_old_visits_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    elif format == "excel":
+        from app.utils.excel_generator import generate_new_old_visits_report_excel
+        excel_content = generate_new_old_visits_report_excel(context)
+        filename_safe = f"new_old_visits_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.xlsx"
+        return Response(
+            content=excel_content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    
+    return templates.TemplateResponse("reports/new_old_visits_report.html", context)
+
+
+@router.get("/cataract-booked-vs-done", name="cataract_booked_done_report")
+def cataract_booked_done_report(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None),
+    format: str = Query("html", regex="^(html|pdf|excel)$"),
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Doctor", "Nurse", "Management", "Finance"]))
+):
+    """Generate report on cataract surgeries booked vs actually done.
+    Tracks scheduled cataract procedures vs completed/cancelled.no show."""
+    from app.models.procedure_models import EyeProcedureCategory, ProcedureStatus
+    
+    # Parse dates
+    if start_date:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start = date.today() - timedelta(days=90)
+    
+    if end_date:
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    else:
+        end = date.today()
+    
+    # Build query filters - cataract surgeries
+    filters = [
+        Procedure.eye_category == EyeProcedureCategory.CATARACT_SURGERY.value,
+        Procedure.is_active == True,
+        func.date(Procedure.scheduled_date) >= start,
+        func.date(Procedure.scheduled_date) <= end
+    ]
+    
+    if status_filter:
+        filters.append(Procedure.status == status_filter)
+    
+    # Get cataract procedures
+    procedures = db.query(Procedure).options(
+        joinedload(Procedure.patient),
+        joinedload(Procedure.ordered_by),
+        joinedload(Procedure.performed_by)
+    ).filter(*filters).order_by(Procedure.scheduled_date.desc()).all()
+    
+    # Classify as booked vs done
+    booked = []
+    done = []
+    cancelled = []
+    no_show = []
+    postponed = []
+    pending = []
+    
+    procedure_data = []
+    
+    for proc in procedures:
+        if proc.status == ProcedureStatus.COMPLETED:
+            status_category = "done"
+            done.append(proc)
+        elif proc.status == ProcedureStatus.CANCELLED:
+            status_category = "cancelled"
+            cancelled.append(proc)
+        elif proc.status == ProcedureStatus.NO_SHOW:
+            status_category = "no_show"
+            no_show.append(proc)
+        elif proc.status == ProcedureStatus.POSTPONED:
+            status_category = "postponed"
+            postponed.append(proc)
+        elif proc.status in [ProcedureStatus.SCHEDULED, ProcedureStatus.CONFIRMED, ProcedureStatus.ORDERED]:
+            status_category = "booked"
+            booked.append(proc)
+        else:
+            status_category = "pending"
+            pending.append(proc)
+        
+        procedure_data.append({
+            "procedure": proc,
+            "status_category": status_category,
+            "patient": proc.patient,
+            "ordered_by": proc.ordered_by,
+            "performed_by": proc.performed_by
+        })
+    
+    # Statistics
+    total_procedures = len(procedures)
+    total_booked = len(booked)
+    total_done = len(done)
+    total_cancelled = len(cancelled)
+    total_no_show = len(no_show)
+    total_postponed = len(postponed)
+    total_pending = len(pending)
+    
+    # Booking to completion rate
+    completion_rate = (total_done / total_booked * 100) if total_booked > 0 else 0
+    cancellation_rate = (total_cancelled / total_booked * 100) if total_booked > 0 else 0
+    no_show_rate = (total_no_show / total_booked * 100) if total_booked > 0 else 0
+    
+    # Breakdown by eye
+    eye_breakdown = {}
+    for proc in procedures:
+        eye = proc.eye.value if proc.eye else "Unknown"
+        if eye not in eye_breakdown:
+            eye_breakdown[eye] = {"booked": 0, "done": 0, "cancelled": 0, "no_show": 0, "postponed": 0}
+        
+        if proc.status == ProcedureStatus.COMPLETED:
+            eye_breakdown[eye]["done"] += 1
+        elif proc.status == ProcedureStatus.CANCELLED:
+            eye_breakdown[eye]["cancelled"] += 1
+        elif proc.status == ProcedureStatus.NO_SHOW:
+            eye_breakdown[eye]["no_show"] += 1
+        elif proc.status == ProcedureStatus.POSTPONED:
+            eye_breakdown[eye]["postponed"] += 1
+        elif proc.status in [ProcedureStatus.SCHEDULED, ProcedureStatus.CONFIRMED, ProcedureStatus.ORDERED]:
+            eye_breakdown[eye]["booked"] += 1
+    
+    # Breakdown by month
+    monthly_breakdown = {}
+    for proc in procedures:
+        if proc.scheduled_date:
+            month_key = proc.scheduled_date.strftime('%Y-%m')
+            if month_key not in monthly_breakdown:
+                monthly_breakdown[month_key] = {"booked": 0, "done": 0, "cancelled": 0, "no_show": 0}
+            
+            if proc.status == ProcedureStatus.COMPLETED:
+                monthly_breakdown[month_key]["done"] += 1
+            elif proc.status == ProcedureStatus.CANCELLED:
+                monthly_breakdown[month_key]["cancelled"] += 1
+            elif proc.status == ProcedureStatus.NO_SHOW:
+                monthly_breakdown[month_key]["no_show"] += 1
+            elif proc.status in [ProcedureStatus.SCHEDULED, ProcedureStatus.CONFIRMED, ProcedureStatus.ORDERED]:
+                monthly_breakdown[month_key]["booked"] += 1
+    
+    context = {
+        "request": request,
+        "title": "Cataract Booked vs Done Report",
+        "current_user": current_user,
+        "user_role": current_user.role.name,
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end.strftime("%Y-%m-%d"),
+        "status_filter": status_filter,
+        "procedure_data": procedure_data,
+        "total_procedures": total_procedures,
+        "total_booked": total_booked,
+        "total_done": total_done,
+        "total_cancelled": total_cancelled,
+        "total_no_show": total_no_show,
+        "total_postponed": total_postponed,
+        "total_pending": total_pending,
+        "completion_rate": completion_rate,
+        "cancellation_rate": cancellation_rate,
+        "no_show_rate": no_show_rate,
+        "eye_breakdown": eye_breakdown,
+        "monthly_breakdown": monthly_breakdown,
+        "hospital_settings": db.query(HospitalSettings).first(),
+        "report_date": datetime.now()
+    }
+    
+    if format == "pdf":
+        from app.utils.pdf_generator import generate_cataract_report_pdf
+        pdf_content = generate_cataract_report_pdf(context)
+        filename_safe = f"cataract_report_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.pdf"
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    elif format == "excel":
+        from app.utils.excel_generator import generate_cataract_report_excel
+        excel_content = generate_cataract_report_excel(context)
+        filename_safe = f"cataract_report_{start.strftime('%Y-%m-%d')}_{end.strftime('%Y-%m-%d')}.xlsx"
+        return Response(
+            content=excel_content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename_safe}"}
+        )
+    
+    return templates.TemplateResponse("reports/cataract_booked_done_report.html", context)

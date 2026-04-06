@@ -151,8 +151,8 @@ def auto_link_opd_visit(
     
     # If no active visit and appointment_id is provided, check if appointment has an OPD visit
     if appointment_id:
-        from app.models.scheduled_appointment_models import Appointment
-        appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        from app.models.scheduled_appointment_models import ScheduledAppointment
+        appointment = db.query(ScheduledAppointment).filter(ScheduledAppointment.id == appointment_id).first()
         if appointment:
             # Check if there's an OPD visit linked to this appointment
             opd_visit = db.query(OPDVisit).filter(
@@ -215,21 +215,8 @@ def auto_link_opd_visit(
         
         opd_visit = opd_crud.create_opd_visit(db, opd_visit_data, patient_id)
         
-        # For cash patients, create consultation charge if not already created
-        if patient.payment_mechanism and patient.payment_mechanism.value == "cash":
-            from app.services.charge_automation import create_charge_for_consultation
-            try:
-                create_charge_for_consultation(
-                    db, 
-                    patient_id, 
-                    None,  # created_by_id - will be set by the service
-                    encounter_id=None,
-                    opd_visit_id=opd_visit.id
-                )
-                opd_crud.mark_consultation_charge_created(db, opd_visit.id)
-            except Exception as e:
-                # Log error but don't fail the visit creation
-                print(f"Error creating consultation charge during auto-link: {e}")
+        # Note: Consultation charges are created at registration (front office), not during encounter creation
+        # This ensures cash patients pay at registration before seeing a clinician
         
         return opd_visit.id
         

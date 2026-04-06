@@ -205,6 +205,10 @@ class RefundProcess(BaseModel):
     notes: Optional[str] = None
 
 
+class RefundCancel(BaseModel):
+    notes: Optional[str] = None
+
+
 class RefundRead(RefundBase):
     id: int
     refund_number: str
@@ -310,4 +314,18 @@ class DiscountCalculationResult(BaseModel):
     discount_amount: Decimal
     applicable_rules: List[str]
     final_amount: Decimal
+
+
+# Admission Billing Schemas
+class AdmissionChargeItem(BaseModel):
+    """Individual admission charge item with service and quantity"""
+    service_pricing_id: int = Field(..., description="ID of the service pricing")
+    quantity: int = Field(default=1, ge=1, description="Quantity of the service")
+
+
+class AdmissionChargeCreate(BaseModel):
+    """Schema for adding multiple charges to an admission"""
+    admission_id: int
+    charges: List[AdmissionChargeItem] = Field(..., description="List of charges to add")
+    notes: Optional[str] = Field(None, description="Optional notes for the charges")
 

@@ -100,3 +100,14 @@ def get_default_price_for_service(db: Session, service_name: str, charge_type: s
         return pricing.unit_price
     return None
 
+
+def get_service_pricing_by_category(db: Session, category: str, charge_type: str = None) -> List[ServicePricing]:
+    """Get all active service pricing for a specific category"""
+    query = db.query(ServicePricing).filter(
+        ServicePricing.category == category,
+        ServicePricing.is_active == True
+    )
+    if charge_type:
+        query = query.filter(ServicePricing.charge_type == charge_type)
+    return query.order_by(ServicePricing.service_name).all()
+

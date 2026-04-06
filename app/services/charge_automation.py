@@ -13,7 +13,8 @@ from typing import Optional, Dict
 from decimal import Decimal
 from datetime import datetime
 
-from app.models.billing_models import Invoice, Charge, InvoiceStatus, ChargeType
+from app.models.billing_models import Invoice, Charge, InvoiceStatus, ChargeType, PaymentMethod
+from app.models.patient_models import PaymentMechanism
 from app.models.encounter_models import LabOrder, RadiologyOrder, Prescription, OrderStatus
 from app.models.lab_catalog_models import LabTest
 from app.models.inventory_models import Medication
@@ -32,6 +33,28 @@ DEFAULT_RADIOLOGY_COST = Decimal('100.00')
 DEFAULT_PHARMACY_COST = Decimal('20.00')  # Per unit
 DEFAULT_CONSULTATION_COST = Decimal('100.00')
 DEFAULT_PROCEDURE_COST = Decimal('150.00')
+
+
+def convert_payment_mechanism_to_method(payment_mechanism: PaymentMechanism) -> PaymentMethod:
+    """
+    Convert Patient PaymentMechanism enum to PaymentMethod enum for billing.
+    
+    PaymentMechanism (patient model): CASH, NHIS, PRIVATE_INSURANCE, SELF_PAY
+    PaymentMethod (billing model): cash, nhis, private_insurance, mobile_money, card, bank_transfer
+    
+    Args:
+        payment_mechanism: The payment mechanism from patient model
+        
+    Returns:
+        Corresponding PaymentMethod enum value
+    """
+    mapping = {
+        PaymentMechanism.CASH: PaymentMethod.CASH,
+        PaymentMechanism.NHIS: PaymentMethod.NHIS,
+        PaymentMechanism.PRIVATE_INSURANCE: PaymentMethod.PRIVATE_INSURANCE,
+        PaymentMechanism.SELF_PAY: PaymentMethod.CASH,  # SELF_PAY defaults to CASH
+    }
+    return mapping.get(payment_mechanism, PaymentMethod.CASH)
 
 
 def build_procedure_description(procedure: Procedure, catalog: Optional[ProcedureCatalog] = None) -> str:
@@ -72,11 +95,16 @@ def get_or_create_invoice_for_encounter(
     # DEBUG: Log encounter_id being queried
     print(f"[DEBUG] get_or_create_invoice_for_encounter - encounter_id: {encounter_id}")
     
-    # Check if invoice already exists for this encounter
+    # Check if invoice already exists for this encounter (any non-cancelled status)
     existing_invoice = db.query(Invoice).filter(
         Invoice.encounter_id == encounter_id,
         Invoice.is_active == True,
-        Invoice.status.in_([InvoiceStatus.DRAFT.value, InvoiceStatus.PENDING.value, InvoiceStatus.PARTIALLY_PAID.value])
+        Invoice.status.in_([
+            InvoiceStatus.DRAFT.value,
+            InvoiceStatus.PENDING.value,
+            InvoiceStatus.PARTIALLY_PAID.value,
+            InvoiceStatus.PAID.value,
+        ])
     ).first()
     
     if existing_invoice:
@@ -99,10 +127,10 @@ def get_or_create_invoice_for_encounter(
     # Check if patient is admitted (IPD)
     is_admitted = ipd_crud.get_current_admission(db, encounter.patient_id) is not None
     
-    # Determine payment mechanism from patient
-    payment_mechanism = None
+    # Determine payment method from patient
+    payment_method = None
     if patient.payment_mechanism:
-        payment_mechanism = patient.payment_mechanism
+        payment_method = convert_payment_mechanism_to_method(patient.payment_mechanism)
     
     # Create new invoice
     from app.schemas.billing_schemas import InvoiceCreate
@@ -110,7 +138,7 @@ def get_or_create_invoice_for_encounter(
         patient_id=encounter.patient_id,
         encounter_id=encounter_id,
         appointment_id=encounter.appointment_id,
-        payment_mechanism=payment_mechanism,
+        payment_mechanism=payment_method,
         charges=[]
     )
     
@@ -324,6 +352,29 @@ def create_charge_for_consultation(
     if not patient:
         return None
     
+    # Check if patient is already admitted to IPD - skip consultation fee for IPD patients
+    # IPD patients are billed for consultation as part of their admission/ward charges at discharge
+    from app.models.ipd_models import Admission, AdmissionStatus
+    from app.utils.payment_verification import is_patient_admitted
+    is_admitted = is_patient_admitted(db, patient_id)
+    if is_admitted:
+        logger.info(f"[CHARGE_AUTO_DBG] Patient {patient_id} is already admitted to IPD - skipping consultation fee creation")
+        return None
+    
+    # Check if patient has active direct service registration today
+    # Direct service patients skip consultation fee
+    from app.utils.payment_verification import has_active_direct_service_registration
+    if has_active_direct_service_registration(db, patient_id):
+        logger.info(f"[CHARGE_AUTO_DBG] Patient {patient_id} has active direct service registration - skipping consultation fee creation")
+        return None
+    
+    # Check if patient has a triage (vitals) record today
+    # Patients who don't go through triage should not be charged consultation
+    from app.utils.payment_verification import has_today_triage_record
+    if not has_today_triage_record(db, patient_id):
+        logger.info(f"[CHARGE_AUTO_DBG] Patient {patient_id} has no triage record today - skipping consultation fee creation")
+        return None
+    
     # If created_by_id is None, try to get a system user as fallback
     if not created_by_id:
         # Try to find an admin user as fallback
@@ -480,7 +531,7 @@ def create_charge_for_consultation(
             encounter_id=None,
             appointment_id=None,
             opd_visit_id=opd_visit_id,
-            payment_mechanism=patient.payment_mechanism,
+            payment_mechanism=convert_payment_mechanism_to_method(patient.payment_mechanism),
             charges=[]
         )
         invoice = billing_crud.create_invoice(db, invoice_data, created_by_id)
@@ -490,7 +541,7 @@ def create_charge_for_consultation(
             patient_id=patient_id,
             encounter_id=None,
             appointment_id=None,
-            payment_mechanism=patient.payment_mechanism,
+            payment_mechanism=convert_payment_mechanism_to_method(patient.payment_mechanism),
             charges=[]
         )
         invoice = billing_crud.create_invoice(db, invoice_data, created_by_id)
@@ -525,11 +576,16 @@ def create_charge_for_lab_order(
     For IPD cash customers: Consumables are pay-as-you-go, but charges can be deferred to discharge
     For insurance customers: Charges are created but can be billed later
     """
+    # Never bill amendment archive records — they are audit copies, not new service orders
+    if getattr(lab_order, 'result_status', None) == 'AMENDED_VERSION':
+        logger.info(f"[CHARGE_AUTO] Skipping charge for AMENDED_VERSION archive order {lab_order.id}")
+        return None
+
     # Check if charge already exists for this lab order
     existing_charge = db.query(Charge).filter(
         Charge.lab_order_id == lab_order.id
     ).first()
-    
+
     if existing_charge:
         return None  # Charge already exists, don't create duplicate
     
@@ -586,7 +642,7 @@ def create_charge_for_lab_order(
             patient_id=patient.id,
             encounter_id=None,
             appointment_id=None,
-            payment_mechanism=patient.payment_mechanism,
+            payment_mechanism=convert_payment_mechanism_to_method(patient.payment_mechanism),
             charges=[]
         )
         invoice = billing_crud.create_invoice(db, invoice_data, created_by_id)
@@ -685,7 +741,7 @@ def create_charge_for_radiology_order(
             patient_id=patient.id,
             encounter_id=None,
             appointment_id=None,
-            payment_mechanism=patient.payment_mechanism,
+            payment_mechanism=convert_payment_mechanism_to_method(patient.payment_mechanism),
             charges=[]
         )
         invoice = billing_crud.create_invoice(db, invoice_data, created_by_id)
@@ -736,6 +792,8 @@ def create_charge_for_prescription(
     
     For OPD cash customers: Pay-as-you-go (payment required before dispensing)
     For IPD cash customers: Consumables are pay-as-you-go, but charges can be deferred to discharge
+    
+    For walk-in prescriptions (is_walk_in=True): Creates a patient-level invoice
     """
     # Check if charge already exists for this prescription
     existing_charge = db.query(Charge).filter(
@@ -745,11 +803,74 @@ def create_charge_for_prescription(
     if existing_charge:
         return None  # Charge already exists, don't create duplicate
     
-    # Get encounter and patient to check payment mechanism and admission status
     from app.models.encounter_models import Encounter
     from app.models.patient_models import Patient, PaymentMechanism
     from app.crud import ipd_crud
     
+    # Handle walk-in prescriptions (no encounter) OR legacy prescriptions with no encounter
+    # Check both encounter_id is None AND is_walk_in flag
+    if prescription.encounter_id is None or prescription.is_walk_in:
+        # This is a walk-in pharmacy sale - create patient-level invoice
+        # For legacy data, try to get patient_id from encounter if available
+        patient_id = prescription.patient_id
+        
+        # If no patient_id on prescription but has encounter_id, try to get from encounter
+        if patient_id is None and prescription.encounter_id:
+            encounter = db.query(Encounter).filter(Encounter.id == prescription.encounter_id).first()
+            if encounter:
+                patient_id = encounter.patient_id
+        
+        if patient_id is None:
+            # Cannot create charge without patient - skip this prescription
+            print(f"Warning: Cannot create charge for prescription {prescription.id} - no patient found")
+            return None
+        
+        patient = db.query(Patient).filter(Patient.id == patient_id).first()
+        if not patient:
+            raise ValueError(f"Patient {prescription.patient_id} not found")
+        
+        # Check for existing active invoice for this patient (walk-in)
+        from app.models.billing_models import Invoice, InvoiceStatus
+        existing_invoice = db.query(Invoice).filter(
+            Invoice.patient_id == patient.id,
+            Invoice.encounter_id.is_(None),
+            Invoice.is_active == True,
+            Invoice.status.in_([InvoiceStatus.DRAFT.value, InvoiceStatus.PENDING.value])
+        ).first()
+        
+        if existing_invoice:
+            invoice = existing_invoice
+        else:
+            # Create new walk-in invoice
+            from app.schemas.billing_schemas import InvoiceCreate
+            invoice_data = InvoiceCreate(
+                patient_id=patient.id,
+                encounter_id=None,
+                payment_mechanism="cash",  # Walk-in is always cash
+                charges=[]
+            )
+            invoice = billing_crud.create_invoice(db, invoice_data, created_by_id)
+        
+        # Get price from medication inventory
+        unit_price = get_medication_price(db, prescription)
+        quantity = prescription.quantity if prescription.quantity else 1
+        
+        # Create charge
+        charge_data = ChargeCreate(
+            charge_type=ChargeType.PHARMACY,
+            description=f"Medication: {prescription.medication_name} ({prescription.dosage or 'N/A'}, {prescription.frequency or 'N/A'})",
+            quantity=quantity,
+            unit_price=unit_price,
+            discount=Decimal('0.00'),
+            tax_rate=Decimal('0.00'),
+            encounter_id=None,
+            prescription_id=prescription.id
+        )
+        
+        charge = billing_crud.add_charge_to_invoice(db, invoice.id, charge_data)
+        return charge
+    
+    # Original logic for encounter-based prescriptions
     encounter = db.query(Encounter).filter(Encounter.id == prescription.encounter_id).first()
     if not encounter:
         raise ValueError(f"Encounter {prescription.encounter_id} not found")

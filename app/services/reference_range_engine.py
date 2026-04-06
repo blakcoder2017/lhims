@@ -35,7 +35,14 @@ class ReferenceRangeResult:
         interpretation: Optional[str] = None,
         source_table: str = "lab_reference_ranges",
         range_id: Any = None,
-        is_fallback: bool = False
+        is_fallback: bool = False,
+        sex: Optional[str] = None,
+        age_min_days: Optional[int] = None,
+        age_max_days: Optional[int] = None,
+        matched_sex: Optional[str] = None,
+        matched_age_min: Optional[int] = None,
+        matched_age_max: Optional[int] = None,
+        notes: Optional[str] = None
     ):
         self.low = low
         self.high = high
@@ -47,6 +54,13 @@ class ReferenceRangeResult:
         self.source_table = source_table
         self.range_id = range_id
         self.is_fallback = is_fallback
+        self.sex = sex
+        self.age_min_days = age_min_days
+        self.age_max_days = age_max_days
+        self.matched_sex = matched_sex
+        self.matched_age_min = matched_age_min
+        self.matched_age_max = matched_age_max
+        self.notes = notes
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -59,7 +73,14 @@ class ReferenceRangeResult:
             "interpretation": self.interpretation,
             "source_table": self.source_table,
             "range_id": str(self.range_id) if self.range_id else None,
-            "is_fallback": self.is_fallback
+            "is_fallback": self.is_fallback,
+            "sex": self.sex,
+            "age_min_days": self.age_min_days,
+            "age_max_days": self.age_max_days,
+            "matched_sex": self.matched_sex,
+            "matched_age_min": self.matched_age_min,
+            "matched_age_max": self.matched_age_max,
+            "notes": self.notes
         }
 
 
@@ -93,12 +114,11 @@ def get_field_reference_range(
     Get the most appropriate reference range for a field code.
     
     Priority:
-    1. Exact sex match + exact age match
-    2. Exact sex match + age range overlap
-    3. ANY sex + exact age match
-    4. ANY sex + age range overlap
-    5. Facility-specific + exact match
-    6. Global fallback
+    1. First filter: Age-appropriate ranges only (patient falls within age range)
+    2. Then score by:
+       - Sex specificity: Exact match (+100) > ANY (+10)
+       - Age specificity: Exact match (+50) > min/max only (+30) > none (+5)
+       - Facility specificity (+20) > default (+1)
     
     Args:
         db: Database session
@@ -113,88 +133,171 @@ def get_field_reference_range(
     if not field_code:
         return None
     
+    # Field code aliases for FBC parameters - try alternate codes if not found
+    field_code_aliases = {
+        # Main FBC parameters - add common variations
+        'WBC': ['wbc', 'wbc_count', 'twbc', 'total_wbc', 'white_blood_cell'],
+        'HGB': ['Hb', 'hb', 'haemoglobin', 'haemoglobin_level', 'hemoglobin'],
+        'HCT': ['Hct', 'hct', 'pcv', 'PCV', 'haematocrit', 'packed_cell_volume'],
+        'RBC': ['rbc', 'red_blood_cell', 'red_cell_count'],
+        'PLT': ['Platelet', 'platelet', 'plt_count', 'thrombocyte'],
+        'MCV': ['mcv', 'mean_corpuscular_volume'],
+        'MCH': ['mch', 'mean_corpuscular_hemoglobin'],
+        'MCHC': ['mchc', 'mean_corpuscular_hemoglobin_concentration'],
+        'RDW': ['RDW_CV', 'RDW-CV', 'rdw', 'red_cell_distribution_width'],
+        'RDW_CV': ['RDW', 'RDW-CV'],
+        'RDW_SD': ['RDW-SD'],
+        'MPV': ['mpv', 'mean_platelet_volume'],
+        'LYM%': ['LYMPH%', 'LYMPH', 'lym', 'lymphocyte_percent'],
+        'LYM#': ['LYMPH#', 'LYMPH', 'lym_abs'],
+        'MON%': ['MONO%', 'MONOCYTE', 'mono'],
+        'MON#': ['MONO#', 'MONOCYTE', 'mono_abs'],
+        'NEU%': ['NEUT%', 'NEUTROPHIL', 'neut', 'poly'],
+        'NEU#': ['NEUT#', 'NEUTROPHIL', 'neut_abs'],
+        'EOS%': ['EO%', 'EOSINOPHIL', 'eos'],
+        'EOS#': ['EO#', 'EOSINOPHIL', 'eos_abs'],
+        'BASO%': ['BASO%', 'BASOPHIL', 'baso'],
+        'BASO#': ['BASO#', 'BASOPHIL', 'baso_abs'],
+        'RDW': ['RDW_CV', 'RDW-CV', 'rdw'],
+        'RDW_CV': ['RDW', 'RDW-CV'],
+        'RDW_SD': ['RDW-SD'],
+    }
+    
+    # Try original field code first, then try aliases
+    codes_to_try = [field_code]
+    if field_code in field_code_aliases:
+        codes_to_try.extend(field_code_aliases[field_code])
+    
     sex = normalize_sex(patient_sex)
     
-    # Build base query
-    query = db.query(LabReferenceRange).filter(
-        LabReferenceRange.field_code == field_code
-    )
-    
-    # Get all matching ranges first
-    all_ranges = query.all()
-    
-    if not all_ranges:
-        return None
-    
-    # Score each range based on specificity
-    scored_ranges = []
-    for rr in all_ranges:
-        score = 0
-        notes = []
+    # Try each code in order until we find a match
+    for code in codes_to_try:
+        # Build base query
+        query = db.query(LabReferenceRange).filter(
+            LabReferenceRange.field_code == code
+        )
         
-        # Sex specificity (higher = more specific)
-        if rr.sex == sex:
-            score += 100
-            notes.append(f"exact_sex({sex})")
-        elif rr.sex == "ANY":
-            score += 10
-            notes.append("any_sex")
-        else:
-            continue  # Skip non-matching sex
+        # Get all matching ranges first
+        all_ranges = query.all()
         
-        # Age specificity
-        if patient_age_days is not None:
-            age_match = False
-            if rr.age_min_days is not None and rr.age_max_days is not None:
-                if rr.age_min_days <= patient_age_days <= rr.age_max_days:
-                    score += 50
-                    age_match = True
-                    notes.append(f"exact_age({patient_age_days})")
-            elif rr.age_min_days is not None and rr.age_max_days is None:
-                if patient_age_days >= rr.age_min_days:
-                    score += 30
-                    age_match = True
-                    notes.append(f"min_age({rr.age_min_days})")
-            elif rr.age_min_days is None and rr.age_max_days is not None:
-                if patient_age_days <= rr.age_max_days:
-                    score += 30
-                    age_match = True
-                    notes.append(f"max_age({rr.age_max_days})")
-            else:
-                # No age restriction = global
-                score += 5
-                notes.append("no_age_restriction")
-        
-        # Facility specificity
-        if facility_id is not None:
-            if rr.facility_id == facility_id:
-                score += 20
-                notes.append(f"facility({facility_id})")
-            elif rr.facility_id is None:
-                score += 1
-                notes.append("default_facility")
-        
-        scored_ranges.append((score, rr, notes))
+        if all_ranges:
+            # Found ranges - use this code and proceed with scoring
+            
+            # First pass: Filter out ranges where patient falls OUTSIDE the age range
+            # This prevents adult ranges from being selected for pediatric patients
+            age_appropriate_ranges = []
+            for rr in all_ranges:
+                is_age_appropriate = False
+                
+                if patient_age_days is not None:
+                    # Check if patient age falls within the range
+                    if rr.age_min_days is not None and rr.age_max_days is not None:
+                        # Both min and max defined - patient must be within range
+                        if rr.age_min_days <= patient_age_days <= rr.age_max_days:
+                            is_age_appropriate = True
+                    elif rr.age_min_days is not None and rr.age_max_days is None:
+                        # Only min defined - patient must be >= min age
+                        if patient_age_days >= rr.age_min_days:
+                            is_age_appropriate = True
+                    elif rr.age_min_days is None and rr.age_max_days is not None:
+                        # Only max defined - patient must be <= max age
+                        if patient_age_days <= rr.age_max_days:
+                            is_age_appropriate = True
+                    else:
+                        # No age restriction - range applies to all ages
+                        is_age_appropriate = True
+                else:
+                    # No age specified - all ranges are age-appropriate
+                    is_age_appropriate = True
+                
+                if is_age_appropriate:
+                    age_appropriate_ranges.append(rr)
+            
+            # If no age-appropriate ranges found, fall back to ranges with no age restriction
+            if not age_appropriate_ranges:
+                age_appropriate_ranges = [rr for rr in all_ranges if rr.age_min_days is None and rr.age_max_days is None]
+            
+            if not age_appropriate_ranges:
+                # Last resort: use all ranges but penalize age mismatch
+                age_appropriate_ranges = all_ranges
+            
+            # Score each range based on specificity
+            scored_ranges = []
+            for rr in age_appropriate_ranges:
+                score = 0
+                notes = []
+                
+                # Sex specificity (higher = more specific)
+                if rr.sex == sex:
+                    score += 100
+                    notes.append(f"exact_sex({sex})")
+                elif rr.sex == "ANY":
+                    score += 10
+                    notes.append("any_sex")
+                else:
+                    continue  # Skip non-matching sex
+                
+                # Age specificity
+                if patient_age_days is not None:
+                    age_match = False
+                    if rr.age_min_days is not None and rr.age_max_days is not None:
+                        if rr.age_min_days <= patient_age_days <= rr.age_max_days:
+                            score += 50
+                            age_match = True
+                            notes.append(f"exact_age({patient_age_days})")
+                    elif rr.age_min_days is not None and rr.age_max_days is None:
+                        if patient_age_days >= rr.age_min_days:
+                            score += 30
+                            age_match = True
+                            notes.append(f"min_age({rr.age_min_days})")
+                    elif rr.age_min_days is None and rr.age_max_days is not None:
+                        if patient_age_days <= rr.age_max_days:
+                            score += 30
+                            age_match = True
+                            notes.append(f"max_age({rr.age_max_days})")
+                    else:
+                        # No age restriction = global
+                        score += 5
+                        notes.append("no_age_restriction")
+                
+                # Facility specificity
+                if facility_id is not None:
+                    if rr.facility_id == facility_id:
+                        score += 20
+                        notes.append(f"facility({facility_id})")
+                    elif rr.facility_id is None:
+                        score += 1
+                        notes.append("default_facility")
+                
+                scored_ranges.append((score, rr, notes))
+            
+            if not scored_ranges:
+                return None
+            
+            # Sort by score (highest first)
+            scored_ranges.sort(key=lambda x: x[0], reverse=True)
+            best_range = scored_ranges[0][1]
+            is_fallback = scored_ranges[0][0] < 100
+            
+            return ReferenceRangeResult(
+                low=best_range.low,
+                high=best_range.high,
+                critical_low=best_range.critical_low,
+                critical_high=best_range.critical_high,
+                unit=best_range.unit,
+                text_range=best_range.text_range,
+                is_fallback=is_fallback,
+                sex=best_range.sex,
+                age_min_days=best_range.age_min_days,
+                age_max_days=best_range.age_max_days,
+                matched_sex=best_range.sex,
+                matched_age_min=best_range.age_min_days,
+                matched_age_max=best_range.age_max_days,
+                notes=", ".join(scored_ranges[0][2]) if scored_ranges[0][2] else None
+            )
     
-    if not scored_ranges:
-        return None
-    
-    # Sort by score (highest first)
-    scored_ranges.sort(key=lambda x: x[0], reverse=True)
-    best_range = scored_ranges[0][1]
-    is_fallback = scored_ranges[0][0] < 100
-    
-    return ReferenceRangeResult(
-        low=best_range.low,
-        high=best_range.high,
-        critical_low=best_range.critical_low,
-        critical_high=best_range.critical_high,
-        unit=best_range.unit,
-        text_range=best_range.text_range,
-        source_table="lab_reference_ranges",
-        range_id=best_range.id,
-        is_fallback=is_fallback
-    )
+    # If no ranges found for any code, return None
+    return None
 
 
 def get_test_reference_range(
@@ -208,11 +311,10 @@ def get_test_reference_range(
     Get reference range from the test-level reference_ranges table.
     
     Priority:
-    1. Exact sex match + exact age match
-    2. Exact sex match + age range overlap
-    3. ANY sex + exact age match
-    4. ANY sex + age range overlap
-    5. Default adult fallback
+    1. First filter: Age-appropriate ranges only (patient falls within age range)
+    2. Then score by:
+       - Sex specificity: Exact match (+100) > ANY (+10)
+       - Age specificity: Exact match (+50) > min/max only (+30) > none (+5)
     
     Args:
         db: Database session
@@ -244,9 +346,47 @@ def get_test_reference_range(
     if not all_ranges:
         return None
     
+    # First pass: Filter out ranges where patient falls OUTSIDE the age range
+    # This prevents adult ranges from being selected for pediatric patients
+    age_appropriate_ranges = []
+    for rr in all_ranges:
+        is_age_appropriate = False
+        
+        if patient_age_years is not None:
+            # Check if patient age falls within the range
+            if rr.age_min is not None and rr.age_max is not None:
+                # Both min and max defined - patient must be within range
+                if rr.age_min <= patient_age_years <= rr.age_max:
+                    is_age_appropriate = True
+            elif rr.age_min is not None and rr.age_max is None:
+                # Only min defined - patient must be >= min age
+                if patient_age_years >= rr.age_min:
+                    is_age_appropriate = True
+            elif rr.age_min is None and rr.age_max is not None:
+                # Only max defined - patient must be <= max age
+                if patient_age_years <= rr.age_max:
+                    is_age_appropriate = True
+            else:
+                # No age restriction - range applies to all ages
+                is_age_appropriate = True
+        else:
+            # No age specified - all ranges are age-appropriate
+            is_age_appropriate = True
+        
+        if is_age_appropriate:
+            age_appropriate_ranges.append(rr)
+    
+    # If no age-appropriate ranges found, fall back to ranges with no age restriction
+    if not age_appropriate_ranges:
+        age_appropriate_ranges = [rr for rr in all_ranges if rr.age_min is None and rr.age_max is None]
+    
+    if not age_appropriate_ranges:
+        # Last resort: use all ranges but penalize age mismatch
+        age_appropriate_ranges = all_ranges
+    
     # Score each range
     scored_ranges = []
-    for rr in all_ranges:
+    for rr in age_appropriate_ranges:
         score = 0
         
         # Sex specificity
@@ -436,3 +576,171 @@ def validate_test_applicability(
         "warnings": warnings,
         "age_bracket": age_bracket
     }
+
+
+def get_gestational_age_reference_range(
+    db: Session,
+    field_code: str,
+    gestational_age_weeks: int,
+    patient_sex: Optional[str] = None,
+    facility_id: Optional[int] = None
+) -> Optional[ReferenceRangeResult]:
+    """
+    Get reference range based on gestational age for neonates.
+    
+    This is used for preterm infants where reference ranges differ based on
+    gestational age at birth (e.g., different hemoglobin ranges for 28-week vs 36-week infants).
+    
+    Args:
+        db: Database session
+        field_code: The field code to look up
+        gestational_age_weeks: Gestational age in weeks
+        patient_sex: Patient's sex (M, F, or ANY)
+        facility_id: Facility ID for multi-facility support
+        
+    Returns:
+        ReferenceRangeResult or None
+    """
+    if not field_code:
+        return None
+    
+    sex = normalize_sex(patient_sex)
+    
+    # Query for gestational age-based reference ranges
+    query = db.query(LabReferenceRange).filter(
+        LabReferenceRange.field_code == field_code,
+        LabReferenceRange.is_gestational_age_based == True
+    )
+    
+    all_ranges = query.all()
+    
+    if not all_ranges:
+        return None
+    
+    # Filter by gestational age range
+    appropriate_ranges = []
+    for rr in all_ranges:
+        # Check if gestational age falls within range
+        if rr.gestational_age_min_weeks is not None and rr.gestational_age_max_weeks is not None:
+            if rr.gestational_age_min_weeks <= gestational_age_weeks <= rr.gestational_age_max_weeks:
+                appropriate_ranges.append(rr)
+        elif rr.gestational_age_min_weeks is not None and rr.gestational_age_max_weeks is None:
+            if gestational_age_weeks >= rr.gestational_age_min_weeks:
+                appropriate_ranges.append(rr)
+        elif rr.gestational_age_min_weeks is None and rr.gestational_age_max_weeks is not None:
+            if gestational_age_weeks <= rr.gestational_age_max_weeks:
+                appropriate_ranges.append(rr)
+    
+    if not appropriate_ranges:
+        # Fall back to any gestational age range
+        appropriate_ranges = [rr for rr in all_ranges 
+                           if rr.gestational_age_min_weeks is None and rr.gestational_age_max_weeks is None]
+    
+    if not appropriate_ranges:
+        return None
+    
+    # Score by specificity
+    scored_ranges = []
+    for rr in appropriate_ranges:
+        score = 0
+        
+        # Sex specificity
+        if rr.sex == sex:
+            score += 100
+        elif rr.sex == "ANY":
+            score += 10
+        else:
+            continue  # Skip non-matching sex
+        
+        # Gestational age specificity
+        if rr.gestational_age_min_weeks is not None and rr.gestational_age_max_weeks is not None:
+            if rr.gestational_age_min_weeks <= gestational_age_weeks <= rr.gestational_age_max_weeks:
+                score += 50
+        elif rr.gestational_age_min_weeks is not None:
+            if gestational_age_weeks >= rr.gestational_age_min_weeks:
+                score += 30
+        elif rr.gestational_age_max_weeks is not None:
+            if gestational_age_weeks <= rr.gestational_age_max_weeks:
+                score += 30
+        else:
+            score += 5
+        
+        # Facility specificity
+        if facility_id is not None:
+            if rr.facility_id == facility_id:
+                score += 20
+            elif rr.facility_id is None:
+                score += 1
+        
+        scored_ranges.append((score, rr))
+    
+    if not scored_ranges:
+        return None
+    
+    scored_ranges.sort(key=lambda x: x[0], reverse=True)
+    best_range = scored_ranges[0][1]
+    is_fallback = scored_ranges[0][0] < 100
+    
+    return ReferenceRangeResult(
+        low=best_range.low,
+        high=best_range.high,
+        critical_low=best_range.critical_low,
+        critical_high=best_range.critical_high,
+        unit=best_range.unit,
+        text_range=best_range.text_range,
+        is_fallback=is_fallback,
+        sex=best_range.sex,
+        age_min_days=best_range.gestational_age_min_weeks * 7 if best_range.gestational_age_min_weeks else None,
+        age_max_days=best_range.gestational_age_max_weeks * 7 if best_range.gestational_age_max_weeks else None,
+        notes=f"gestational_age_based:{gestational_age_weeks}weeks"
+    )
+
+
+def get_reference_range_with_gestational_age(
+    db: Session,
+    field_code: str,
+    patient_age_days: Optional[int] = None,
+    patient_sex: Optional[str] = None,
+    gestational_age_weeks: Optional[int] = None,
+    facility_id: Optional[int] = None
+) -> Optional[ReferenceRangeResult]:
+    """
+    Get reference range with support for both postnatal age and gestational age.
+    
+    For neonates (age < 1 year), this function will:
+    1. First try to find gestational age-based ranges
+    2. Fall back to postnatal age-based ranges
+    
+    Args:
+        db: Database session
+        field_code: The field code to look up
+        patient_age_days: Patient's postnatal age in days
+        patient_sex: Patient's sex
+        gestational_age_weeks: Gestational age in weeks (for neonates)
+        facility_id: Facility ID
+        
+    Returns:
+        ReferenceRangeResult or None
+    """
+    # If we have gestational age for a neonate, prioritize gestational age ranges
+    if gestational_age_weeks is not None and patient_age_days is not None and patient_age_days < 365:
+        # Try gestational age-based ranges first
+        ga_result = get_gestational_age_reference_range(
+            db=db,
+            field_code=field_code,
+            gestational_age_weeks=gestational_age_weeks,
+            patient_sex=patient_sex,
+            facility_id=facility_id
+        )
+        
+        if ga_result:
+            return ga_result
+    
+    # Fall back to standard postnatal age-based lookup
+    return get_field_reference_range(
+        db=db,
+        field_code=field_code,
+        patient_age_days=patient_age_days,
+        patient_sex=patient_sex,
+        facility_id=facility_id
+    )

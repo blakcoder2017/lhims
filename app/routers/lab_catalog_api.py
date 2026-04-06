@@ -10,7 +10,7 @@ from app.core.deps import get_current_user, role_required
 from app.models.lab_catalog_models import LabTest
 from app.models.lab_models import ReferenceRange
 from app.crud import lab_catalog_crud
-from app.schemas.lab_catalog_schemas import LabTestCreate, LabTestUpdate, ReferenceRangeCreate
+from app.schemas.lab_catalog_schemas import LabTestCreate, LabTestUpdate, ReferenceRangeCreate, ReferenceRangeUpdate
 from app.schemas.lab_catalog_schemas import LabTestUpdate, LabTestActivate
 
 router = APIRouter(tags=["Lab Catalog"])
@@ -310,6 +310,64 @@ def get_lab_test_categories_api(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/api/v1/lab/tests/{test_id}/parameters", name="lab_test_parameters_api")
+def get_lab_test_parameters_api(
+    test_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get reference ranges (parameters) for a specific lab test.
+    Used by template builder to add test parameters to templates.
+    Returns list of parameters with their reference ranges.
+    """
+    # Get the test
+    test = db.query(LabTest).filter(LabTest.id == test_id).first()
+    if not test:
+        raise HTTPException(status_code=404, detail="Lab test not found")
+    
+    # Get reference ranges for this test
+    ranges = db.query(ReferenceRange).filter(
+        ReferenceRange.test_id == test_id,
+        ReferenceRange.is_active == True
+    ).all()
+    
+    # If no specific ranges, return the test itself as a single parameter
+    if not ranges:
+        return [
+            {
+                "test_id": test.id,
+                "test_name": test.test_name,
+                "test_code": test.test_code,
+                "parameter_name": test.test_name,
+                "parameter_code": test.test_code or f"param_{test.id}",
+                "unit": None,
+                "normal_min": None,
+                "normal_max": None,
+                "critical_low": None,
+                "critical_high": None
+            }
+        ]
+    
+    return [
+        {
+            "test_id": r.test_id,
+            "test_name": r.test_name,
+            "test_code": r.test_code,
+            "parameter_name": r.test_name,
+            "parameter_code": r.test_code or f"param_{r.id}",
+            "unit": r.unit,
+            "normal_min": float(r.normal_min) if r.normal_min else None,
+            "normal_max": float(r.normal_max) if r.normal_max else None,
+            "critical_low": float(r.critical_low) if r.critical_low else None,
+            "critical_high": float(r.critical_high) if r.critical_high else None,
+            "gender": r.gender,
+            "age_min": r.age_min,
+            "age_max": r.age_max
+        }
+        for r in ranges
+    ]
+
+
 @router.get("/lab/reference-ranges", name="reference_ranges_dashboard")
 def reference_ranges_dashboard(
     request: Request,
@@ -320,6 +378,10 @@ def reference_ranges_dashboard(
     """Reference ranges management dashboard"""
     ranges = lab_catalog_crud.get_reference_ranges(db, test_id=test_id)
     tests = lab_catalog_crud.get_lab_tests(db, limit=200)
+    template_ranges = lab_catalog_crud.get_template_reference_ranges(db, limit=500)
+    
+    # Get missing reference ranges info
+    missing_info = lab_catalog_crud.get_missing_reference_ranges(db)
     
     context = {
         "request": request,
@@ -328,7 +390,9 @@ def reference_ranges_dashboard(
         "user_role": current_user.role.name,
         "ranges": ranges,
         "tests": tests,
-        "test_id": test_id
+        "test_id": test_id,
+        "template_ranges": template_ranges,
+        "missing_info": missing_info
     }
     return templates.TemplateResponse("lab/reference_ranges.html", context)
 
@@ -340,6 +404,9 @@ def create_reference_range(
     current_user = Depends(role_required(["Admin", "Lab Staff"])),
     test_id: Optional[int] = Form(None),
     test_name: str = Form(...),
+    age_min: Optional[str] = Form(None),
+    age_max: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
     normal_min: Optional[str] = Form(None),
     normal_max: Optional[str] = Form(None),
     critical_low: Optional[str] = Form(None),
@@ -352,6 +419,9 @@ def create_reference_range(
     range_data = ReferenceRangeCreate(
         test_id=test_id,
         test_name=test_name,
+        age_min=int(age_min) if age_min else None,
+        age_max=int(age_max) if age_max else None,
+        gender=gender if gender else None,
         normal_min=Decimal(normal_min) if normal_min else None,
         normal_max=Decimal(normal_max) if normal_max else None,
         critical_low=Decimal(critical_low) if critical_low else None,
@@ -361,4 +431,115 @@ def create_reference_range(
     
     range_obj = lab_catalog_crud.create_reference_range(db, range_data)
     return RedirectResponse(url="/lab/reference-ranges?status=created", status_code=302)
+
+
+@router.post("/lab/reference-ranges/edit", name="edit_reference_range", status_code=302)
+def edit_reference_range(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Lab Staff"])),
+    range_id: int = Form(...),
+    test_id: Optional[int] = Form(None),
+    test_name: str = Form(...),
+    age_min: Optional[str] = Form(None),
+    age_max: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
+    normal_min: Optional[str] = Form(None),
+    normal_max: Optional[str] = Form(None),
+    critical_low: Optional[str] = Form(None),
+    critical_high: Optional[str] = Form(None),
+    unit: Optional[str] = Form(None)
+):
+    """Edit a reference range"""
+    from decimal import Decimal
+    
+    range_update = ReferenceRangeUpdate(
+        test_id=test_id,
+        test_name=test_name,
+        age_min=int(age_min) if age_min else None,
+        age_max=int(age_max) if age_max else None,
+        gender=gender if gender else None,
+        normal_min=Decimal(normal_min) if normal_min else None,
+        normal_max=Decimal(normal_max) if normal_max else None,
+        critical_low=Decimal(critical_low) if critical_low else None,
+        critical_high=Decimal(critical_high) if critical_high else None,
+        unit=unit
+    )
+    
+    updated_range = lab_catalog_crud.update_reference_range(db, range_id, range_update)
+    if not updated_range:
+        return RedirectResponse(url="/lab/reference-ranges?status=error", status_code=302)
+    return RedirectResponse(url="/lab/reference-ranges?status=updated", status_code=302)
+
+
+@router.post("/lab/reference-ranges/parameter/create", name="create_template_reference_range", status_code=302)
+def create_template_reference_range(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Lab Staff"])),
+    field_code: str = Form(...),
+    sex: str = Form("ANY"),
+    age_min_days: Optional[str] = Form(None),
+    age_max_days: Optional[str] = Form(None),
+    low: Optional[str] = Form(None),
+    high: Optional[str] = Form(None),
+    critical_low: Optional[str] = Form(None),
+    critical_high: Optional[str] = Form(None),
+    text_range: Optional[str] = Form(None),
+    unit: Optional[str] = Form(None)
+):
+    """Create a template parameter reference range"""
+    new_range = lab_catalog_crud.create_template_reference_range(
+        db=db,
+        field_code=field_code,
+        sex=sex,
+        age_min_days=int(age_min_days) if age_min_days else None,
+        age_max_days=int(age_max_days) if age_max_days else None,
+        low=float(low) if low else None,
+        high=float(high) if high else None,
+        critical_low=float(critical_low) if critical_low else None,
+        critical_high=float(critical_high) if critical_high else None,
+        text_range=text_range,
+        unit=unit
+    )
+    return RedirectResponse(url="/lab/reference-ranges?status=param_created", status_code=302)
+
+
+@router.post("/lab/reference-ranges/parameter/edit", name="edit_template_reference_range", status_code=302)
+def edit_template_reference_range(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Lab Staff"])),
+    range_id: str = Form(...),
+    field_code: str = Form(...),
+    sex: str = Form("ANY"),
+    age_min_days: Optional[str] = Form(None),
+    age_max_days: Optional[str] = Form(None),
+    low: Optional[str] = Form(None),
+    high: Optional[str] = Form(None),
+    critical_low: Optional[str] = Form(None),
+    critical_high: Optional[str] = Form(None),
+    text_range: Optional[str] = Form(None),
+    unit: Optional[str] = Form(None)
+):
+    """Edit a template parameter reference range"""
+    from uuid import UUID
+    
+    updated_range = lab_catalog_crud.update_template_reference_range(
+        db=db,
+        range_id=UUID(range_id),
+        field_code=field_code,
+        sex=sex,
+        age_min_days=int(age_min_days) if age_min_days else None,
+        age_max_days=int(age_max_days) if age_max_days else None,
+        low=float(low) if low else None,
+        high=float(high) if high else None,
+        critical_low=float(critical_low) if critical_low else None,
+        critical_high=float(critical_high) if critical_high else None,
+        text_range=text_range,
+        unit=unit
+    )
+    if not updated_range:
+        return RedirectResponse(url="/lab/reference-ranges?status=error", status_code=302)
+    return RedirectResponse(url="/lab/reference-ranges?status=param_updated", status_code=302)
 

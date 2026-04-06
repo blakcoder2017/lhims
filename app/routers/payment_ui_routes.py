@@ -88,20 +88,24 @@ def collect_payment_page(
     new_visit: Optional[str] = Query(None),
     return_to: Optional[str] = Query("triage"),
     visit_type: Optional[str] = Query(None),
-    department: Optional[str] = Query(None),
+    service_pricing_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Front Office", "Finance", "Admin"])),
 ):
-    """Payment page: select department (for department-based consultation fee) then proceed to pay."""
+    """Payment page: select consultation service pricing then proceed to pay."""
     patient = patient_crud.get_patient(db, patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     if not is_cash_patient(db, patient_id):
         return RedirectResponse(url=f"/patients/{patient_id}/triage", status_code=302)
-    departments, _ = department_crud.get_departments(db, limit=100, active_only=True)
+    
+    # Fetch consultation service pricing - filter by charge_type=opd
+    consultation_pricing = service_pricing_crud.get_service_pricing_by_charge_type(db, "opd")
+    
     has_previous, revisit_pct = _get_revisit_info(db, patient_id)
     is_revisit_eligible = has_previous and revisit_pct is not None
-    # visit_type override: "revisit" or "new" from query; otherwise auto from history
+    
+    # Visit type override: "revisit" or "new" from query; otherwise auto from history
     effective_visit_type = None
     if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
         effective_visit_type = "revisit"
@@ -109,39 +113,39 @@ def collect_payment_page(
         effective_visit_type = "new"
     elif is_revisit_eligible:
         effective_visit_type = "revisit"
-    from app.services.charge_automation import get_consultation_price_for_department
+    
     from decimal import Decimal
-    departments_with_prices = []
-    for dept in departments:
-        full_price = get_consultation_price_for_department(db, department_name=dept.name, visit_type=None)
-        revisit_price = (
-            get_consultation_price_for_department(
-                db, department_name=dept.name, visit_type="revisit",
-                revisit_follow_up_percentage=Decimal(str(revisit_pct)) if revisit_pct else None
-            )
-            if is_revisit_eligible else None
-        )
-        departments_with_prices.append({
-            "id": dept.id,
-            "name": dept.name,
-            "full_price": float(full_price) if full_price else None,
+    # Build service pricing list with prices
+    service_pricing_list = []
+    for sp in consultation_pricing:
+        full_price = Decimal(str(sp.unit_price))
+        revisit_price = None
+        if is_revisit_eligible and revisit_pct:
+            revisit_price = (full_price * Decimal(str(revisit_pct)) / Decimal("100")).quantize(Decimal("0.01"))
+        service_pricing_list.append({
+            "id": sp.id,
+            "service_name": sp.service_name,
+            "service_code": sp.service_code,
+            "full_price": float(full_price),
             "revisit_price": float(revisit_price) if revisit_price else None,
         })
-    preselect_department = (department or "").strip() or None
+    
+    preselect_service_pricing_id = service_pricing_id
+    
     context = {
         "request": request,
-        "title": "Collect payment – Select department and pay",
+        "title": "Collect payment – Select consultation service and pay",
         "current_user": current_user,
         "user_role": current_user.role.name,
         "patient": patient,
-        "departments": departments_with_prices,
+        "service_pricing": service_pricing_list,  # Changed from departments to service_pricing
         "opd_visit_id": opd_visit_id,
         "new_visit": new_visit or "",
         "return_to": return_to or "triage",
         "is_revisit_eligible": is_revisit_eligible,
         "revisit_discount_pct": revisit_pct,
         "effective_visit_type": effective_visit_type,
-        "preselect_department": preselect_department,
+        "preselect_service_pricing_id": preselect_service_pricing_id,
     }
     return templates.TemplateResponse("billing/collect_payment.html", context)
 
@@ -257,7 +261,37 @@ def process_vitals_payment(
     amount: str = Form(...)
 ):
     """Process payment for vitals fee."""
+    from app.models.billing_models import Invoice, Charge
+    import logging
+    logger = logging.getLogger(__name__)
+    
     amount_decimal = Decimal(amount)
+    
+    # Validate invoice belongs to patient FIRST
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.patient_id != patient_id:
+        raise HTTPException(status_code=400, detail="Invoice does not belong to this patient")
+    
+    # Validate and fix amount if it's invalid (0 or less)
+    if amount_decimal <= 0:
+        # Fallback: get the amount from the invoice's balance
+        if invoice and invoice.balance is not None and invoice.balance > Decimal("0"):
+            amount_decimal = invoice.balance
+            logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+        else:
+            # Last resort: get from charge
+            charge = db.query(Charge).filter(Charge.invoice_id == invoice_id).first()
+            if charge and charge.total_amount > Decimal("0"):
+                amount_decimal = charge.total_amount
+                logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+            else:
+                logger.warning(f"Invalid payment amount: {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment amount must be greater than 0. Please contact administrator."
+                )
     
     # Create payment
     payment_data = PaymentCreate(
@@ -285,7 +319,7 @@ def pay_consultation_page(
     return_to: Optional[str] = Query(None),
     new_visit: Optional[str] = Query(None),
     from_lab: Optional[int] = Query(None),
-    department: Optional[str] = Query(None),
+    service_pricing_id: Optional[int] = Query(None),
     from_registration: Optional[str] = Query(None),
     opd_visit_id: Optional[int] = Query(None),
     visit_type: Optional[str] = Query(None),
@@ -309,6 +343,11 @@ def pay_consultation_page(
             redirect_url += f"?new_visit={new_visit}" if "?" not in redirect_url else f"&new_visit={new_visit}"
         return RedirectResponse(url=redirect_url, status_code=302)
 
+    # Get service pricing if provided
+    service_pricing_obj = None
+    if service_pricing_id:
+        service_pricing_obj = service_pricing_crud.get_service_pricing(db, service_pricing_id)
+    
     # When encounter_id is set (e.g. from lab: pay visit = consultation + lab), use that invoice
     if encounter_id is not None:
         invoice = db.query(Invoice).filter(
@@ -359,8 +398,8 @@ def pay_consultation_page(
         if completed_encounters_today > 0:
             is_new_visit_flag = True
     
-    # For new visits, department is required for correct consultation fee (from Departments, not ServicePricing)
-    if is_new_visit_flag and not department:
+    # For new visits, service_pricing_id is required for correct consultation fee
+    if is_new_visit_flag and not service_pricing_id:
         params = [f"new_visit=true", f"return_to={return_to or 'triage'}"]
         if opd_visit_id:
             params.append(f"opd_visit_id={opd_visit_id}")
@@ -370,6 +409,33 @@ def pay_consultation_page(
             url=str(request.url_for("collect_payment", patient_id=patient_id)) + "?" + "&".join(params),
             status_code=302
         )
+    
+    # Get revisit info
+    has_prev, revisit_pct = _get_revisit_info(db, patient_id)
+    visit_type_for_price = None
+    if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
+        visit_type_for_price = "revisit"
+    elif visit_type and str(visit_type).strip().lower() == "new":
+        visit_type_for_price = None
+    elif has_prev and revisit_pct is not None:
+        visit_type_for_price = "revisit"
+    
+    # Calculate the correct price from service pricing
+    base_price = DEFAULT_CONSULTATION_FEE
+    service_name = "Consultation Fee (Covers Vitals & Initial Encounter)"
+    if service_pricing_obj:
+        base_price = Decimal(str(service_pricing_obj.unit_price))
+        service_name = service_pricing_obj.service_name
+    
+    # Revisit discount is DISABLED - always use the full service pricing amount
+    if visit_type_for_price == "revisit" and revisit_pct:
+        base_price = (base_price * Decimal(str(revisit_pct)) / Decimal("100")).quantize(Decimal("0.01"))
+    
+    # Ensure price is at least the minimum default fee
+    if base_price <= Decimal("0"):
+        base_price = DEFAULT_CONSULTATION_FEE
+    
+    correct_price = base_price
     
     # For new visits, we need to find or create a NEW charge (not use old paid charges)
     if is_new_visit_flag:
@@ -392,90 +458,41 @@ def pay_consultation_page(
         existing_charge = existing_query.order_by(Charge.created_at.desc()).first()
         
         if existing_charge:
-            # Department is required (enforced above); ensure charge amount matches department price (with revisit discount)
-            from app.services.charge_automation import get_consultation_price_for_department
-            has_prev, revisit_pct = _get_revisit_info(db, patient_id)
-            visit_type_for_price = None
-            if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
-                visit_type_for_price = "revisit"
-            elif visit_type and str(visit_type).strip().lower() == "new":
-                visit_type_for_price = None
-            elif has_prev and revisit_pct is not None:
-                visit_type_for_price = "revisit"
-            correct_price = get_consultation_price_for_department(
-                db, department_name=department,
-                visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
-            )
-            if abs(float(existing_charge.total_amount) - float(correct_price)) > 0.01:
+            # Ensure charge amount matches service pricing price (with revisit discount)
+            # Always update if service_pricing_obj is provided with a valid price
+            # This ensures we never use a 0 or incorrect amount when pricing is set
+            should_update = False
+            if service_pricing_obj and service_pricing_obj.unit_price is not None and service_pricing_obj.unit_price > 0:
+                # Service pricing has a valid price - always use it
+                should_update = True
+            elif abs(float(existing_charge.total_amount) - float(correct_price)) > 0.01:
+                # Fallback: update if amount differs significantly (and no valid service pricing)
+                should_update = True
+            
+            if should_update:
                 from app.crud import billing_crud
                 from app.schemas.billing_schemas import ChargeUpdate
                 updated = billing_crud.update_charge(db, existing_charge.id, ChargeUpdate(unit_price=correct_price))
                 if updated:
                     existing_charge = updated
                     db.refresh(existing_charge.invoice)
-            
+        
             charge = existing_charge
             invoice = existing_charge.invoice
             payment_paid = False  # Unpaid charge requires payment
         else:
-            # Create a new charge via create_charge_for_consultation (may return existing charge from triage etc.)
-            from app.services.charge_automation import create_charge_for_consultation
+            # Create a new charge via get_or_create_service_charge
             from app.crud import opd_crud
-            vt_param = None
-            if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
-                vt_param = "revisit"
-            elif visit_type and str(visit_type).strip().lower() == "new":
-                vt_param = "new"
-            new_charge = create_charge_for_consultation(
-                db, patient_id, current_user.id,
+            charge, invoice = get_or_create_service_charge(
+                db, patient_id, ChargeType.CONSULTATION,
+                service_name,
+                correct_price,
                 encounter_id=encounter_id,
                 opd_visit_id=opd_visit_id,
-                department_name=department,
-                visit_type=vt_param
+                created_by_id=current_user.id
             )
-            if new_charge:
-                charge = new_charge
-                invoice = new_charge.invoice
-                # Verify amount: create_charge_for_consultation may return existing charge with wrong price
-                if department:
-                    from app.services.charge_automation import get_consultation_price_for_department
-                    has_prev, revisit_pct = _get_revisit_info(db, patient_id)
-                    visit_type_for_price = vt_param if vt_param else ("revisit" if has_prev and revisit_pct else None)
-                    correct_price = get_consultation_price_for_department(
-                        db, department_name=department,
-                        visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
-                    )
-                    if abs(float(charge.total_amount) - float(correct_price)) > 0.01:
-                        from app.crud import billing_crud
-                        from app.schemas.billing_schemas import ChargeUpdate
-                        updated = billing_crud.update_charge(db, charge.id, ChargeUpdate(unit_price=correct_price))
-                        if updated:
-                            charge = updated
-                            db.refresh(charge.invoice)
-                if opd_visit_id:
-                    opd_crud.mark_consultation_charge_created(db, opd_visit_id)
-            else:
-                # Fallback to get_or_create_service_charge (uses department price with revisit discount when applicable)
-                from app.services.charge_automation import get_consultation_price_for_department
-                has_prev, revisit_pct = _get_revisit_info(db, patient_id)
-                visit_type_for_price = vt_param if vt_param else ("revisit" if has_prev and revisit_pct else None)
-                if department:
-                    service_price = get_consultation_price_for_department(
-                        db, department_name=department,
-                        visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
-                    )
-                else:
-                    service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
-                charge, invoice = get_or_create_service_charge(
-                    db, patient_id, ChargeType.CONSULTATION,
-                    "Consultation Fee (Covers Vitals & Initial Encounter)",
-                    service_price,
-                    encounter_id=encounter_id,
-                    opd_visit_id=opd_visit_id,
-                    created_by_id=current_user.id
-                )
-                if opd_visit_id:
-                    opd_crud.mark_consultation_charge_created(db, opd_visit_id)
+            if opd_visit_id:
+                opd_crud.mark_consultation_charge_created(db, opd_visit_id)
             payment_paid = False  # New charge requires payment
     else:
         # Not a new visit - check if already paid
@@ -490,29 +507,28 @@ def pay_consultation_page(
                 redirect_url += f"?new_visit={new_visit}" if "?" not in redirect_url else f"&new_visit={new_visit}"
             return RedirectResponse(url=redirect_url, status_code=302)
         
-        # Get or create charge (use department-based price with revisit discount when department provided)
+        # Get or create charge (use service pricing with revisit discount when provided)
         if not charge:
-            from app.services.charge_automation import get_consultation_price_for_department
-            has_prev, revisit_pct = _get_revisit_info(db, patient_id)
-            visit_type_for_price = None
-            if visit_type and str(visit_type).strip().lower() in ("revisit", "follow_up"):
-                visit_type_for_price = "revisit"
-            elif visit_type and str(visit_type).strip().lower() != "new" and has_prev and revisit_pct:
-                visit_type_for_price = "revisit"
-                service_price = get_consultation_price_for_department(
-                    db, department_name=department,
-                    visit_type=visit_type_for_price, revisit_follow_up_percentage=revisit_pct
-                )
-            else:
-                service_price = get_service_price(db, "Consultation", "consultation", DEFAULT_CONSULTATION_FEE)
             charge, invoice = get_or_create_service_charge(
                 db, patient_id, ChargeType.CONSULTATION,
-                "Consultation Fee (Covers Vitals & Initial Encounter)",
-                service_price,
+                service_name,
+                correct_price,
                 encounter_id=encounter_id,
                 opd_visit_id=opd_visit_id,
                 created_by_id=current_user.id
             )
+        else:
+            # Existing charge found - ensure it has the correct price when service pricing is set
+            # This fixes cases where old charges have 0 amount
+            if service_pricing_obj and service_pricing_obj.unit_price is not None and service_pricing_obj.unit_price > 0:
+                if float(charge.total_amount) != float(correct_price):
+                    from app.crud import billing_crud
+                    from app.schemas.billing_schemas import ChargeUpdate
+                    updated = billing_crud.update_charge(db, charge.id, ChargeUpdate(unit_price=correct_price))
+                    if updated:
+                        charge = updated
+                        db.refresh(charge.invoice)
+                        invoice = charge.invoice
     
     # When encounter_id is set, pay full visit invoice (consultation + lab)
     amount_due = None
@@ -534,7 +550,7 @@ def pay_consultation_page(
         "amount_due": amount_due,
         "from_lab": from_lab,
         "from_registration": from_registration,
-        "department": department,
+        "service_pricing_id": service_pricing_id,
     }
 
     return templates.TemplateResponse("billing/pay_service.html", context)
@@ -553,20 +569,43 @@ def process_consultation_payment(
     new_visit: Optional[str] = Form(None),
     from_lab: Optional[int] = Form(None),
     from_registration: Optional[str] = Form(None),
+    service_pricing_id: Optional[int] = Form(None),
     department: Optional[str] = Form(None),
 ):
     """Process payment for consultation fee (or full visit = consultation + lab)."""
     from app.models.billing_models import Invoice, Charge
     from app.crud import opd_crud
+    import logging
+    logger = logging.getLogger(__name__)
 
     amount_decimal = Decimal(amount)
 
-    # Validate invoice belongs to patient
+    # Validate invoice belongs to patient FIRST (needed for amount correction)
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.patient_id != patient_id:
         raise HTTPException(status_code=400, detail="Invoice does not belong to this patient")
+
+    # Validate and fix amount if it's invalid (0 or less)
+    # Get the correct amount from the invoice if needed
+    if amount_decimal <= 0:
+        # Fallback: get the amount from the invoice's balance
+        if invoice and invoice.balance is not None and invoice.balance > Decimal("0"):
+            amount_decimal = invoice.balance
+            logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+        else:
+            # Last resort: get from charge
+            charge = db.query(Charge).filter(Charge.invoice_id == invoice_id).first()
+            if charge and charge.total_amount > Decimal("0"):
+                amount_decimal = charge.total_amount
+                logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+            else:
+                logger.warning(f"Invalid payment amount: {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment amount must be greater than 0. Please contact administrator."
+                )
 
     # If patient has an active OPD visit, ensure invoice is linked to it
     active_opd_visit = opd_crud.get_active_opd_visit_by_patient(db, patient_id)
@@ -602,13 +641,16 @@ def process_consultation_payment(
         opd_crud.sync_opd_visit_payment_status(db, active_opd_visit.id)
 
     # Create receipt so it appears in receipts and can be printed
+    # Capture payment_id before try block to safely use in exception handler
+    payment_id_for_logging = payment.id
+    payment_receipt_number = payment.receipt_number
     try:
         receipt = billing_crud.create_receipt(db, payment.id, current_user.id)
         receipt_number = receipt.receipt_number
     except Exception as e:
         import logging
-        logging.getLogger(__name__).exception("Error creating receipt for payment %s: %s", payment.id, e)
-        receipt_number = payment.receipt_number or "N/A"
+        logging.getLogger(__name__).exception("Error creating receipt for payment %s: %s", payment_id_for_logging, e)
+        receipt_number = payment_receipt_number or "N/A"
 
     # Send SMS notification to patient for consultation payment
     try:
@@ -798,7 +840,37 @@ def process_radiology_payment(
     amount: str = Form(...)
 ):
     """Process payment for radiology fee."""
+    from app.models.billing_models import Invoice, Charge
+    import logging
+    logger = logging.getLogger(__name__)
+    
     amount_decimal = Decimal(amount)
+    
+    # Validate invoice belongs to patient FIRST
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.patient_id != patient_id:
+        raise HTTPException(status_code=400, detail="Invoice does not belong to this patient")
+    
+    # Validate and fix amount if it's invalid (0 or less)
+    if amount_decimal <= 0:
+        # Fallback: get the amount from the invoice's balance
+        if invoice and invoice.balance is not None and invoice.balance > Decimal("0"):
+            amount_decimal = invoice.balance
+            logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+        else:
+            # Last resort: get from charge
+            charge = db.query(Charge).filter(Charge.invoice_id == invoice_id).first()
+            if charge and charge.total_amount > Decimal("0"):
+                amount_decimal = charge.total_amount
+                logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+            else:
+                logger.warning(f"Invalid payment amount: {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment amount must be greater than 0. Please contact administrator."
+                )
     
     # Create payment
     payment_data = PaymentCreate(
@@ -915,7 +987,37 @@ def process_pharmacy_payment(
     amount: str = Form(...)
 ):
     """Process payment for pharmacy/prescription fee."""
+    from app.models.billing_models import Invoice, Charge
+    import logging
+    logger = logging.getLogger(__name__)
+    
     amount_decimal = Decimal(amount)
+    
+    # Validate invoice belongs to patient FIRST
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.patient_id != patient_id:
+        raise HTTPException(status_code=400, detail="Invoice does not belong to this patient")
+    
+    # Validate and fix amount if it's invalid (0 or less)
+    if amount_decimal <= 0:
+        # Fallback: get the amount from the invoice's balance
+        if invoice and invoice.balance is not None and invoice.balance > Decimal("0"):
+            amount_decimal = invoice.balance
+            logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+        else:
+            # Last resort: get from charge
+            charge = db.query(Charge).filter(Charge.invoice_id == invoice_id).first()
+            if charge and charge.total_amount > Decimal("0"):
+                amount_decimal = charge.total_amount
+                logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+            else:
+                logger.warning(f"Invalid payment amount: {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment amount must be greater than 0. Please contact administrator."
+                )
     
     # Create payment
     payment_data = PaymentCreate(
@@ -1039,7 +1141,37 @@ def process_lab_payment(
     amount: str = Form(...)
 ):
     """Process payment for lab test fee."""
+    from app.models.billing_models import Invoice, Charge
+    import logging
+    logger = logging.getLogger(__name__)
+    
     amount_decimal = Decimal(amount)
+    
+    # Validate invoice belongs to patient FIRST
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.patient_id != patient_id:
+        raise HTTPException(status_code=400, detail="Invoice does not belong to this patient")
+    
+    # Validate and fix amount if it's invalid (0 or less)
+    if amount_decimal <= 0:
+        # Fallback: get the amount from the invoice's balance
+        if invoice and invoice.balance is not None and invoice.balance > Decimal("0"):
+            amount_decimal = invoice.balance
+            logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+        else:
+            # Last resort: get from charge
+            charge = db.query(Charge).filter(Charge.invoice_id == invoice_id).first()
+            if charge and charge.total_amount > Decimal("0"):
+                amount_decimal = charge.total_amount
+                logger.info(f"Fixed invalid payment amount from 0.00 to {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+            else:
+                logger.warning(f"Invalid payment amount: {amount_decimal} for patient {patient_id}, invoice {invoice_id}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment amount must be greater than 0. Please contact administrator."
+                )
     
     # Create payment
     payment_data = PaymentCreate(

@@ -89,7 +89,7 @@ def get_missing_reference_ranges():
     # G6PD
     ranges.extend([
         {"field_code": "g6pd_result", "sex": "ANY", "age_min_days": 0, "age_max_days": 36500,
-         "text_range": "Normal,Deficient,Intermediate", "unit": None},
+         "text_range": "-", "unit": None},
     ])
     
     # Direct Coombs

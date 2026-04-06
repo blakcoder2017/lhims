@@ -15,7 +15,7 @@ from sqlalchemy import or_, and_, func
 from typing import Optional, List
 
 from app.db.database import get_db
-from app.core.deps import role_required
+from app.core.deps import role_required, get_current_user
 from app.core.templates import templates
 from app.models.pharmacy_models import (
     PharmacyDosageForm, PharmacyDrug, PharmacySupplier, PharmacyStore,
@@ -25,6 +25,7 @@ from app.models.pharmacy_models import (
 )
 from app.models.encounter_models import Prescription, Encounter
 from app.models.patient_models import Patient
+from app.models.inventory_models import Medication, StockItem
 from app.services.pharmacy_fefo import (
     get_available_batches_fefo,
     allocate_fefo,
@@ -48,9 +49,14 @@ def _can_view_cost(db: Session, role_name: str) -> bool:
 def formulary_search(
     q: str = Query(..., min_length=2),
     db: Session = Depends(get_db),
-    current_user=Depends(role_required(["Admin", "Doctor", "Nurse", "Clinician", "Pharmacy Staff"])),
+    current_user = Depends(get_current_user),
 ):
     """Search formulations: generic + strength + dosage form + route. Doctor MUST select one."""
+    from datetime import datetime
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Formulary search called with q={q}")
+    
     search = f"%{q.strip()}%"
     items = (
         db.query(PharmacyDrug)
@@ -67,6 +73,10 @@ def formulary_search(
         .limit(50)
         .all()
     )
+    
+    # Get active store
+    store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+    
     out = []
     for d in items:
         df = d.dosage_form.name if d.dosage_form else ""
@@ -79,6 +89,32 @@ def formulary_search(
         label += f" {df}"
         if d.route:
             label += f" ({d.route})"
+        
+        # Get price and stock from pharmacy batches
+        default_price = None
+        available_stock = 0
+        if store:
+            # Get FEFO batch (earliest expiry first)
+            batch = db.query(PharmacyBatch).filter(
+                PharmacyBatch.store_id == store.id,
+                PharmacyBatch.drug_id == d.id,
+                PharmacyBatch.status == "ACTIVE",
+                PharmacyBatch.expiry_date >= datetime.now().date(),
+                PharmacyBatch.qty_on_hand > 0,
+            ).order_by(PharmacyBatch.expiry_date.asc()).first()
+            
+            if batch and batch.selling_price:
+                default_price = float(batch.selling_price)
+            
+            # Calculate total available stock
+            batches = db.query(PharmacyBatch).filter(
+                PharmacyBatch.store_id == store.id,
+                PharmacyBatch.drug_id == d.id,
+                PharmacyBatch.status == "ACTIVE",
+                PharmacyBatch.expiry_date >= datetime.now().date(),
+            ).all()
+            available_stock = float(sum(b.qty_on_hand for b in batches if b.qty_on_hand > 0))
+        
         out.append({
             "id": str(d.id),
             "item_code": d.item_code,
@@ -93,6 +129,8 @@ def formulary_search(
             "concentration_unit": d.concentration_unit,
             "pack_size": d.pack_size,
             "is_controlled": d.is_controlled,
+            "default_price": default_price,
+            "available_stock": available_stock,
         })
     return JSONResponse(content=out)
 
@@ -593,12 +631,18 @@ def report_controlled_register(
 @router.get("/drugs", name="pharmacy_drugs_list")
 def drugs_list_api(
     db: Session = Depends(get_db),
-    current_user=Depends(role_required(["Admin", "Pharmacy Staff"])),
+    current_user = Depends(get_current_user),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
 ):
-    """List all drugs with optional search."""
+    """List all drugs with optional search, including price and stock info."""
+    from datetime import date
+    from sqlalchemy import func
+    
+    # Get active store
+    store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+    
     q = db.query(PharmacyDrug).options(joinedload(PharmacyDrug.dosage_form))
     if search:
         s = f"%{search}%"
@@ -612,6 +656,7 @@ def drugs_list_api(
     q = q.filter(PharmacyDrug.is_active == True)
     total = q.count()
     drugs = q.order_by(PharmacyDrug.generic_name).offset((page - 1) * limit).limit(limit).all()
+    
     out = []
     for d in drugs:
         df = d.dosage_form.name if d.dosage_form else ""
@@ -624,6 +669,32 @@ def drugs_list_api(
         label += f" {df}"
         if d.route:
             label += f" ({d.route})"
+        
+        # Get stock and price info from pharmacy batches
+        default_price = None
+        available_stock = 0
+        if store:
+            # Get FEFO batch (earliest expiry first)
+            batch = db.query(PharmacyBatch).filter(
+                PharmacyBatch.store_id == store.id,
+                PharmacyBatch.drug_id == d.id,
+                PharmacyBatch.status == "ACTIVE",
+                PharmacyBatch.expiry_date >= date.today(),
+                PharmacyBatch.qty_on_hand > 0,
+            ).order_by(PharmacyBatch.expiry_date.asc()).first()
+            
+            if batch and batch.selling_price:
+                default_price = float(batch.selling_price)
+            
+            # Calculate total available stock
+            batches = db.query(PharmacyBatch).filter(
+                PharmacyBatch.store_id == store.id,
+                PharmacyBatch.drug_id == d.id,
+                PharmacyBatch.status == "ACTIVE",
+                PharmacyBatch.expiry_date >= date.today(),
+            ).all()
+            available_stock = float(sum(b.qty_on_hand for b in batches if b.qty_on_hand > 0))
+        
         out.append({
             "id": str(d.id),
             "item_code": d.item_code,
@@ -641,6 +712,8 @@ def drugs_list_api(
             "reorder_qty": float(d.reorder_qty) if d.reorder_qty else None,
             "is_controlled": d.is_controlled,
             "label": label,
+            "default_price": default_price,
+            "available_stock": available_stock,
         })
     return JSONResponse(content={"total": total, "page": page, "limit": limit, "drugs": out})
 
@@ -1672,3 +1745,364 @@ def get_dispense_slip(
         "patient": dispense.patient,
     }
     return templates.TemplateResponse("pharmacy_ghana/dispense_slip.html", context)
+
+
+# ========================================================
+# BATCH ACTIONS API
+# ========================================================
+
+@router.put("/stores/{store_id}/batches/{batch_id}", name="pharmacy_batch_update")
+def update_batch(
+    store_id: UUID,
+    batch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(role_required(["Admin", "Pharmacy Staff"])),
+    batch_no: Optional[str] = Form(None),
+    expiry_date: Optional[date] = Form(None),
+    unit_cost: Optional[float] = Form(None),
+    selling_price: Optional[float] = Form(None),
+    qty_on_hand: Optional[float] = Form(None),
+    supplier_id: Optional[str] = Form(None),
+    invoice_ref: Optional[str] = Form(None),
+):
+    """Update batch details."""
+    batch = db.query(PharmacyBatch).filter(
+        PharmacyBatch.id == batch_id,
+        PharmacyBatch.store_id == store_id
+    ).first()
+    
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+    
+    if batch_no is not None:
+        batch.batch_no = batch_no
+    if expiry_date is not None:
+        batch.expiry_date = expiry_date
+    if unit_cost is not None:
+        batch.unit_cost = Decimal(str(unit_cost))
+    if selling_price is not None:
+        batch.selling_price = Decimal(str(selling_price))
+    if qty_on_hand is not None:
+        batch.qty_on_hand = Decimal(str(qty_on_hand))
+    if invoice_ref is not None:
+        batch.invoice_ref = invoice_ref
+    if supplier_id is not None:
+        try:
+            batch.supplier_id = UUID(supplier_id)
+        except ValueError:
+            pass
+    
+    # Update audit fields
+    batch.updated_at = datetime.now()
+    batch.updated_by_id = current_user.id
+    
+    db.commit()
+    db.refresh(batch)
+    
+    return {"success": True, "message": "Batch updated successfully", "batch_id": str(batch.id)}
+
+
+@router.post("/stores/{store_id}/batches/{batch_id}/status", name="pharmacy_batch_update_status")
+def update_batch_status(
+    store_id: UUID,
+    batch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(role_required(["Admin", "Pharmacy Staff"])),
+    status: str = Form(...),
+    notes: Optional[str] = Form(None),
+):
+    """Update batch status (DAMAGED, RETURNED, QUARANTINE, ACTIVE)."""
+    valid_statuses = ["ACTIVE", "DAMAGED", "RETURNED", "QUARANTINE", "EXPIRED", "DEPLETED"]
+    if status.upper() not in valid_statuses:
+        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+    
+    batch = db.query(PharmacyBatch).filter(
+        PharmacyBatch.id == batch_id,
+        PharmacyBatch.store_id == store_id
+    ).first()
+    
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+    
+    old_status = batch.status
+    batch.status = status.upper()
+    batch.updated_at = datetime.now()
+    batch.updated_by_id = current_user.id
+    
+    # Create stock ledger entry for status change
+    ledger = PharmacyStockLedger(
+        store_id=store_id,
+        drug_id=batch.drug_id,
+        batch_id=batch_id,
+        movement_type=f"STATUS_{status.upper()}",
+        qty_in=0,
+        qty_out=0,
+        note=f"Status changed from {old_status} to {status.upper()}. Notes: {notes or 'N/A'}",
+        created_by_id=current_user.id,
+    )
+    db.add(ledger)
+    db.commit()
+    
+    return {"success": True, "message": f"Batch status updated to {status}", "batch_id": str(batch.id)}
+
+
+@router.post("/stores/{store_id}/batches/bulk-status", name="pharmacy_batch_bulk_update_status")
+def update_batches_status_bulk(
+    store_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(role_required(["Admin", "Pharmacy Staff"])),
+    batch_ids: List[str] = Form(...),
+    status: str = Form(...),
+    notes: Optional[str] = Form(None),
+):
+    """Update status for multiple batches at once."""
+    valid_statuses = ["ACTIVE", "DAMAGED", "RETURNED", "QUARANTINE", "EXPIRED", "DEPLETED"]
+    if status.upper() not in valid_statuses:
+        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+    
+    if not batch_ids:
+        raise HTTPException(400, "No batch IDs provided")
+    
+    updated_count = 0
+    errors = []
+    
+    for batch_id_str in batch_ids:
+        try:
+            batch_id = UUID(batch_id_str)
+        except ValueError:
+            errors.append(f"Invalid batch ID: {batch_id_str}")
+            continue
+        
+        batch = db.query(PharmacyBatch).filter(
+            PharmacyBatch.id == batch_id,
+            PharmacyBatch.store_id == store_id
+        ).first()
+        
+        if not batch:
+            errors.append(f"Batch not found: {batch_id_str}")
+            continue
+        
+        old_status = batch.status
+        batch.status = status.upper()
+        batch.updated_at = datetime.now()
+        batch.updated_by_id = current_user.id
+        
+        # Create stock ledger entry for status change
+        ledger = PharmacyStockLedger(
+            store_id=store_id,
+            drug_id=batch.drug_id,
+            batch_id=batch_id,
+            movement_type=f"STATUS_{status.upper()}",
+            qty_in=0,
+            qty_out=0,
+            note=f"Bulk status change from {old_status} to {status.upper()}. Notes: {notes or 'N/A'}",
+            created_by_id=current_user.id,
+        )
+        db.add(ledger)
+        updated_count += 1
+    
+    db.commit()
+    
+    return {
+        "success": True, 
+        "message": f"Updated {updated_count} batch(es) to {status}",
+        "updated_count": updated_count,
+        "errors": errors if errors else None
+    }
+
+
+@router.post("/stores/{store_id}/batches/{batch_id}/transfer", name="pharmacy_batch_transfer")
+def transfer_batch(
+    store_id: UUID,
+    batch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(role_required(["Admin", "Pharmacy Staff"])),
+    target_store_id: str = Form(...),
+    transfer_qty: float = Form(...),
+    notes: Optional[str] = Form(None),
+):
+    """Transfer batch quantity to another store."""
+    batch = db.query(PharmacyBatch).filter(
+        PharmacyBatch.id == batch_id,
+        PharmacyBatch.store_id == store_id
+    ).first()
+    
+    if not batch:
+        raise HTTPException(404, "Source batch not found")
+    
+    if transfer_qty > float(batch.qty_on_hand):
+        raise HTTPException(400, "Transfer quantity exceeds available quantity")
+    
+    try:
+        target_uuid = UUID(target_store_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid target store ID")
+    
+    target_store = db.query(PharmacyStore).filter(PharmacyStore.id == target_uuid).first()
+    if not target_store:
+        raise HTTPException(404, "Target store not found")
+    
+    # Create ledger entry for source batch
+    ledger_out = PharmacyStockLedger(
+        store_id=store_id,
+        drug_id=batch.drug_id,
+        batch_id=batch_id,
+        movement_type="TRANSFER_OUT",
+        qty_in=0,
+        qty_out=transfer_qty,
+        reference_type="Store",
+        reference_id=target_uuid,
+        note=f"Transferred to {target_store.name}. Notes: {notes or 'N/A'}",
+        created_by_id=current_user.id,
+    )
+    db.add(ledger_out)
+    
+    # Deduct from source batch
+    batch.qty_on_hand -= Decimal(str(transfer_qty))
+    batch.updated_at = datetime.now()
+    batch.updated_by_id = current_user.id
+    
+    # Check if target batch exists
+    target_batch = db.query(PharmacyBatch).filter(
+        PharmacyBatch.drug_id == batch.drug_id,
+        PharmacyBatch.store_id == target_uuid,
+        PharmacyBatch.batch_no == batch.batch_no,
+        PharmacyBatch.expiry_date == batch.expiry_date,
+    ).first()
+    
+    if target_batch:
+        # Add to existing batch
+        target_batch.qty_on_hand += Decimal(str(transfer_qty))
+        target_batch.updated_at = datetime.now()
+        target_batch.updated_by_id = current_user.id
+        new_batch_id = target_batch.id
+    else:
+        # Create new batch in target store
+        new_batch = PharmacyBatch(
+            drug_id=batch.drug_id,
+            store_id=target_uuid,
+            batch_no=batch.batch_no,
+            expiry_date=batch.expiry_date,
+            unit_cost=batch.unit_cost,
+            selling_price=batch.selling_price,
+            qty_on_hand=transfer_qty,
+            supplier_id=batch.supplier_id,
+            status="ACTIVE",
+        )
+        db.add(new_batch)
+        db.flush()
+        new_batch_id = new_batch.id
+    
+    # Create ledger entry for target batch
+    ledger_in = PharmacyStockLedger(
+        store_id=target_uuid,
+        drug_id=batch.drug_id,
+        batch_id=new_batch_id,
+        movement_type="TRANSFER_IN",
+        qty_in=transfer_qty,
+        qty_out=0,
+        reference_type="Store",
+        reference_id=store_id,
+        note=f"Received from {store_id}. Notes: {notes or 'N/A'}",
+        created_by_id=current_user.id,
+    )
+    db.add(ledger_in)
+    
+    db.commit()
+    
+    return {"success": True, "message": f"Transferred {transfer_qty} units to {target_store.name}"}
+
+
+@router.get("/stores/{store_id}/batches/{batch_id}/label", name="pharmacy_batch_label")
+def print_batch_label(
+    store_id: UUID,
+    batch_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(role_required(["Admin", "Pharmacy Staff"])),
+):
+    """Generate batch label for printing."""
+    batch = db.query(PharmacyBatch).options(
+        joinedload(PharmacyBatch.drug),
+        joinedload(PharmacyBatch.store),
+        joinedload(PharmacyBatch.supplier),
+    ).filter(
+        PharmacyBatch.id == batch_id,
+        PharmacyBatch.store_id == store_id
+    ).first()
+    
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+    
+    context = {
+        "request": request,
+        "title": f"Batch Label - {batch.batch_no}",
+        "batch": batch,
+        "drug": batch.drug,
+        "store": batch.store,
+        "now": datetime.now(),
+        "today": date.today(),
+        "timedelta": timedelta,
+    }
+    return templates.TemplateResponse("pharmacy_ghana/batch_label.html", context)
+
+
+@router.get("/stores/{store_id}/batches", name="pharmacy_batches_list_paginated")
+def list_batches_paginated(
+    store_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(role_required(["Admin", "Pharmacy Staff"])),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    drug_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+):
+    """List batches with pagination and filters."""
+    q = db.query(PharmacyBatch).options(
+        joinedload(PharmacyBatch.drug),
+        joinedload(PharmacyBatch.supplier),
+    ).filter(PharmacyBatch.store_id == store_id)
+    
+    if drug_id:
+        try:
+            q = q.filter(PharmacyBatch.drug_id == UUID(drug_id))
+        except ValueError:
+            pass
+    
+    if status:
+        q = q.filter(PharmacyBatch.status == status.upper())
+    
+    if search:
+        s = f"%{search}%"
+        q = q.filter(
+            or_(
+                PharmacyBatch.batch_no.ilike(s),
+                PharmacyBatch.drug.has(PharmacyDrug.generic_name.ilike(s)),
+            )
+        )
+    
+    total = q.count()
+    batches = q.order_by(PharmacyBatch.expiry_date).offset((page - 1) * limit).limit(limit).all()
+    
+    out = []
+    for b in batches:
+        out.append({
+            "id": str(b.id),
+            "batch_no": b.batch_no,
+            "expiry_date": str(b.expiry_date) if b.expiry_date else None,
+            "qty_on_hand": float(b.qty_on_hand) if b.qty_on_hand else 0,
+            "unit_cost": float(b.unit_cost) if b.unit_cost else None,
+            "selling_price": float(b.selling_price) if b.selling_price else None,
+            "status": b.status,
+            "drug": {
+                "id": str(b.drug.id),
+                "generic_name": b.drug.generic_name,
+                "brand_name": b.drug.brand_name,
+            } if b.drug else None,
+            "updated_at": b.updated_at.isoformat() if b.updated_at else None,
+            "updated_by": b.updated_by.username if b.updated_by else None,
+        })
+    
+    return {"total": total, "page": page, "limit": limit, "batches": out}
+

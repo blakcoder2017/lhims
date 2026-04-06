@@ -125,19 +125,19 @@ TEMPLATES = [
                 "wbc_field": {
                     "type": "numeric",
                     "label": "WBC Count",
-                    "unit": "/HPF",
+                    "unit": "/µL",
                     "required": False
                 },
                 "rbc_field": {
                     "type": "numeric",
                     "label": "RBC Count",
-                    "unit": "/HPF",
+                    "unit": "/µL",
                     "required": False
                 },
                 "epithelial_cells": {
                     "type": "numeric",
                     "label": "Epithelial Cells",
-                    "unit": "/HPF",
+                    "unit": "/µL",
                     "required": False
                 },
                 "bacteria": {
@@ -446,13 +446,13 @@ TEMPLATES = [
                 "wbc_semen": {
                     "type": "numeric",
                     "label": "WBC",
-                    "unit": "/HPF",
+                    "unit": "/µL",
                     "required": False
                 },
                 "round_cells": {
                     "type": "numeric",
                     "label": "Round Cells",
-                    "unit": "/HPF",
+                    "unit": "/µL",
                     "required": False
                 },
                 "semen_comment": {

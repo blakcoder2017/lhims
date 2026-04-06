@@ -20,7 +20,7 @@ router = APIRouter(tags=["Shift Types"])
 def shift_types_list(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin"])),
+    current_user: User = Depends(role_required(["Admin", "Management"])),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     active_only: bool = Query(False)

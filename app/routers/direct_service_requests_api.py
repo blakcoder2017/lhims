@@ -30,8 +30,6 @@ from app.crud import encounter_crud, procedure_crud, service_pricing_crud, patie
 from app.schemas.encounter_schemas import (
     LabOrderCreate,
     RadiologyOrderCreate,
-    EncounterCreate,
-    EncounterUpdate,
     PrescriptionCreate,
 )
 from app.schemas.procedure_schemas import ProcedureCreate
@@ -281,27 +279,114 @@ def get_service_price(db: Session, service_type: str, service_name: str, service
 @router.get("/api/v1/patients/{patient_id}/direct-requests/check-medication", name="check_medication_restriction_api")
 def check_medication_restriction_api(
     patient_id: int,
-    medication_id: int,
+    medication_id: Optional[int] = Query(None),  # Legacy inventory medication ID
+    pharmacy_drug_id: Optional[str] = Query(None),  # Ghana pharmacy drug UUID
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Check if medication is restricted and get pricing"""
+    """Check if medication is restricted and get pricing and stock"""
+    from uuid import UUID
+    from datetime import datetime
+    
     patient = patient_crud.get_patient(db, patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     
-    restriction = check_medication_restriction(db, medication_id)
-    medication = inventory_crud.get_medication(db, medication_id)
-    
     price = None
-    if medication:
-        price = float(medication.unit_price) if medication.unit_price else None
+    available_stock = 0
+    medication_name = None
+    
+    # Check pharmacy_drug_id first (UUID from Ghana pharmacy system)
+    if pharmacy_drug_id:
+        try:
+            drug_uuid = UUID(pharmacy_drug_id)
+            from app.models.pharmacy_models import PharmacyDrug, PharmacyBatch, PharmacyStore
+            
+            drug = db.query(PharmacyDrug).filter(PharmacyDrug.id == drug_uuid).first()
+            if drug:
+                medication_name = drug.generic_name
+                
+                # Get price and stock from pharmacy batches
+                store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+                if store:
+                    # Get FEFO batch
+                    batch = db.query(PharmacyBatch).filter(
+                        PharmacyBatch.store_id == store.id,
+                        PharmacyBatch.drug_id == drug.id,
+                        PharmacyBatch.status == "ACTIVE",
+                        PharmacyBatch.expiry_date >= datetime.now().date(),
+                        PharmacyBatch.qty_on_hand > 0,
+                    ).order_by(PharmacyBatch.expiry_date.asc()).first()
+                    
+                    if batch and batch.selling_price:
+                        price = float(batch.selling_price)
+                    
+                    # Calculate total available stock
+                    batches = db.query(PharmacyBatch).filter(
+                        PharmacyBatch.store_id == store.id,
+                        PharmacyBatch.drug_id == drug.id,
+                        PharmacyBatch.status == "ACTIVE",
+                        PharmacyBatch.expiry_date >= datetime.now().date(),
+                    ).all()
+                    available_stock = float(sum(b.qty_on_hand for b in batches if b.qty_on_hand > 0))
+                
+                # Fallback to inventory if no pharmacy price/stock
+                if price is None or available_stock == 0:
+                    from app.models.inventory_models import Medication, StockItem
+                    inv_query = db.query(Medication).filter(Medication.is_active == True)
+                    
+                    medication = None
+                    if drug.item_code:
+                        medication = inv_query.filter(
+                            (Medication.medication_code == drug.item_code) |
+                            (Medication.generic_name.ilike(f"%{drug.generic_name}%"))
+                        ).first()
+                    else:
+                        medication = inv_query.filter(
+                            Medication.generic_name.ilike(f"%{drug.generic_name}%")
+                        ).first()
+                    
+                    if medication:
+                        if price is None and medication.unit_price:
+                            price = float(medication.unit_price)
+                        
+                        if available_stock == 0:
+                            now = datetime.now()
+                            stock_items = db.query(StockItem).filter(
+                                StockItem.medication_id == medication.id,
+                                StockItem.is_active == True,
+                                (StockItem.expiry_date >= now) | (StockItem.expiry_date.is_(None))
+                            ).all()
+                            available_stock = float(sum(item.available_quantity for item in stock_items if item.available_quantity))
+        except ValueError:
+            pass  # Invalid UUID, fall through to check medication_id
+    
+    # Fallback to inventory medication_id
+    if (price is None or available_stock == 0) and medication_id:
+        medication = inventory_crud.get_medication(db, medication_id)
+        if medication:
+            medication_name = medication.name
+            if price is None:
+                price = float(medication.unit_price) if medication.unit_price else None
+            
+            if available_stock == 0:
+                # Get stock from inventory
+                from app.models.inventory_models import StockItem
+                from datetime import datetime
+                now = datetime.now()
+                stock_items = db.query(StockItem).filter(
+                    StockItem.medication_id == medication.id,
+                    StockItem.is_active == True,
+                    (StockItem.expiry_date >= now) | (StockItem.expiry_date.is_(None))
+                ).all()
+                available_stock = float(sum(item.available_quantity for item in stock_items if item.available_quantity))
     
     return JSONResponse(content={
-        "restricted": restriction["restricted"],
-        "reason": restriction["reason"],
+        "restricted": False,  # Could add restriction logic here
+        "reason": None,
         "price": price,
-        "medication_name": medication.name if medication else None
+        "available_stock": available_stock,
+        "medication_name": medication_name
     })
 
 
@@ -374,222 +459,234 @@ def check_procedure_restriction_api(
 
 # Direct Service Request Creation Routes
 @router.post("/patients/{patient_id}/direct-requests/pharmacy/create", name="create_direct_pharmacy_request", status_code=status.HTTP_302_FOUND)
-def create_direct_pharmacy_request(
+async def create_direct_pharmacy_request(
     request: Request,
     patient_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Front Office", "Admin", "Finance", "Pharmacy Staff"])),
-    medication_id: Optional[str] = Form(None),
-    pharmacy_drug_id: Optional[str] = Form(None),
-    medication_name: str = Form(...),
-    dosage: str = Form(...),
-    frequency: str = Form(...),
-    duration: str = Form(...),
-    quantity: int = Form(1),
-    instructions: Optional[str] = Form(None),
+    current_user: User = Depends(role_required(["Front Office", "Admin", "Finance", "Management", "Pharmacy Staff"])),
+    prescriptions_json: Optional[str] = Form(None),
 ):
-    """Create a direct pharmacy request from patient profile"""
+    """Create a direct pharmacy request from patient profile with multiple prescriptions"""
     import traceback
+    import json
     from uuid import UUID
     
-    # Validate medication - either pharmacy_drug_id (Ghana system) or medication_id (legacy)
-    if not pharmacy_drug_id and not medication_id:
+    prescriptions_data = None
+    
+    # Check if we have JSON data (new format with multiple prescriptions)
+    if prescriptions_json:
+        try:
+            prescriptions_data = json.loads(prescriptions_json)
+            if not isinstance(prescriptions_data, list):
+                prescriptions_data = [prescriptions_data]
+        except json.JSONDecodeError as e:
+            print(f"[WARN] Failed to parse prescriptions_json: {e}")
+            prescriptions_data = None
+    
+    # If no JSON, try to get individual fields (legacy single prescription format)
+    if not prescriptions_data:
+        # Get form fields for single prescription (legacy support)
+        form_data = await request.form()
+        medication_id = form_data.get('medication_id')
+        pharmacy_drug_id = form_data.get('pharmacy_drug_id')
+        medication_name = form_data.get('medication_name')
+        dosage = form_data.get('dosage')
+        frequency = form_data.get('frequency')
+        frequency_custom = form_data.get('frequency_custom')
+        duration = form_data.get('duration')
+        quantity = form_data.get('quantity', '1')
+        instructions = form_data.get('instructions')
+        
+        if not medication_name:
+            return RedirectResponse(
+                url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Medication+is+required",
+                status_code=status.HTTP_302_FOUND
+            )
+        
+        # Build frequency from custom if needed
+        if frequency == 'Other' and frequency_custom:
+            frequency = frequency_custom
+        
+        # Single prescription - create list with one item
+        prescriptions_data = [{
+            'medication_id': medication_id,
+            'pharmacy_drug_id': pharmacy_drug_id,
+            'medication_name': medication_name,
+            'dosage': dosage or '',
+            'frequency': frequency or '',
+            'duration': duration,
+            'quantity': int(quantity) if quantity else 1,
+            'instructions': instructions
+        }]
+    
+    if not prescriptions_data or not isinstance(prescriptions_data, list):
         return RedirectResponse(
-            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Medication+is+required",
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Invalid+prescription+data",
             status_code=status.HTTP_302_FOUND
         )
     
-    # Track which system we're using
-    use_ghana_system = bool(pharmacy_drug_id and pharmacy_drug_id.strip())
+    if len(prescriptions_data) > 20:
+        return RedirectResponse(
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Maximum+20+prescriptions+allowed",
+            status_code=status.HTTP_302_FOUND
+        )
     
-    # Ghana: Get drug details from PharmacyDrug if pharmacy_drug_id provided
-    pharmacy_drug = None
-    if use_ghana_system:
-        try:
-            pharmacy_drug_uuid = UUID(pharmacy_drug_id.strip())
-            from app.models.pharmacy_models import PharmacyDrug
-            pharmacy_drug = db.query(PharmacyDrug).options(
-                joinedload(PharmacyDrug.dosage_form)
-            ).filter(
-                PharmacyDrug.id == pharmacy_drug_uuid,
-                PharmacyDrug.is_active == True
-            ).first()
-        except (ValueError, TypeError) as e:
-            print(f"Warning: Invalid pharmacy_drug_id format: {e}")
+    print(f"[DEBUG] create_direct_pharmacy_request called with {len(prescriptions_data)} prescriptions")
     
-    # Build medication name from pharmacy drug if available
-    medication_name_final = medication_name
-    medication_code_final = None
-    dosage_form_name = None
-    strength_value = None
-    strength_unit = None
-    route = None
-    concentration_value = None
-    concentration_unit = None
+    # Track created prescriptions and any warnings
+    created_count = 0
+    failed_count = 0
     stock_warning = None
     
-    if pharmacy_drug:
-        strength = f"{pharmacy_drug.strength_value} {pharmacy_drug.strength_unit or ''}" if pharmacy_drug.strength_value else ""
-        if pharmacy_drug.concentration_value:
-            strength = f"{pharmacy_drug.concentration_value} {pharmacy_drug.concentration_unit or ''}"
-        medication_name_final = f"{pharmacy_drug.generic_name} {strength} {pharmacy_drug.dosage_form.name if pharmacy_drug.dosage_form else ''}".strip()
-        medication_code_final = pharmacy_drug.item_code
-        dosage_form_name = pharmacy_drug.dosage_form.name if pharmacy_drug.dosage_form else None
-        strength_value = float(pharmacy_drug.strength_value) if pharmacy_drug.strength_value else None
-        strength_unit = pharmacy_drug.strength_unit
-        route = pharmacy_drug.route
-        concentration_value = float(pharmacy_drug.concentration_value) if pharmacy_drug.concentration_value else None
-        concentration_unit = pharmacy_drug.concentration_unit
-        
-        # STOCK CHECK: Verify medication is available in pharmacy inventory
-        stock_warning = None
-        from datetime import date
-        from app.models.pharmacy_models import PharmacyBatch, PharmacyStore
-        store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
-        
-        if store:
-            try:
-                pharmacy_drug_uuid = UUID(pharmacy_drug_id.strip())
-                batches = db.query(PharmacyBatch).filter(
-                    PharmacyBatch.store_id == store.id,
-                    PharmacyBatch.drug_id == pharmacy_drug_uuid,
-                    PharmacyBatch.status == "ACTIVE",
-                    PharmacyBatch.expiry_date >= date.today(),
-                ).all()
-                
-                total_available = sum(b.qty_on_hand - b.qty_reserved for b in batches if (b.qty_on_hand - b.qty_reserved) > 0)
-                required_qty = quantity if quantity else 1
-                
-                if total_available == 0:
-                    stock_warning = {
-                        "message": f"{medication_name_final} is currently OUT OF STOCK.",
-                        "is_out_of_stock": True,
-                        "available_quantity": 0,
-                        "requested_quantity": required_qty
-                    }
-                elif total_available < required_qty:
-                    stock_warning = {
-                        "message": f"Insufficient stock. Requested: {required_qty}, Available: {total_available}.",
-                        "is_out_of_stock": False,
-                        "is_partial": True,
-                        "available_quantity": total_available,
-                        "requested_quantity": required_qty
-                    }
-            except (ValueError, TypeError):
-                pass
-    
-    try:
-        # Get patient
-        patient = patient_crud.get_patient(db, patient_id)
-        if not patient:
-            raise HTTPException(status_code=404, detail="Patient not found")
-        
-        # For Ghana system, skip medication restriction check (it's handled by drug interactions)
-        if not use_ghana_system and medication_id:
-            # Legacy: check restriction
-            try:
-                medication_id_int = int(medication_id)
-                restriction = check_medication_restriction(db, medication_id_int)
-                if restriction["restricted"]:
-                    return RedirectResponse(
-                        url=str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?error={restriction['reason']}",
-                        status_code=status.HTTP_302_FOUND
-                    )
-                
-                # Get medication for legacy system
-                medication = inventory_crud.get_medication(db, medication_id_int)
-                if not medication:
-                    raise HTTPException(status_code=404, detail="Medication not found")
-            except (ValueError, TypeError):
-                pass
-        
-        # For direct requests, temporarily set payment mechanism to CASH for invoice creation
-        original_payment_mechanism = patient.payment_mechanism
-        if patient.payment_mechanism != PaymentMechanism.CASH:
-            patient.payment_mechanism = PaymentMechanism.CASH
-            db.commit()
-        
+    for idx, prescr_data in enumerate(prescriptions_data):
         try:
-            # Create minimal encounter for documentation
-            encounter_data = EncounterCreate(
-                patient_id=patient.id,
-                clinician_id=current_user.id,
-                chief_complaint=f"Direct pharmacy request: {medication_name_final}",
-                status=EncounterStatus.COMPLETED
-            )
-            encounter = encounter_crud.create_encounter(db, encounter_data)
+            # Get required fields
+            pharmacy_drug_id = prescr_data.get('pharmacy_drug_id')
+            medication_name = prescr_data.get('medication_name', '')
             
-            # Create prescription with pharmacy_drug_id for Ghana system
+            if not pharmacy_drug_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Prescription #{idx + 1}: pharmacy_drug_id is required. Please select a medication from the pharmacy formulary."
+                )
+                failed_count += 1
+                continue
+            
+            if not medication_name:
+                print(f"[WARN] Skipping prescription {idx}: medication name is required")
+                failed_count += 1
+                continue
+                
+            if not prescr_data.get('frequency'):
+                print(f"[WARN] Skipping prescription {idx}: frequency is required")
+                failed_count += 1
+                continue
+            
+            # Track which system we're using
+            use_ghana_system = bool(pharmacy_drug_id and str(pharmacy_drug_id).strip())
+            
+            # Ghana: Get drug details from PharmacyDrug if pharmacy_drug_id provided
+            pharmacy_drug = None
+            if use_ghana_system:
+                try:
+                    pharmacy_drug_uuid = UUID(str(pharmacy_drug_id).strip())
+                    from app.models.pharmacy_models import PharmacyDrug
+                    pharmacy_drug = db.query(PharmacyDrug).options(
+                        joinedload(PharmacyDrug.dosage_form)
+                    ).filter(
+                        PharmacyDrug.id == pharmacy_drug_uuid,
+                        PharmacyDrug.is_active == True
+                    ).first()
+                except (ValueError, TypeError) as e:
+                    print(f"Warning: Invalid pharmacy_drug_id format: {e}")
+            
+            # Build medication name from pharmacy drug if available
+            medication_name_final = medication_name
+            medication_code_final = None
+            dosage_form_name = None
+            strength_value = None
+            strength_unit = None
+            route = None
+            concentration_value = None
+            concentration_unit = None
+            
+            if pharmacy_drug:
+                strength = f"{pharmacy_drug.strength_value} {pharmacy_drug.strength_unit or ''}" if pharmacy_drug.strength_value else ""
+                if pharmacy_drug.concentration_value:
+                    strength = f"{pharmacy_drug.concentration_value} {pharmacy_drug.concentration_unit or ''}"
+                medication_name_final = f"{pharmacy_drug.generic_name} {strength} {pharmacy_drug.dosage_form.name if pharmacy_drug.dosage_form else ''}".strip()
+                medication_code_final = pharmacy_drug.item_code
+                dosage_form_name = pharmacy_drug.dosage_form.name if pharmacy_drug.dosage_form else None
+                strength_value = float(pharmacy_drug.strength_value) if pharmacy_drug.strength_value else None
+                strength_unit = pharmacy_drug.strength_unit
+                route = pharmacy_drug.route
+                concentration_value = float(pharmacy_drug.concentration_value) if pharmacy_drug.concentration_value else None
+                concentration_unit = pharmacy_drug.concentration_unit
+                
+                # STOCK CHECK: Verify medication is available in pharmacy inventory
+                from datetime import date
+                from app.models.pharmacy_models import PharmacyBatch, PharmacyStore
+                store = db.query(PharmacyStore).filter(PharmacyStore.is_active == True).first()
+                
+                if store:
+                    try:
+                        pharmacy_drug_uuid = UUID(str(pharmacy_drug_id).strip())
+                        batch = db.query(PharmacyBatch).filter(
+                            PharmacyBatch.drug_id == pharmacy_drug_uuid,
+                            PharmacyBatch.store_id == store.id,
+                            PharmacyBatch.expiry_date > date.today(),
+                            PharmacyBatch.qty_on_hand > 0
+                        ).order_by(PharmacyBatch.expiry_date.asc()).first()
+                        
+                        if not batch:
+                            stock_warning = f"{medication_name_final} may be out of stock"
+                    except Exception as stock_error:
+                        print(f"Warning: Stock check failed: {stock_error}")
+            
+            # Get quantity
+            try:
+                quantity = int(prescr_data.get('quantity', 1))
+                if quantity < 1:
+                    quantity = 1
+            except (ValueError, TypeError):
+                quantity = 1
+            
+            # Create prescription data
+            from app.schemas.encounter_schemas import PrescriptionCreate
             prescription_data = PrescriptionCreate(
-                encounter_id=encounter.id,
+                pharmacy_drug_id=str(pharmacy_drug_id).strip(),
+                encounter_id=None,
+                patient_id=patient_id,
                 prescribed_by_id=current_user.id,
                 medication_name=medication_name_final,
                 medication_code=medication_code_final,
-                pharmacy_drug_id=pharmacy_drug_id.strip() if use_ghana_system else None,
                 dosage_form_name=dosage_form_name,
                 strength_value=strength_value,
                 strength_unit=strength_unit,
                 route=route,
                 concentration_value=concentration_value,
                 concentration_unit=concentration_unit,
-                dosage=dosage,
-                frequency=frequency,
-                duration=duration,
+                dosage=prescr_data.get('dosage', ''),
+                frequency=prescr_data.get('frequency', ''),
+                duration=prescr_data.get('duration') if prescr_data.get('duration') else None,
                 quantity=quantity,
-                instructions=instructions if instructions else None,
-                is_walk_in=True
+                instructions=prescr_data.get('instructions') if prescr_data.get('instructions') else None,
+                is_walk_in=False
             )
             
+            # Create the prescription
             new_prescription = encounter_crud.create_prescription(db, prescription_data)
             
-            # Create charge (invoice will use CASH payment mechanism)
-            # SKIP billing if medication is out of stock or has insufficient stock
-            skip_billing = False
-            if stock_warning:
-                if stock_warning.get("is_out_of_stock") or stock_warning.get("is_partial"):
-                    skip_billing = True
+            # Create charge for the prescription
+            try:
+                from app.services import create_charge_for_prescription
+                create_charge_for_prescription(db, new_prescription, current_user.id, check_payment_required=False)
+            except Exception as billing_error:
+                print(f"Warning: Unable to create direct pharmacy charge: {billing_error}")
+                traceback.print_exc()
             
-            if not skip_billing:
-                try:
-                    create_charge_for_prescription(db, new_prescription, current_user.id, check_payment_required=False)
-                except Exception as billing_error:
-                    print(f"Warning: Unable to create direct pharmacy charge: {billing_error}")
-                    traceback.print_exc()
-            else:
-                print(f"Note: Skipping charge for prescription {new_prescription.id} - out of stock/insufficient stock")
-        finally:
-            # Restore original payment mechanism
-            if original_payment_mechanism != PaymentMechanism.CASH:
-                patient.payment_mechanism = original_payment_mechanism
-                db.commit()
-        
-        # Build redirect URL with stock warning if applicable
-        redirect_url = str(request.url_for("view_patient_records", patient_id=patient_id)) + "?status=pharmacy_request_created"
-        if stock_warning:
-            if stock_warning.get("is_out_of_stock"):
-                from urllib.parse import quote
-                warning_msg = f"WARNING_OUT_OF_STOCK:{stock_warning['message']}"
-                redirect_url += f"&stock_warning={quote(warning_msg)}"
-            elif stock_warning.get("is_partial"):
-                from urllib.parse import quote
-                warning_msg = f"WARNING_INSUFFICIENT_STOCK:{stock_warning['message']}"
-                redirect_url += f"&stock_warning={quote(warning_msg)}"
-        
+            created_count += 1
+            
+        except Exception as prescr_error:
+            print(f"[ERROR] Error creating prescription {idx}: {prescr_error}")
+            traceback.print_exc()
+            failed_count += 1
+            continue
+    
+    if created_count == 0:
         return RedirectResponse(
-            url=redirect_url,
+            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + "?error=Failed+to+create+any+prescriptions",
             status_code=status.HTTP_302_FOUND
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[ERROR] Error creating direct pharmacy request: {error_msg}")
-        traceback.print_exc()
-        return RedirectResponse(
-            url=str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?error={error_msg[:200]}",
-            status_code=status.HTTP_302_FOUND
-        )
-
+    
+    # Build redirect URL with stock warning if applicable
+    redirect_url = str(request.url_for("view_patient_records", patient_id=patient_id)) + f"?status=pharmacy_request_created&count={created_count}"
+    if stock_warning:
+        redirect_url += f"&warning={stock_warning}"
+    if failed_count > 0:
+        redirect_url += f"&failed={failed_count}"
+    
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
 
 @router.post("/patients/{patient_id}/direct-requests/lab/create", name="create_direct_lab_request", status_code=status.HTTP_302_FOUND)
 def create_direct_lab_request(

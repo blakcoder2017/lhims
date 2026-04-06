@@ -11,38 +11,37 @@ This document describes how to deploy LHIMS (Laboratory and Hospital Information
 
 ## Quick Start
 
-### 1. Configure Environment Variables
-
-Copy the example environment file and update the values:
+### Option 1: One-Command Install (Recommended)
+The easiest way to get started:
 
 ```bash
-cp env.example .env
-nano .env
+./install.sh
 ```
 
-Important values to update:
-- `POSTGRES_PASSWORD` - Set a strong password for PostgreSQL
-- `SECRET_KEY` - Generate a secure secret key (use: `openssl rand -hex 32`)
+This interactive installer will:
+- Check Docker installation
+- Prompt for configuration (or use defaults with `--quick` flag)
+- Auto-generate secure passwords
+- Build and start all services
+- Initialize the database
 
-### 2. Start the Application
-
-Using the deployment script:
+### Option 2: Quick Demo Mode
+For fast testing with default values:
 
 ```bash
+./deploy_docker.sh start --demo
+```
+
+### Option 3: Semi-Automatic
+If you already have Docker installed:
+
+```bash
+# Auto-generate .env with secure defaults
+./deploy_docker.sh install
+
+# Or just start (will create .env if missing)
 ./deploy_docker.sh start
 ```
-
-Or using docker compose directly:
-
-```bash
-docker compose up -d --build
-```
-
-### 3. Access the Application
-
-After starting, access LHIMS at:
-- **URL**: http://localhost:8000
-- **Health Check**: http://localhost:8000/health
 
 ## Services Included
 
@@ -57,7 +56,19 @@ After starting, access LHIMS at:
 
 ### Start Services
 ```bash
-./deploy_docker.sh start
+./deploy_docker.sh start          # Start with auto-initialization
+./deploy_docker.sh start --demo  # Quick demo mode
+```
+
+### One-Command Install
+```bash
+./deploy_docker.sh install       # Auto-create .env + start
+```
+
+### Interactive Installer
+```bash
+./install.sh                    # Full interactive installation
+./install.sh --quick            # Quick mode with defaults
 ```
 
 ### Stop Services
@@ -82,9 +93,12 @@ After starting, access LHIMS at:
 ./deploy_docker.sh status
 ```
 
-### Initialize Database
+### Initialize Database (if needed)
 ```bash
-./deploy_docker.sh init-db
+./deploy_docker.sh init-db       # Initialize database tables
+./deploy_docker.sh migrate       # Run migrations
+./deploy_docker.sh seed          # Seed initial data
+./deploy_docker.sh full-init     # Full initialization (init + migrate + seed)
 ```
 
 ## Directory Structure
@@ -144,6 +158,12 @@ Check logs for errors:
 Ensure PostgreSQL container is healthy:
 ```bash
 docker compose ps
+```
+
+### First run issues
+If this is your first time running LHIMS:
+```bash
+./deploy_docker.sh full-init   # Run full initialization
 ```
 
 ### Reset everything and start fresh

@@ -3,14 +3,18 @@ Shared Jinja2Templates configuration for LHIMS.
 This module exports a configured templates object with has_permission registered.
 """
 from fastapi.templating import Jinja2Templates
+from datetime import date, datetime
 
 # Initialize Jinja2Templates
 templates = Jinja2Templates(directory="app/templates")
 
-# Register the age filter
-from datetime import date, datetime
+# Get the Jinja2 environment explicitly
+env = templates.env
 
+
+# Register the age filter
 def calculate_age(dob):
+    """Calculate age from date of birth."""
     if not dob:
         return None
     if isinstance(dob, str):
@@ -21,7 +25,8 @@ def calculate_age(dob):
         age -= 1
     return age
 
-templates.env.filters["age"] = calculate_age
+
+env.filters["age"] = calculate_age
 
 
 def normalize_logo_url(url):
@@ -33,7 +38,7 @@ def normalize_logo_url(url):
     return url
 
 
-templates.env.filters["normalize_logo_url"] = normalize_logo_url
+env.filters["normalize_logo_url"] = normalize_logo_url
 
 
 # Register has_permission filter for template permission checking
@@ -50,7 +55,12 @@ def has_permission_filter(user, permission_name):
     return False
 
 
-templates.env.globals["has_permission"] = has_permission_filter
-templates.env.globals["today"] = date.today
-templates.env.globals["now"] = datetime.now  # Callable for templates to use now()
-templates.env.globals["datetime"] = datetime  # For templates to use datetime.now()
+# Register globals
+env.globals["has_permission"] = has_permission_filter
+env.globals["today"] = date.today
+env.globals["now"] = datetime.now  # Callable for templates to use now()
+env.globals["datetime"] = datetime  # For templates to use datetime.now()
+
+# Sync the filters and globals to templates.env for backwards compatibility
+templates.env.filters = env.filters
+templates.env.globals = env.globals

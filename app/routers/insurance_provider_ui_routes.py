@@ -26,7 +26,7 @@ router = APIRouter(
 def list_insurance_providers(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin", "Finance", "Front Office"])),
+    current_user: User = Depends(role_required(["Admin", "Management", "Finance", "Front Office"])),
     active_only: bool = Query(True)
 ):
     """List all insurance providers"""

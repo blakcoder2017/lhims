@@ -44,6 +44,9 @@ class ChargeType(str, enum.Enum):
     PROCEDURE = "procedure"
     ADMISSION = "admission"
     ANTENATAL = "antenatal"
+    PAEDIATRIC = "paediatric"
+    NEONATAL = "neonatal"
+    EMERGENCY = "emergency"
     OTHER = "other"
 
 
@@ -74,7 +77,8 @@ class Invoice(Base):
     tax_amount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))  # Tax amount
     total_amount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))  # Total amount due
     paid_amount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))  # Amount paid so far
-    balance = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))  # Remaining balance
+    refunds_credit = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))  # Total refunds/credits applied
+    balance = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))  # Remaining balance (total - paid - refunds_credit)
     
     # Payment Mechanism
     payment_mechanism = Column(postgresql.ENUM(PaymentMethod, values_callable=lambda x: [e.value for e in x], name='paymentmethod', create_type=False), nullable=True)
@@ -110,6 +114,7 @@ class Invoice(Base):
     payments = relationship("Payment", back_populates="invoice", cascade="all, delete-orphan")
     pharmacy_dispenses = relationship("PharmacyDispense", back_populates="invoice")
     refunds = relationship("Refund", back_populates="invoice", cascade="all, delete-orphan")
+    consolidated_receipt_invoices = relationship("ConsolidatedReceiptInvoice", back_populates="invoice", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Invoice(id={self.id}, invoice_number='{self.invoice_number}', total={self.total_amount}, balance={self.balance})>"
@@ -259,6 +264,7 @@ class RefundStatus(str, enum.Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     PROCESSED = "processed"
+    CANCELLED = "cancelled"
 
 
 class RefundPolicy(Base):
@@ -440,4 +446,203 @@ class DiscountRule(Base):
     
     def __repr__(self):
         return f"<DiscountRule(id={self.id}, name='{self.name}', discount_type={self.discount_type.value}, discount_value={self.discount_value})>"
+
+
+class ConsolidatedReceiptStatus(str, enum.Enum):
+    """Status for consolidated receipt"""
+    DRAFT = "draft"
+    PRINTED = "printed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ConsolidatedReceiptPrintAction(str, enum.Enum):
+    """Print action types for audit log"""
+    PRINT = "print"
+    REPRINT = "reprint"
+    CANCEL = "cancel"
+    VIEW = "view"
+
+
+class ConsolidatedReceipt(Base):
+    """
+    SQLAlchemy Model for consolidated receipts.
+    Links multiple invoices/payments into a single receipt.
+    """
+    __tablename__ = "consolidated_receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
+    generated_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # Receipt Details
+    receipt_number = Column(String(50), unique=True, nullable=False, index=True)
+    status = Column(String(20), nullable=False, default=ConsolidatedReceiptStatus.DRAFT.value)
+    
+    # Financial Summary
+    total_invoices = Column(Integer, nullable=False, default=0)
+    total_amount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    total_paid = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    total_discount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    total_balance = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    
+    # Primary Payment Method (for display)
+    primary_payment_method = Column(String(50), nullable=False)
+    
+    # Timestamps
+    generated_at = Column(DateTime, nullable=False, server_default=func.now())
+    printed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
+    # Soft deletion
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    patient = relationship("Patient")
+    generated_by = relationship("User", foreign_keys=[generated_by_id])
+    invoices = relationship("ConsolidatedReceiptInvoice", back_populates="receipt", cascade="all, delete-orphan")
+    payments = relationship("ConsolidatedReceiptPayment", back_populates="receipt", cascade="all, delete-orphan")
+    print_logs = relationship("ConsolidatedReceiptPrintLog", back_populates="receipt", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<ConsolidatedReceipt(id={self.id}, receipt_number='{self.receipt_number}', total={self.total_amount})>"
+
+
+class ConsolidatedReceiptInvoice(Base):
+    """
+    Links invoices to a consolidated receipt.
+    """
+    __tablename__ = "consolidated_receipt_invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    receipt_id = Column(Integer, ForeignKey("consolidated_receipts.id"), nullable=False)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
+    
+    # Invoice Details at Time of Receipt
+    invoice_number = Column(String(50), nullable=False)
+    invoice_date = Column(DateTime, nullable=False)
+    subtotal = Column(Numeric(10, 2), nullable=False)
+    discount_amount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    total_amount = Column(Numeric(10, 2), nullable=False)
+    paid_amount = Column(Numeric(10, 2), nullable=False)
+    balance = Column(Numeric(10, 2), nullable=False)
+    status = Column(String(20), nullable=False)
+    charge_type = Column(String(20), nullable=True)  # Primary charge type
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    
+    # Relationships
+    receipt = relationship("ConsolidatedReceipt", back_populates="invoices")
+    invoice = relationship("Invoice", back_populates="consolidated_receipt_invoices")
+    charges = relationship("ConsolidatedReceiptCharge", back_populates="receipt_invoice", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<ConsolidatedReceiptInvoice(id={self.id}, invoice_number='{self.invoice_number}')>"
+
+
+class ConsolidatedReceiptCharge(Base):
+    """
+    Stores individual charges from invoices for the receipt.
+    Provides itemized breakdown.
+    """
+    __tablename__ = "consolidated_receipt_charges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    receipt_invoice_id = Column(Integer, ForeignKey("consolidated_receipt_invoices.id"), nullable=False)
+    charge_id = Column(Integer, ForeignKey("charges.id"), nullable=True)  # Optional link to original charge
+    
+    # Charge Details
+    description = Column(String(500), nullable=False)
+    charge_type = Column(String(20), nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Numeric(10, 2), nullable=False)
+    discount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    tax_amount = Column(Numeric(10, 2), nullable=False, default=Decimal('0.00'))
+    total_amount = Column(Numeric(10, 2), nullable=False)
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    
+    # Relationships
+    receipt_invoice = relationship("ConsolidatedReceiptInvoice", back_populates="charges")
+    
+    def __repr__(self):
+        return f"<ConsolidatedReceiptCharge(id={self.id}, description='{self.description}')>"
+
+
+class ConsolidatedReceiptPayment(Base):
+    """
+    Links payments to a consolidated receipt.
+    Supports multiple payment methods in single transaction.
+    """
+    __tablename__ = "consolidated_receipt_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    receipt_id = Column(Integer, ForeignKey("consolidated_receipts.id"), nullable=False)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=False)
+    
+    # Payment Details
+    amount = Column(Numeric(10, 2), nullable=False)
+    payment_method = Column(String(50), nullable=False)
+    transaction_reference = Column(String(100), nullable=True)
+    payment_number = Column(String(50), nullable=False)
+    payment_date = Column(DateTime, nullable=False)
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    
+    # Relationships
+    receipt = relationship("ConsolidatedReceipt", back_populates="payments")
+    payment = relationship("Payment")
+    
+    def __repr__(self):
+        return f"<ConsolidatedReceiptPayment(id={self.id}, amount={self.amount}, method={self.payment_method})>"
+
+
+class ConsolidatedReceiptPrintLog(Base):
+    """
+    Audit log for all print actions on consolidated receipts.
+    """
+    __tablename__ = "consolidated_receipt_print_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Foreign Keys
+    receipt_id = Column(Integer, ForeignKey("consolidated_receipts.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    # Print Details
+    action = Column(String(20), nullable=False)  # PRINT, REPRINT, CANCEL, VIEW
+    status = Column(String(20), nullable=False)  # SUCCESS, FAILED
+    printer_name = Column(String(100), nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Authorization for reprints
+    authorized_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reason = Column(Text, nullable=True)
+    
+    # Request Details
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    
+    # Relationships
+    receipt = relationship("ConsolidatedReceipt", back_populates="print_logs")
+    user = relationship("User", foreign_keys=[user_id])
+    authorized_by = relationship("User", foreign_keys=[authorized_by_id])
+    
+    def __repr__(self):
+        return f"<ConsolidatedReceiptPrintLog(id={self.id}, action={self.action}, status={self.status})>"
 

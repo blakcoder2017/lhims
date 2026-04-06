@@ -53,8 +53,8 @@ def inventory_dashboard(
     medication_stock = {}
     for med in medications:
         stock_items = inventory_crud.get_stock_items_by_medication(db, med.id)
-        total_quantity = sum(item.quantity for item in stock_items if item.is_active)
-        available_quantity = sum(item.available_quantity for item in stock_items if item.is_active)
+        total_quantity = float(sum(item.quantity for item in stock_items if item.is_active))
+        available_quantity = float(sum(item.available_quantity for item in stock_items if item.is_active))
         
         # Check for low stock
         is_low_stock = med.reorder_level and total_quantity <= med.reorder_level

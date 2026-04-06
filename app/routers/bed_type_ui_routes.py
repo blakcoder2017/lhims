@@ -26,7 +26,7 @@ router = APIRouter(
 def list_bed_types(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin"])),
+    current_user: User = Depends(role_required(["Admin", "Management"])),
     active_only: bool = Query(False)
 ):
     """List all bed types"""

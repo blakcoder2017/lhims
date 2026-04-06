@@ -285,12 +285,14 @@ def get_patient_registration_page(
     current_user = Depends(role_required(["Front Office", "Nurse", "Finance", "Admin"])) 
 ):
     """Unified registration/check-in: new patient or start visit for existing patient."""
-    from app.crud import insurance_provider_crud, department_crud, hospital_settings_crud
+    from app.crud import insurance_provider_crud, department_crud, hospital_settings_crud, service_pricing_crud
     
     # Get active insurance providers for dropdown
     insurance_providers = insurance_provider_crud.get_insurance_providers(db, active_only=True)
-    # Get active departments for consultation department selection
+    # Get active departments for clinical routing
     departments, _ = department_crud.get_departments(db, limit=100, active_only=True)
+    # Get consultation service pricing for the pricing dropdown - filter by charge_type=opd
+    consultation_pricing = service_pricing_crud.get_service_pricing_by_charge_type(db, "opd")
     # Get hospital settings including insurance configuration
     hospital_settings = hospital_settings_crud.get_hospital_settings(db)
     
@@ -305,6 +307,7 @@ def get_patient_registration_page(
         "user_role": current_user.role.name,
         "insurance_providers": insurance_providers,
         "departments": departments,
+        "consultation_pricing": consultation_pricing,
         "nhis_enabled": nhis_enabled,
         "private_insurance_enabled": private_insurance_enabled
     }
@@ -315,7 +318,8 @@ def get_patient_registration_page(
 def registration_success_page(
     request: Request,
     patient_id: int,
-    department: str = Query(..., description="Department for this visit"),
+    service_pricing_id: int = Query(..., description="Service pricing ID for consultation fee"),
+    department: Optional[str] = Query(None, description="Department for clinical routing"),
     from_registration: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user = Depends(role_required(["Front Office", "Nurse", "Admin"])),
@@ -325,10 +329,26 @@ def registration_success_page(
     if not patient_data:
         return RedirectResponse(url="/patients/register", status_code=status.HTTP_302_FOUND)
     from urllib.parse import quote
-    from app.services.charge_automation import get_consultation_price_for_department
+    from app.crud import service_pricing_crud
+    from decimal import Decimal
+    
+    # Get service pricing to determine the consultation fee
+    service_pricing_obj = service_pricing_crud.get_service_pricing(db, service_pricing_id)
+    if service_pricing_obj:
+        consultation_fee = Decimal(str(service_pricing_obj.unit_price))
+        service_name = service_pricing_obj.service_name
+    else:
+        from app.services.charge_automation import DEFAULT_CONSULTATION_FEE
+        consultation_fee = DEFAULT_CONSULTATION_FEE
+        service_name = "Consultation Fee"
+    
+    # Use department for clinical routing if provided
     department_clean = (department or "").strip() or "General Medicine"
-    consultation_fee = get_consultation_price_for_department(db, department_name=department_clean)
-    pay_url = f"/patients/{patient_id}/pay/consultation?department={quote(department_clean)}&return_to=dashboard&from_registration=1&new_visit=true"
+    
+    pay_url = f"/patients/{patient_id}/pay/consultation?service_pricing_id={service_pricing_id}&return_to=dashboard&from_registration=1&new_visit=true"
+    if department:
+        pay_url += f"&department={quote(department)}"
+    
     context = {
         "request": request,
         "title": "Patient registered",
@@ -336,6 +356,8 @@ def registration_success_page(
         "user_role": current_user.role.name,
         "patient": patient_data,
         "department": department_clean,
+        "service_pricing_id": service_pricing_id,
+        "service_name": service_name,
         "consultation_fee": float(consultation_fee) if consultation_fee else None,
         "pay_url": pay_url,
     }
@@ -752,33 +774,52 @@ def get_new_encounter_page(
         except (ValueError, TypeError):
             pass
     
+    # Get admission_id from query params (for IPD encounters)
+    admission_id = request.query_params.get("admission_id")
+    if admission_id:
+        try:
+            admission_id = int(admission_id)
+        except (ValueError, TypeError):
+            admission_id = None
+    
+    # For IPD encounters, skip triage/payment verification - IPD patients don't need these
+    is_ipd_encounter = admission_id is not None
+    
     checked_in_statuses = {AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_PROGRESS}
     active_appointment = None
-    # Verify complete workflow: vitals + check-in + payment (for ALL users including admins)
-    from app.utils.payment_verification import verify_encounter_workflow
     
-    workflow_complete, missing_step, vitals_record, appointment_record, payment_info = verify_encounter_workflow(
-        db, patient_id, check_vitals=True, check_checkin=True, check_payment=True
-    )
-    
-    if not workflow_complete:
-        triage_url = request.url_for("patient_triage", patient_id=patient_id)
-        status_param = "checkin_required"
-        if missing_step == "vitals":
-            status_param = "vitals_required"
-        elif missing_step == "payment":
-            status_param = "payment_required"
-        return RedirectResponse(
-            url=f"{triage_url}?status={status_param}",
-            status_code=status.HTTP_302_FOUND
+    if not is_ipd_encounter:
+        # Verify complete workflow: vitals + check-in + payment (for OPD encounters only)
+        from app.utils.payment_verification import verify_encounter_workflow
+        
+        workflow_complete, missing_step, vitals_record, appointment_record, payment_info = verify_encounter_workflow(
+            db, patient_id, check_vitals=True, check_checkin=True, check_payment=True
         )
-    
-    # Use the verified appointment record
-    appointment_data = appointment_record or appointment_data
-    
-    # Extract payment info from workflow verification
-    payment_paid, charge, invoice = payment_info if payment_info else (True, None, None)
-    payment_required = not payment_paid and is_cash_patient(db, patient_id)
+        
+        if not workflow_complete:
+            triage_url = request.url_for("patient_triage", patient_id=patient_id)
+            status_param = "checkin_required"
+            if missing_step == "vitals":
+                status_param = "vitals_required"
+            elif missing_step == "payment":
+                status_param = "payment_required"
+            return RedirectResponse(
+                url=f"{triage_url}?status={status_param}",
+                status_code=status.HTTP_302_FOUND
+            )
+        
+        # Use the verified appointment record
+        appointment_data = appointment_record or appointment_data
+        
+        # Extract payment info from workflow verification
+        payment_paid, charge, invoice = payment_info if payment_info else (True, None, None)
+        payment_required = not payment_paid and is_cash_patient(db, patient_id)
+    else:
+        # IPD encounter - no payment/triage required
+        payment_paid = True
+        charge = None
+        invoice = None
+        payment_required = False
 
     # Load diseases for dropdowns
     try:
@@ -843,6 +884,7 @@ def get_new_encounter_page(
         "patient": patient_data,
         "appointment": appointment_data,
         "queue_entry_id": queue_entry_id,
+        "admission_id": admission_id,
         "active_opd_visit": active_opd_visit,
         "recent_vitals": recent_vitals_list,
         "payment_required": payment_required,
@@ -1173,6 +1215,7 @@ def get_encounter_page(
         "timedelta": timedelta,
         "hospital_settings": hospital_settings,
         "datetime": datetime,
+        "current_time": datetime.utcnow(),
         "recent_vitals": recent_vitals,
         "addendums": addendums,
     }
@@ -1424,7 +1467,7 @@ def disease_report_page(
     limit: int = Query(100, ge=10, le=500),
     format: str = Query("html", regex="^(html|pdf|excel|csv)$"),
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Doctor", "Clinician", "Management"]))
+    current_user = Depends(role_required(["Admin", "Doctor", "Clinician", "Management", "Nurse"]))
 ):
     from fastapi.responses import Response
     

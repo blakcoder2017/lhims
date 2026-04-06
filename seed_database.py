@@ -222,15 +222,28 @@ def seed_roles_permissions(db):
             "billing_view", "billing_create", "billing_process"
         ]),
         
-        ("accountant", "Accountant", [
-            # Menu permissions
-            "menu_finance", "menu_reports",
-            # Submenu permissions
+        ("accountant", "Accountant/Finance", [
+            # Menu permissions - ADDED FRONT OFFICE + ALL FRONT DESK
+            "menu_finance", "menu_front_office", "menu_patients", "menu_direct_service",
+            # Submenu permissions - ALL FRONT DESK + BILLING/CLAIMS (NO REPORTS)
             "billing", "claims",
-            "financial_reports", "patient_reports", "expense_reports",
-            # Functional permissions
+            "register_patient", "view_patients_list", "view_opd_queue", "manage_appointments",
+            # Functional permissions - FRONT DESK + BILLING
             "billing_view", "billing_edit", "billing_process",
-            "admin_reports"
+            "patient_view", "patient_create", "patient_edit",
+            "appointment_view", "appointment_create", "appointment_edit"
+        ]),
+        
+        ("finance", "Finance Officer", [
+            # Menu permissions - FRONT OFFICE + ALL FRONT DESK
+            "menu_finance", "menu_front_office", "menu_patients", "menu_direct_service",
+            # Submenu permissions - ALL FRONT DESK + BILLING/CLAIMS (NO REPORTS)
+            "billing", "claims",
+            "register_patient", "view_patients_list", "view_opd_queue", "manage_appointments",
+            # Functional permissions - FRONT DESK + BILLING (NO FINANCIAL REPORTS)
+            "billing_view", "billing_edit", "billing_process",
+            "patient_view", "patient_create", "patient_edit",
+            "appointment_view", "appointment_create", "appointment_edit"
         ]),
     ]
     

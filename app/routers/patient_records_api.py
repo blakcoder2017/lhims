@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
 from app.core.templates import templates
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from typing import Optional
 from datetime import datetime, date
 from decimal import Decimal
@@ -282,7 +283,7 @@ def view_patient_records(
     - Prescriptions
     """
     from app.crud import appointment_crud, triage_crud, ipd_crud
-    from app.models.encounter_models import EncounterStatus
+    from app.models.encounter_models import Encounter, EncounterStatus
     from app.models.ipd_models import AdmissionStatus
     from app.utils.patient_utils import calculate_age
     
@@ -342,9 +343,13 @@ def view_patient_records(
     birth_records = birth_crud.get_birth_records_by_mother(db, patient_id)
     
     # Get all lab orders for this patient
+    # Include both direct patient_id links (walk-in orders) AND encounter-based orders
     from app.models.encounter_models import LabOrder
-    lab_orders = db.query(LabOrder).filter(
-        LabOrder.patient_id == patient_id
+    lab_orders = db.query(LabOrder).outerjoin(Encounter, LabOrder.encounter_id == Encounter.id).filter(
+        or_(
+            LabOrder.patient_id == patient_id,
+            Encounter.patient_id == patient_id
+        )
     ).order_by(LabOrder.ordered_at.desc()).limit(100).all()
     
     # Get all prescriptions for this patient
@@ -700,18 +705,22 @@ def complete_opd_visit(
 def start_visit_from_registration(
     request: Request,
     patient_id: int = Form(...),
-    department: str = Form(...),
+    service_pricing_id: Optional[int] = Form(None),
     visit_type: str = Form("new"),
+    department: Optional[str] = Form(None),
     # Optional payment method override for revisit patients
     payment_mechanism: Optional[str] = Form(None),
     nhis_number: Optional[str] = Form(None),
     nhis_expiry_date: Optional[str] = Form(None),
+    # Purpose of visit — consultation (default) or direct_service
+    purpose_of_visit: Optional[str] = Form("consultation"),
+    direct_service_type: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(role_required(["Admin", "Front Office", "Nurse", "Finance"])),
 ):
     """
     Start a visit for an existing patient from the registration page.
-    Creates OPD visit and redirects to collect_payment with department and visit type.
+    Creates OPD visit and redirects to collect_payment with service_pricing_id and visit type.
     Optional payment_mechanism allows updating patient payment method during revisit.
     """
     from urllib.parse import quote
@@ -724,7 +733,8 @@ def start_visit_from_registration(
     # Handle optional payment method update (for revisit patients who want to change payment method)
     if payment_mechanism and payment_mechanism.strip():
         try:
-            payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip())
+            # Convert to uppercase to match enum values (form may send lowercase)
+            payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip().upper())
             # Build update data for patient
             update_data = {"payment_mechanism": payment_mechanism_enum}
             if nhis_number is not None:
@@ -749,6 +759,38 @@ def start_visit_from_registration(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
+    # Direct Service path — skip consultation, create DirectServiceRegistration, redirect to service dashboard
+    is_direct_service = (purpose_of_visit or "consultation").strip().lower() == "direct_service"
+    if is_direct_service:
+        valid_service_types = ("lab", "pharmacy", "radiology", "procedure")
+        if not direct_service_type or direct_service_type.strip().lower() not in valid_service_types:
+            return RedirectResponse(
+                url=str(request.url_for("register_patient")) + "?error=Please+select+a+service+type+for+direct+service",
+                status_code=status.HTTP_302_FOUND
+            )
+        from app.crud import direct_service_registration_crud
+        from app.schemas.direct_service_registration_schemas import DirectServiceRegistrationCreate
+        _SERVICE_LABELS = {"lab": "Laboratory", "pharmacy": "Pharmacy", "radiology": "Radiology", "procedure": "Procedure"}
+        stype = direct_service_type.strip().lower()
+        reg_data = DirectServiceRegistrationCreate(
+            patient_id=patient.id,
+            service_type=stype,
+            service_type_label=_SERVICE_LABELS.get(stype, stype.title()),
+            registration_notes="Registered via front office (existing patient, direct service)",
+        )
+        registration = direct_service_registration_crud.create_direct_service_registration(db, reg_data, current_user.id)
+        return RedirectResponse(
+            url=f"/direct-service-registration?patient_id={patient.id}&registration_id={registration.id}&success=1",
+            status_code=status.HTTP_302_FOUND
+        )
+
+    # Guard: consultation path requires a service pricing selection
+    if not service_pricing_id:
+        return RedirectResponse(
+            url=str(request.url_for("register_patient")) + "?error=Please+select+a+consultation+service",
+            status_code=status.HTTP_302_FOUND
+        )
+
     queue_entry = appointment_crud.get_recent_checked_in_queue_entry(db, patient_id, within_hours=24)
     if queue_entry:
         return RedirectResponse(
@@ -762,12 +804,11 @@ def start_visit_from_registration(
         return RedirectResponse(
             url=str(request.url_for("collect_payment", patient_id=patient_id))
             + f"?opd_visit_id={active_visit.id}&new_visit=true&return_to=triage"
-            + f"&department={quote((department or '').strip() or 'General Medicine')}"
+            + f"&service_pricing_id={service_pricing_id}"
             + f"&visit_type={quote((visit_type or 'new').strip().lower())}",
             status_code=status.HTTP_302_FOUND
         )
 
-    dept_clean = (department or "").strip() or "General Medicine"
     visit_type_clean = (visit_type or "new").strip().lower()
     if visit_type_clean not in ("revisit", "follow_up"):
         visit_type_clean = "new"
@@ -778,7 +819,7 @@ def start_visit_from_registration(
 
     try:
         opd_visit_data = OPDVisitCreate(
-            visit_type="revisit" if visit_type_clean in ("revisit", "follow_up") else "walk_in",
+            visit_type="revisit" if visit_type_clean in ("revisit", "follow_up") else "opd",
             payment_status=payment_status
         )
         opd_visit = opd_crud.create_opd_visit(db, opd_visit_data, patient_id)
@@ -788,7 +829,7 @@ def start_visit_from_registration(
             return RedirectResponse(
                 url=str(request.url_for("collect_payment", patient_id=patient_id))
                 + f"?opd_visit_id={opd_visit.id}&new_visit=true&return_to=triage"
-                + f"&department={quote(dept_clean)}&visit_type={vt_param}",
+                + f"&service_pricing_id={service_pricing_id}&visit_type={vt_param}",
                 status_code=status.HTTP_302_FOUND
             )
         return RedirectResponse(
@@ -803,7 +844,7 @@ def start_visit_from_registration(
         )
 
 
-@router.post("/patients/{patient_id}/start-new-visit", name="start_new_opd_visit")
+@router.post("/patients/{patient_id}/opd-visit/new", name="start_new_opd_visit")
 def start_new_opd_visit(
     request: Request,
     patient_id: int,
@@ -828,7 +869,8 @@ def start_new_opd_visit(
     # Handle optional payment method update (for revisit patients who want to change payment method)
     if payment_mechanism and payment_mechanism.strip():
         try:
-            payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip())
+            # Convert to uppercase to match enum values (form may send lowercase)
+            payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip().upper())
             # Build update data for patient
             update_data = {"payment_mechanism": payment_mechanism_enum}
             if nhis_number is not None:
@@ -871,13 +913,14 @@ def start_new_opd_visit(
                 + f"?opd_visit_id={active_visit.id}&new_visit=true&return_to=triage",
                 status_code=status.HTTP_302_FOUND
             )
+        # Insurance patient with active visit: redirect to nurse queue
         return RedirectResponse(
-            url=str(request.url_for("patient_triage", patient_id=patient_id)) + f"?opd_visit_id={active_visit.id}",
+            url="/nurse/triage-queue?status=revisit",
             status_code=status.HTTP_302_FOUND
         )
     
     # Determine visit type based on payment mechanism
-    visit_type = "walk_in"
+    visit_type = "opd"
     payment_status = "pending"
     
     if patient.payment_mechanism:
@@ -903,8 +946,23 @@ def start_new_opd_visit(
                 + f"?opd_visit_id={opd_visit.id}&new_visit=true&return_to=triage",
                 status_code=status.HTTP_302_FOUND
             )
+        # Insurance patient: add to vitals queue and redirect to nurse queue
+        from app.schemas.appointment_schemas import QueueCreate
+        from app.models.appointment_models import VisitType
+        queue_data = QueueCreate(
+            patient_id=patient_id,
+            department="General Medicine",
+            department_type="opd",
+            visit_type=VisitType.WALK_IN,
+            priority=5,
+            chief_complaint=None,
+            notes="Registered from front office (new visit)",
+            assigned_clinician_id=None,
+            created_by_id=current_user.id
+        )
+        appointment_crud.create_queue_entry(db, queue_data)
         return RedirectResponse(
-            url=str(request.url_for("patient_triage", patient_id=patient_id)) + f"?opd_visit_id={opd_visit.id}&new_visit=true",
+            url="/nurse/triage-queue?status=registered",
             status_code=status.HTTP_302_FOUND
         )
         
@@ -988,7 +1046,8 @@ def update_patient(
         payment_mechanism_enum = None
         if payment_mechanism and payment_mechanism.strip():
             try:
-                payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip())
+                # Convert to uppercase to match enum values (form may send lowercase)
+                payment_mechanism_enum = PaymentMechanism(payment_mechanism.strip().upper())
             except ValueError:
                 return RedirectResponse(
                     url=str(request.url_for("edit_patient_form", patient_id=patient_id)) + "?error=Invalid payment mechanism",

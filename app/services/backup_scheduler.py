@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from app.db.database import SessionLocal
-from app.services.backup_service import create_full_backup, list_backups, BACKUP_DIR
+from app.services.backup_service import create_full_backup, list_backups, BACKUP_DIR, create_complete_backup, list_complete_backups
 from app.crud.hospital_settings_crud import get_hospital_settings
 from scripts.backup_to_drive import BackupToDrive
 
@@ -72,6 +72,57 @@ def run_scheduled_backup(days_to_keep: int = 30, include_drive_upload: bool = Tr
         db.close()
 
 
+def run_scheduled_complete_backup(
+    days_to_keep: int = 30,
+    include_drive_upload: bool = False,
+    include_data: bool = True,
+    compress: bool = True
+) -> bool:
+    """
+    Execute a scheduled complete database backup using pg_dump.
+    This function is designed to be called by cron jobs or scheduled tasks.
+    
+    Args:
+        days_to_keep: Number of days of backups to retain (default: 30)
+        include_drive_upload: Whether to upload to Google Drive (default: False)
+        include_data: Whether to include data (default: True)
+        compress: Whether to compress with gzip (default: True)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        print(f"[{datetime.now()}] Starting complete database backup...")
+        
+        # Create complete backup using pg_dump
+        backup_path = create_complete_backup(include_data=include_data, compress=compress)
+        
+        if not backup_path:
+            print(f"[{datetime.now()}] ERROR: Failed to create complete backup")
+            return False
+        
+        print(f"[{datetime.now()}] Complete backup created: {backup_path}")
+        
+        # Upload to Google Drive if enabled
+        if include_drive_upload:
+            try:
+                backup_system = BackupToDrive()
+                # Note: This would need adaptation for .sql.gz files
+                print(f"[{datetime.now()}] Drive upload skipped for complete backup (not implemented)")
+            except Exception as e:
+                print(f"[{datetime.now()}] WARNING: Drive upload failed: {e}")
+        
+        # Clean up old complete backups
+        cleanup_old_complete_backups(days_to_keep=days_to_keep)
+        
+        print(f"[{datetime.now()}] Complete backup completed successfully")
+        return True
+        
+    except Exception as e:
+        print(f"[{datetime.now()}] ERROR: {str(e)}")
+        return False
+
+
 def cleanup_old_backups(days_to_keep: int = 30):
     """
     Remove backups older than the specified number of days.
@@ -104,11 +155,50 @@ def cleanup_old_backups(days_to_keep: int = 30):
         print(f"[{datetime.now()}] Error in cleanup_old_backups: {e}")
 
 
+def cleanup_old_complete_backups(days_to_keep: int = 30):
+    """
+    Remove complete SQL backups older than the specified number of days.
+    
+    Args:
+        days_to_keep: Number of days of backups to retain
+    """
+    try:
+        if not BACKUP_DIR.exists():
+            return
+        
+        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        backups = list_complete_backups()
+        
+        for backup in backups:
+            try:
+                backup_date_str = backup.get("backup_date", "")
+                if backup_date_str:
+                    backup_date = datetime.fromisoformat(backup_date_str.replace('Z', '+00:00'))
+                    if backup_date < cutoff_date:
+                        sql_file = backup.get("sql_file", "")
+                        if sql_file:
+                            backup_path = BACKUP_DIR / sql_file
+                            if backup_path.exists():
+                                backup_path.unlink()
+                                print(f"[{datetime.now()}] Deleted old complete backup: {backup_path}")
+                            
+                            # Also delete metadata if exists
+                            metadata_file = BACKUP_DIR / f"{backup.get('backup_name', '')}_metadata.json"
+                            if metadata_file.exists():
+                                metadata_file.unlink()
+            except Exception as e:
+                print(f"[{datetime.now()}] Error cleaning up complete backup: {e}")
+                continue
+    except Exception as e:
+        print(f"[{datetime.now()}] Error in cleanup_old_complete_backups: {e}")
+
+
 def generate_cron_job_entry(
     hour: int = 2,
     minute: int = 0,
     python_path: Optional[str] = None,
-    project_path: Optional[str] = None
+    project_path: Optional[str] = None,
+    backup_type: str = "complete"
 ) -> str:
     """
     Generate a cron job entry for automatic backups.
@@ -118,6 +208,7 @@ def generate_cron_job_entry(
         minute: Minute of hour (0-59) to run backup
         python_path: Path to Python executable (auto-detected if None)
         project_path: Path to project root (auto-detected if None)
+        backup_type: Type of backup - "complete" or "partial" (default: "complete")
     
     Returns:
         Cron job entry string
@@ -131,8 +222,11 @@ def generate_cron_job_entry(
     # Get the script path
     script_path = Path(__file__).resolve()
     
-    # Generate cron entry
-    cron_entry = f"{minute} {hour} * * * cd {project_path} && {python_path} -c \"from app.services.backup_scheduler import run_scheduled_backup; run_scheduled_backup(include_drive_upload=True)\""
+    # Generate cron entry based on backup type
+    if backup_type == "complete":
+        cron_entry = f"{minute} {hour} * * * cd {project_path} && {python_path} -c \"from app.services.backup_scheduler import run_scheduled_complete_backup; run_scheduled_complete_backup(days_to_keep=30)\""
+    else:
+        cron_entry = f"{minute} {hour} * * * cd {project_path} && {python_path} -c \"from app.services.backup_scheduler import run_scheduled_backup; run_scheduled_backup(include_drive_upload=True)\""
     
     return cron_entry
 
@@ -140,7 +234,8 @@ def generate_cron_job_entry(
 def install_cron_job(
     hour: int = 2,
     minute: int = 0,
-    comment: str = "LHIMS Automatic Backup"
+    comment: str = "LHIMS Automatic Backup",
+    backup_type: str = "complete"
 ) -> tuple[bool, str]:
     """
     Install a cron job for automatic backups (Linux/Mac only).
@@ -149,6 +244,7 @@ def install_cron_job(
         hour: Hour of day (0-23) to run backup
         minute: Minute of hour (0-59) to run backup
         comment: Comment to identify the cron job
+        backup_type: Type of backup - "complete" or "partial" (default: "complete")
     
     Returns:
         Tuple of (success: bool, message: str)
@@ -157,8 +253,9 @@ def install_cron_job(
         return False, "Cron jobs are only supported on Linux and macOS. Use Task Scheduler on Windows."
     
     try:
-        cron_entry = generate_cron_job_entry(hour=hour, minute=minute)
-        cron_entry_with_comment = f"{cron_entry} # {comment}"
+        cron_entry = generate_cron_job_entry(hour=hour, minute=minute, backup_type=backup_type)
+        backup_type_label = "Complete Database" if backup_type == "complete" else "Partial CSV"
+        cron_entry_with_comment = f"{cron_entry} # {comment} - {backup_type_label}"
         
         # Get current crontab
         result = subprocess.run(

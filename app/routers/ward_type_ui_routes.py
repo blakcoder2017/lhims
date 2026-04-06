@@ -26,7 +26,7 @@ router = APIRouter(
 def list_ward_types(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Admin"])),
+    current_user: User = Depends(role_required(["Admin", "Management"])),
     active_only: bool = Query(True)
 ):
     """List all ward types"""

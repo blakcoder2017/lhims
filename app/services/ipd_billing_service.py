@@ -2,10 +2,11 @@
 IPD Billing Automation Service
 
 This module handles automatic billing for IPD (Inpatient Department) services:
-- Ward charges (daily charges for ward occupancy)
-- Bed charges (daily charges for bed occupancy)
+- Admission Fee (ward charges - daily charges for ward occupancy)
 - Automatic charge creation when patient is admitted
 - Automatic charge calculation on discharge
+
+Note: Bed charges have been removed - patients should not be charged for bed charges.
 """
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -89,18 +90,18 @@ def calculate_ward_bed_charges(
     if hasattr(admission, 'ward') and admission.ward and admission.ward.charge_per_day:
         ward_charge_per_day = Decimal(str(admission.ward.charge_per_day))
     
-    ward_charge = upsert_duration_charge(f"Ward Charges: {admission.ward.name}", ward_charge_per_day)
+    ward_charge = upsert_duration_charge(f"Admission Fee : {admission.ward.name}", ward_charge_per_day)
     if ward_charge:
         charges.append(ward_charge)
     
-    # Bed charges
-    bed_charge_per_day = Decimal('0.00')
-    if hasattr(admission, 'bed') and admission.bed and admission.bed.charge_per_day:
-        bed_charge_per_day = Decimal(str(admission.bed.charge_per_day))
+    # Bed charges - COMMENTED OUT: Patients should not be charged for bed charges
+    # bed_charge_per_day = Decimal('0.00')
+    # if hasattr(admission, 'bed') and admission.bed and admission.bed.charge_per_day:
+    #     bed_charge_per_day = Decimal(str(admission.bed.charge_per_day))
     
-    bed_charge = upsert_duration_charge(f"Bed Charges: {admission.bed.bed_number}", bed_charge_per_day)
-    if bed_charge:
-        charges.append(bed_charge)
+    # bed_charge = upsert_duration_charge(f"Bed Charges: {admission.bed.bed_number}", bed_charge_per_day)
+    # if bed_charge:
+    #     charges.append(bed_charge)
     
     return charges
 
@@ -141,17 +142,30 @@ def get_or_create_invoice_for_admission(
     
     # Create new invoice for the admission
     from app.schemas.billing_schemas import InvoiceCreate
-    from app.models.patient_models import Patient
+    from app.models.billing_models import PaymentMethod
+    from app.models.patient_models import Patient, PaymentMechanism
     
     patient = db.query(Patient).filter(Patient.id == admission.patient_id).first()
     if not patient:
         raise ValueError(f"Patient {admission.patient_id} not found")
     
+    # Convert PaymentMechanism to PaymentMethod (handle enum mismatch)
+    payment_method = None
+    if patient.payment_mechanism:
+        if patient.payment_mechanism == PaymentMechanism.CASH:
+            payment_method = PaymentMethod.CASH
+        elif patient.payment_mechanism == PaymentMechanism.NHIS:
+            payment_method = PaymentMethod.NHIS
+        elif patient.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE:
+            payment_method = PaymentMethod.PRIVATE_INSURANCE
+        elif patient.payment_mechanism == PaymentMechanism.SELF_PAY:
+            payment_method = PaymentMethod.CASH  # Default to cash for self-pay
+    
     invoice_data = InvoiceCreate(
         patient_id=admission.patient_id,
         encounter_id=admission.encounter_id,
         appointment_id=None,
-        payment_mechanism=patient.payment_mechanism,
+        payment_mechanism=payment_method,
         charges=[]
     )
     

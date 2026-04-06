@@ -47,7 +47,7 @@ class Expense(Base):
     # Expense Details
     expense_number = Column(String(50), unique=True, nullable=False, index=True)  # Unique expense number
     description = Column(Text, nullable=False)  # Description of the expense
-    category = Column(Enum(ExpenseCategory), nullable=False)  # Expense category
+    category = Column(Enum(ExpenseCategory, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False)  # Expense category
     amount = Column(Numeric(10, 2), nullable=False)  # Expense amount
     currency = Column(String(10), nullable=False, default="GHS")  # Currency code
     
@@ -57,7 +57,7 @@ class Expense(Base):
     invoice_number = Column(String(100), nullable=True)  # Vendor invoice number
     
     # Status and Approval
-    status = Column(Enum(ExpenseStatus), nullable=False, default=ExpenseStatus.PENDING)
+    status = Column(Enum(ExpenseStatus, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=ExpenseStatus.PENDING)
     approved_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # User who approved
     approved_at = Column(DateTime, nullable=True)  # Approval date
     

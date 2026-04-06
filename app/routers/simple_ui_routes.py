@@ -75,3 +75,8 @@ async def patient_pay_redirect(patient_id: int):
 async def radiology_studies_redirect():
     """Redirect to radiology main page"""
     return RedirectResponse(url="/radiology", status_code=302)
+
+@router.get("/radiology")
+async def radiology_redirect():
+    """Redirect to radiology dashboard"""
+    return RedirectResponse(url="/api/v1/ancillary/radiology", status_code=302)

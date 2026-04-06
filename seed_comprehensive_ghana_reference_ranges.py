@@ -249,18 +249,18 @@ REFERENCE_RANGES = [
     # Uric Acid (μmol/L)
     ('uric_acid', 'M', 0, 365, 100, 230, 'μmol/L', None, None),
     ('uric_acid', 'M', 365, 6570, 120, 350, 'μmol/L', None, None),
-    ('uric_acid', 'M', 6570, 25550, 200, 430, 'μmol/L', None, None),
+    ('uric_acid', 'M', 6570, 25550, 142, 339, 'μmol/L', None, None),
     ('uric_acid', 'F', 0, 365, 100, 230, 'μmol/L', None, None),
     ('uric_acid', 'F', 365, 6570, 120, 350, 'μmol/L', None, None),
-    ('uric_acid', 'F', 6570, 25550, 140, 360, 'μmol/L', None, None),
+    ('uric_acid', 'F', 6570, 25550, 202, 416, 'μmol/L', None, None),
     
     # Uric Acid Value (alternative)
     ('uric_acid_value', 'M', 0, 365, 100, 230, 'μmol/L', None, None),
     ('uric_acid_value', 'M', 365, 6570, 120, 350, 'μmol/L', None, None),
-    ('uric_acid_value', 'M', 6570, 25550, 200, 430, 'μmol/L', None, None),
+    ('uric_acid_value', 'M', 6570, 25550, 142, 339, 'μmol/L', None, None),
     ('uric_acid_value', 'F', 0, 365, 100, 230, 'μmol/L', None, None),
     ('uric_acid_value', 'F', 365, 6570, 120, 350, 'μmol/L', None, None),
-    ('uric_acid_value', 'F', 6570, 25550, 140, 360, 'μmol/L', None, None),
+    ('uric_acid_value', 'F', 6570, 25550, 202, 416, 'μmol/L', None, None),
     
     # eGFR (mL/min/1.73m²)
     ('gfr_value', 'ANY', 0, 365, 40, 120, 'mL/min/1.73m²', 15, None),
@@ -519,10 +519,14 @@ REFERENCE_RANGES = [
     # INFLAMMATORY MARKERS
     # =========================================================================
     
-    # CRP (mg/L)
-    ('crp_value', 'ANY', 0, 365, 0, 10, 'mg/L', None, 50),
-    ('crp_value', 'ANY', 365, 6570, 0, 6, 'mg/L', None, 50),
-    ('crp_value', 'ANY', 6570, 25550, 0, 3, 'mg/L', None, 50),
+    # CRP (mg/L) - CVD Risk Assessment - interpretation-based, no auto-flags
+    # < 1.0 mg/L = Low CVD (no inflammation)
+    # 1.0-3.0 mg/L = Moderate CVD risk
+    # > 3.0 mg/L = High CVD risk
+    # > 10 mg/L = May indicate infection (bacterial/viral)
+    ('crp_value', 'ANY', 0, 365, None, None, 'mg/L', None, None),
+    ('crp_value', 'ANY', 365, 6570, None, None, 'mg/L', None, None),
+    ('crp_value', 'ANY', 6570, 25550, None, None, 'mg/L', None, None),
     
     # ASO Titer (IU/mL)
     ('aso_value', 'ANY', 0, 365, 0, 100, 'IU/mL', None, None),

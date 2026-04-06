@@ -42,8 +42,7 @@ def claims_dashboard(
     Unified Claims Dashboard - Shows both NHIS and Private Insurance claims
     with provider badges and submission tracking
     """
-    from app.models.billing_models import Invoice, InvoiceStatus
-    from app.models.patient_models import PaymentMechanism
+    from app.models.billing_models import Invoice, InvoiceStatus, PaymentMethod
     from sqlalchemy.orm import joinedload
     from sqlalchemy import func
     from decimal import Decimal
@@ -105,7 +104,7 @@ def claims_dashboard(
     # ========== PRIVATE INSURANCE CLAIMS ==========
     private_query = db.query(Invoice).filter(
         Invoice.is_active == True,
-        Invoice.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE.value
+        Invoice.payment_mechanism == PaymentMethod.PRIVATE_INSURANCE.value
     )
     
     if status_filter and provider_filter != "nhis":
@@ -205,8 +204,7 @@ def private_insurance_claims_dashboard(
     insurance_provider: Optional[str] = Query(None)
 ):
     """Private Insurance Claims dashboard - aggregates all bills and claims grouped by insurance company"""
-    from app.models.billing_models import Invoice, InvoiceStatus
-    from app.models.patient_models import PaymentMechanism
+    from app.models.billing_models import Invoice, InvoiceStatus, PaymentMethod
     from sqlalchemy.orm import joinedload
     from sqlalchemy import func
     from decimal import Decimal
@@ -214,7 +212,7 @@ def private_insurance_claims_dashboard(
     # Base query for private insurance invoices
     base_query = db.query(Invoice).filter(
         Invoice.is_active == True,
-        Invoice.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE.value
+        Invoice.payment_mechanism == PaymentMethod.PRIVATE_INSURANCE.value
     )
     
     if status_filter:
@@ -581,8 +579,7 @@ def export_private_insurance_invoices(
     format: str = Query("csv", regex="^(csv|excel)$")
 ):
     """Export private insurance invoices to CSV or Excel for submission to providers."""
-    from app.models.billing_models import Invoice, InvoiceStatus
-    from app.models.patient_models import PaymentMechanism
+    from app.models.billing_models import Invoice, InvoiceStatus, PaymentMethod
     from sqlalchemy.orm import joinedload
     from fastapi.responses import StreamingResponse
     import csv
@@ -592,7 +589,7 @@ def export_private_insurance_invoices(
     # Base query for private insurance invoices
     base_query = db.query(Invoice).filter(
         Invoice.is_active == True,
-        Invoice.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE.value
+        Invoice.payment_mechanism == PaymentMethod.PRIVATE_INSURANCE.value
     ).options(
         joinedload(Invoice.patient),
         joinedload(Invoice.encounter)
@@ -741,13 +738,12 @@ def update_private_insurance_invoice_status(
     notes: Optional[str] = Form(None)
 ):
     """Update the status of a private insurance invoice."""
-    from app.models.billing_models import Invoice, InvoiceStatus
-    from app.models.patient_models import PaymentMechanism
+    from app.models.billing_models import Invoice, InvoiceStatus, PaymentMethod
     
     invoice = db.query(Invoice).filter(
         Invoice.id == invoice_id,
         Invoice.is_active == True,
-        Invoice.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE.value
+        Invoice.payment_mechanism == PaymentMethod.PRIVATE_INSURANCE.value
     ).first()
     
     if not invoice:
@@ -847,8 +843,7 @@ def batch_update_private_insurance_invoices_status(
     """
     Batch update status for multiple private insurance invoices.
     """
-    from app.models.billing_models import Invoice, InvoiceStatus
-    from app.models.patient_models import PaymentMechanism
+    from app.models.billing_models import Invoice, InvoiceStatus, PaymentMethod
     
     try:
         status_enum = InvoiceStatus(new_status)
@@ -865,7 +860,7 @@ def batch_update_private_insurance_invoices_status(
                 invoice = db.query(Invoice).filter(
                     Invoice.id == invoice_id,
                     Invoice.is_active == True,
-                    Invoice.payment_mechanism == PaymentMechanism.PRIVATE_INSURANCE.value
+                    Invoice.payment_mechanism == PaymentMethod.PRIVATE_INSURANCE.value
                 ).first()
                 
                 if invoice:

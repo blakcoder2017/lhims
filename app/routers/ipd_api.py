@@ -275,6 +275,158 @@ def delete_admission_endpoint(
     return None
 
 
+# Admission Billing Routes
+@router.post("/api/v1/admissions/{admission_id}/charges", status_code=status.HTTP_201_CREATED)
+async def add_admission_charges(
+    admission_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Nurse", "Admin", "Front Office"]))
+):
+    """
+    Add multiple service charges to an admission.
+    
+    Request body:
+    {
+        "charges": [
+            {"service_pricing_id": 1, "quantity": 2},
+            {"service_pricing_id": 3, "quantity": 1}
+        ]
+    }
+    """
+    from app.crud import billing_crud, service_pricing_crud
+    from decimal import Decimal
+    
+    # Get admission
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    
+    # Parse request body
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    
+    charges_data = body.get('charges', [])
+    if not charges_data:
+        raise HTTPException(status_code=400, detail="No charges provided")
+    
+    # Process each charge
+    processed_charges = []
+    for charge_item in charges_data:
+        service_pricing_id = charge_item.get('service_pricing_id')
+        quantity = charge_item.get('quantity', 1)
+        
+        if not service_pricing_id:
+            raise HTTPException(status_code=400, detail="service_pricing_id is required")
+        
+        # Get service pricing
+        service = service_pricing_crud.get_service_pricing(db, service_pricing_id)
+        if not service:
+            raise HTTPException(status_code=404, detail=f"Service pricing {service_pricing_id} not found")
+        
+        processed_charges.append({
+            'description': service.service_name,
+            'quantity': quantity,
+            'unit_price': service.unit_price
+        })
+    
+    # Add charges to admission invoice
+    invoice = billing_crud.add_charges_to_admission(
+        db, admission_id, processed_charges, current_user.id
+    )
+    
+    return {
+        "status": "success",
+        "message": f"Added {len(processed_charges)} charge(s) to admission",
+        "invoice_id": invoice.id,
+        "invoice_number": invoice.invoice_number,
+        "total_amount": float(invoice.total_amount)
+    }
+
+
+@router.get("/api/v1/admissions/{admission_id}/charges", name="get_admission_charges")
+def get_admission_charges(
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Get all charges for an admission"""
+    from app.crud import billing_crud
+    from app.schemas.billing_schemas import InvoiceRead
+    
+    # Get admission
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    
+    # Get invoice
+    invoice = billing_crud.get_invoice_by_admission(db, admission_id)
+    if not invoice:
+        return {"admission_id": admission_id, "invoice": None, "charges": []}
+    
+    return {
+        "admission_id": admission_id,
+        "invoice": InvoiceRead.model_validate(invoice),
+        "charges": invoice.charges
+    }
+
+
+@router.get("/api/v1/admissions/{admission_id}/billing", name="get_admission_billing")
+def get_admission_billing(
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Get billing details for an admission (for UI)"""
+    from app.crud import billing_crud, service_pricing_crud
+    from app.schemas.billing_schemas import InvoiceRead
+    from app.models.service_pricing_models import ServicePricing
+    
+    # Get admission
+    admission = ipd_crud.get_admission(db, admission_id)
+    if not admission:
+        raise HTTPException(status_code=404, detail="Admission not found")
+    
+    # Get available services for admission - filter by 'other' charge type
+    admission_services = db.query(ServicePricing).filter(
+        ServicePricing.is_active == True,
+        ServicePricing.charge_type.in_([
+            'other'
+        ])
+    ).all()
+    
+    # Get invoice
+    invoice = billing_crud.get_invoice_by_admission(db, admission_id)
+    
+    return {
+        "admission": {
+            "id": admission.id,
+            "admission_number": admission.admission_number,
+            "admission_date": admission.admission_date.isoformat() if admission.admission_date else None,
+            "patient": {
+                "id": admission.patient.id,
+                "patient_id": admission.patient.patient_id,
+                "first_name": admission.patient.first_name,
+                "last_name": admission.patient.last_name
+            },
+            "ward": {"name": admission.ward.name} if admission.ward else None,
+            "bed": {"bed_number": admission.bed.bed_number} if admission.bed else None
+        },
+        "invoice": InvoiceRead.model_validate(invoice) if invoice else None,
+        "available_services": [
+            {
+                "id": s.id,
+                "service_name": s.service_name,
+                "service_code": s.service_code,
+                "unit_price": float(s.unit_price),
+                "category": s.category
+            } for s in admission_services
+        ]
+    }
+
+
 # Doctor Duty Routes
 @router.post("/api/v1/doctor-duties", response_model=DoctorDuty, status_code=status.HTTP_201_CREATED)
 def create_doctor_duty_endpoint(

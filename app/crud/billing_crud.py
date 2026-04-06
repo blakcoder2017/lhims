@@ -1,11 +1,12 @@
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 import uuid
 from sqlalchemy.exc import IntegrityError
 
-from app.models.billing_models import Invoice, Charge, Payment, ChargePayment, InvoiceStatus, PaymentStatus, PaymentMethod, ChargeType, Refund, RefundPolicy, RefundStatus
+from app.models.billing_models import Invoice, Charge, Payment, ChargePayment, InvoiceStatus, PaymentStatus, PaymentMethod, ChargeType, Refund, RefundPolicy, RefundStatus, ConsolidatedReceipt, ConsolidatedReceiptInvoice, ConsolidatedReceiptCharge, ConsolidatedReceiptPayment, ConsolidatedReceiptPrintLog
 from app.models.user_models import User
 from app.schemas.billing_schemas import (
     InvoiceCreate, InvoiceUpdate, InvoiceRead,
@@ -498,6 +499,66 @@ def allocate_payment_to_charge(db: Session, payment_id: int, charge_id: int, amo
     return cp
 
 
+def get_invoice_by_admission(db: Session, admission_id: int) -> Optional[Invoice]:
+    """Get an invoice linked to an admission"""
+    return db.query(Invoice).options(
+        joinedload(Invoice.patient),
+        joinedload(Invoice.charges),
+        joinedload(Invoice.payments).joinedload(Payment.received_by),
+        joinedload(Invoice.created_by)
+    ).filter(
+        Invoice.admission_id == admission_id,
+        Invoice.is_active == True
+    ).first()
+
+
+def get_or_create_admission_invoice(db: Session, admission_id: int, patient_id: int, created_by_id: int) -> Invoice:
+    """Get existing invoice for admission or create a new one"""
+    existing_invoice = get_invoice_by_admission(db, admission_id)
+    if existing_invoice:
+        return existing_invoice
+    
+    # Create new invoice for admission
+    from app.schemas.billing_schemas import InvoiceCreate
+    invoice_data = InvoiceCreate(
+        patient_id=patient_id,
+        admission_id=admission_id
+    )
+    return create_invoice(db, invoice_data, created_by_id)
+
+
+def add_charges_to_admission(db: Session, admission_id: int, charges_data: List[dict], created_by_id: int) -> Invoice:
+    """Add multiple charges to an admission invoice"""
+    from app.models.ipd_models import Admission
+    
+    # Get admission to get patient_id
+    admission = db.query(Admission).filter(Admission.id == admission_id).first()
+    if not admission:
+        raise ValueError("Admission not found")
+    
+    # Get or create invoice
+    invoice = get_or_create_admission_invoice(db, admission_id, admission.patient_id, created_by_id)
+    
+    # Add each charge
+    for charge_data in charges_data:
+        from app.schemas.billing_schemas import ChargeCreate
+        from app.models.billing_models import ChargeType
+        
+        charge_create = ChargeCreate(
+            charge_type=ChargeType.ADMISSION,
+            description=charge_data['description'],
+            quantity=charge_data['quantity'],
+            unit_price=charge_data['unit_price'],
+            discount=Decimal('0.00'),
+            tax_rate=Decimal('0.00')
+        )
+        add_charge_to_invoice(db, invoice.id, charge_create)
+    
+    # Refresh to get updated totals
+    db.refresh(invoice)
+    return invoice
+
+
 def create_receipt(db: Session, payment_id: int, generated_by_id: int) -> "Receipt":
     """
     Create a receipt for a payment.
@@ -520,22 +581,26 @@ def create_receipt(db: Session, payment_id: int, generated_by_id: int) -> "Recei
         return existing_receipt
     
     # Create receipt
-    receipt = Receipt(
-        payment_id=payment.id,
-        patient_id=payment.patient_id,
-        invoice_id=payment.invoice_id,
-        generated_by_id=generated_by_id,
-        receipt_number=payment.receipt_number or generate_receipt_number(db),
-        amount=payment.amount,
-        payment_method=payment.payment_method.value if hasattr(payment.payment_method, 'value') else str(payment.payment_method),
-        currency="GHS"
-    )
-    
-    db.add(receipt)
-    db.commit()
-    db.refresh(receipt)
-    
-    return receipt
+    try:
+        receipt = Receipt(
+            payment_id=payment.id,
+            patient_id=payment.patient_id,
+            invoice_id=payment.invoice_id,
+            generated_by_id=generated_by_id,
+            receipt_number=payment.receipt_number or generate_receipt_number(db),
+            amount=payment.amount,
+            payment_method=payment.payment_method.value if hasattr(payment.payment_method, 'value') else str(payment.payment_method),
+            currency="GHS"
+        )
+        
+        db.add(receipt)
+        db.commit()
+        db.refresh(receipt)
+        
+        return receipt
+    except Exception as e:
+        db.rollback()  # Roll back the failed transaction
+        raise
 
 
 def get_payment(db: Session, payment_id: int) -> Optional[Payment]:
@@ -739,6 +804,14 @@ def create_refund(db: Session, refund_data: RefundCreate, user_id: int) -> Optio
     db.add(db_refund)
     db.commit()
     db.refresh(db_refund)
+    
+    # Send notification about new refund request
+    try:
+        from app.services.billing_notification_service import send_refund_request_notification
+        send_refund_request_notification(db, db_refund)
+    except Exception as e:
+        print(f"Error sending refund request notification: {e}")
+    
     return db_refund
 
 
@@ -749,13 +822,20 @@ def validate_refund_request(db: Session, payment: Payment, invoice: Invoice, amo
     if payment.status != PaymentStatus.COMPLETED:
         return "Can only refund completed payments"
     
-    # Check if payment was already refunded
-    existing_refund = db.query(Refund).filter(
+    # Check if payment was already fully refunded
+    existing_refunds = db.query(Refund).filter(
         Refund.payment_id == payment.id,
-        Refund.status == RefundStatus.PROCESSED
-    ).first()
-    if existing_refund:
-        return "Payment has already been refunded"
+        Refund.status.in_([RefundStatus.PROCESSED, RefundStatus.APPROVED])
+    ).all()
+    
+    total_refunded = sum(r.amount for r in existing_refunds)
+    remaining_amount = payment.amount - total_refunded
+    
+    if existing_refunds and total_refunded >= payment.amount:
+        return "Payment has already been fully refunded"
+    
+    if amount > remaining_amount:
+        return f"Refund amount ({amount}) cannot exceed remaining refundable amount ({remaining_amount})"
     
     # Check amount doesn't exceed payment amount
     if amount > payment.amount:
@@ -776,11 +856,42 @@ def validate_refund_request(db: Session, payment: Payment, invoice: Invoice, amo
     return None
 
 
-def get_refunds(db: Session, skip: int = 0, limit: int = 100, status: Optional[RefundStatus] = None) -> List[Refund]:
-    """Get all refunds with optional status filter"""
-    query = db.query(Refund)
+def get_refunds(db: Session, skip: int = 0, limit: int = 100, status: Optional[RefundStatus] = None, 
+                  search: Optional[str] = None, start_date: Optional[str] = None, 
+                  end_date: Optional[str] = None) -> List[Refund]:
+    """Get all refunds with optional status filter, search, and date range"""
+    from datetime import datetime
+    
+    query = db.query(Refund).options(joinedload(Refund.patient))
+    
     if status:
         query = query.filter(Refund.status == status)
+    
+    if search:
+        # Search by refund number, patient name, or patient ID
+        query = query.join(Refund.patient).filter(
+            (Refund.refund_number.ilike(f"%{search}%")) |
+            (Patient.full_name.ilike(f"%{search}%")) |
+            (Patient.id.cast(str).ilike(f"%{search}%"))
+        )
+    
+    if start_date:
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.filter(Refund.request_date >= start)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+            # Add one day to include the end date
+            from datetime import timedelta
+            end = end + timedelta(days=1)
+            query = query.filter(Refund.request_date < end)
+        except ValueError:
+            pass
+    
     return query.order_by(Refund.created_at.desc()).offset(skip).limit(limit).all()
 
 
@@ -823,6 +934,14 @@ def approve_refund(db: Session, refund_id: int, user_id: int, notes: Optional[st
     
     db.commit()
     db.refresh(db_refund)
+    
+    # Send notification
+    try:
+        from app.services.billing_notification_service import send_refund_approval_notification
+        send_refund_approval_notification(db, db_refund)
+    except Exception as e:
+        print(f"Error sending refund approval notification: {e}")
+    
     return db_refund
 
 
@@ -844,6 +963,14 @@ def reject_refund(db: Session, refund_id: int, user_id: int, rejection_reason: s
     
     db.commit()
     db.refresh(db_refund)
+    
+    # Send notification
+    try:
+        from app.services.billing_notification_service import send_refund_rejection_notification
+        send_refund_rejection_notification(db, db_refund)
+    except Exception as e:
+        print(f"Error sending refund rejection notification: {e}")
+    
     return db_refund
 
 
@@ -863,14 +990,15 @@ def process_refund(db: Session, refund_id: int, user_id: int, refund_method: Pay
     # Update payment status
     payment.status = PaymentStatus.REFUNDED
     
-    # Update invoice - reduce paid amount and update balance
-    invoice.paid_amount -= db_refund.amount
-    invoice.balance = invoice.total_amount - invoice.paid_amount
+    # Update invoice - add to refunds_credit (NOT reduce paid_amount)
+    # This ensures the refund is shown as a credit, not as increasing the balance
+    invoice.refunds_credit = (invoice.refunds_credit or Decimal('0.00')) + db_refund.amount
+    invoice.balance = invoice.total_amount - invoice.paid_amount - invoice.refunds_credit
     
     # Update invoice status based on new balance
-    if invoice.balance == invoice.total_amount:
-        invoice.status = InvoiceStatus.PENDING
-        invoice.paid_date = None
+    if invoice.balance <= 0 and invoice.paid_amount > 0:
+        invoice.status = InvoiceStatus.PAID
+        invoice.paid_date = datetime.now()
     elif invoice.balance > 0:
         invoice.status = InvoiceStatus.PARTIALLY_PAID
     
@@ -885,10 +1013,18 @@ def process_refund(db: Session, refund_id: int, user_id: int, refund_method: Pay
     
     db.commit()
     db.refresh(db_refund)
+    
+    # Send notification
+    try:
+        from app.services.billing_notification_service import send_refund_processed_notification
+        send_refund_processed_notification(db, db_refund)
+    except Exception as e:
+        print(f"Error sending refund processed notification: {e}")
+    
     return db_refund
 
 
-def cancel_refund(db: Session, refund_id: int) -> Optional[Refund]:
+def cancel_refund(db: Session, refund_id: int, user_id: int = None, notes: str = None) -> Optional[Refund]:
     """Cancel a pending refund request"""
     db_refund = db.query(Refund).filter(Refund.id == refund_id).first()
     if not db_refund:
@@ -897,8 +1033,440 @@ def cancel_refund(db: Session, refund_id: int) -> Optional[Refund]:
     if db_refund.status not in [RefundStatus.PENDING, RefundStatus.APPROVED]:
         raise ValueError("Only pending or approved refunds can be cancelled")
     
-    db_refund.is_active = False
+    db_refund.status = RefundStatus.CANCELLED
+    if notes:
+        db_refund.notes = (db_refund.notes or "") + f"\n[CANCELLED] {notes}"
     db.commit()
     db.refresh(db_refund)
+    
+    # Send notification about cancelled refund
+    try:
+        from app.services.billing_notification_service import send_refund_cancelled_notification
+        send_refund_cancelled_notification(db, db_refund)
+    except Exception as e:
+        print(f"Error sending refund cancellation notification: {e}")
+    
     return db_refund
+
+
+# ============================================================================
+# CONSOLIDATED RECEIPT CRUD OPERATIONS
+# ============================================================================
+
+def generate_consolidated_receipt_number(db: Session) -> str:
+    """Generate a unique consolidated receipt number with retry logic"""
+    prefix = "CR"
+    date_str = datetime.now().strftime("%Y%m%d")
+    max_retries = 5
+    
+    for attempt in range(max_retries):
+        # Get the last consolidated receipt number for today
+        last_receipt = db.query(ConsolidatedReceipt).filter(
+            ConsolidatedReceipt.receipt_number.like(f"{prefix}-{date_str}-%")
+        ).order_by(ConsolidatedReceipt.id.desc()).first()
+        
+        if last_receipt:
+            try:
+                sequence = int(last_receipt.receipt_number.split('-')[-1])
+                sequence += 1
+            except (ValueError, IndexError):
+                sequence = 1
+        else:
+            sequence = 1
+        
+        receipt_number = f"{prefix}-{date_str}-{sequence:04d}"
+        
+        # Check if this receipt number already exists
+        existing = db.query(ConsolidatedReceipt).filter(
+            ConsolidatedReceipt.receipt_number == receipt_number
+        ).first()
+        
+        if not existing:
+            return receipt_number
+        
+        if attempt < max_retries - 1:
+            db.rollback()
+            continue
+    
+    # Fallback: use UUID if all retries fail
+    return f"{prefix}-{date_str}-{uuid.uuid4().hex[:8].upper()}"
+
+
+def get_invoices_for_consolidated_receipt(
+    db: Session,
+    patient_id: Optional[int] = None,
+    patient_name: Optional[str] = None,
+    phone_number: Optional[str] = None,
+    nhis_number: Optional[str] = None,
+    invoice_ids: Optional[List[int]] = None,
+    status: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    charge_type: Optional[str] = None
+) -> List[Invoice]:
+    """
+    Search invoices for consolidated receipt generation.
+    Supports filtering by patient, status, date range, and charge type.
+    """
+    from sqlalchemy.orm import joinedload
+    from app.models.patient_models import Patient
+    
+    query = db.query(Invoice).options(
+        joinedload(Invoice.patient),
+        joinedload(Invoice.charges)
+    ).filter(
+        Invoice.is_active == True
+    )
+    
+    if patient_id:
+        query = query.filter(Invoice.patient_id == patient_id)
+        print(f"[DEBUG] Added patient_id filter: {patient_id}")
+    
+    # Search by patient name if provided
+    if patient_name:
+        # Join with Patient model and filter by name
+        # Use func.concat for cross-database compatibility
+        query = query.join(Patient).filter(
+            (Patient.first_name.ilike(f"%{patient_name}%")) |
+            (Patient.last_name.ilike(f"%{patient_name}%")) |
+            (func.concat(Patient.first_name, ' ', Patient.last_name).ilike(f"%{patient_name}%"))
+        )
+        print(f"[DEBUG] Added patient_name filter: {patient_name}")
+    
+    # Search by phone number
+    if phone_number:
+        query = query.join(Patient).filter(
+            Patient.phone_number.ilike(f"%{phone_number}%")
+        )
+    
+    # Search by NHIS number
+    if nhis_number:
+        query = query.join(Patient).filter(
+            Patient.nhis_number.ilike(f"%{nhis_number}%")
+        )
+    
+    if invoice_ids:
+        query = query.filter(Invoice.id.in_(invoice_ids))
+    
+    if status:
+        query = query.filter(Invoice.status == status)
+    
+    if start_date:
+        query = query.filter(Invoice.invoice_date >= start_date)
+    
+    if end_date:
+        query = query.filter(Invoice.invoice_date <= end_date)
+    
+    # If charge_type filter is provided, filter invoices that have charges of that type
+    if charge_type:
+        from app.models.billing_models import Charge
+        invoice_ids_with_charge_type = db.query(Charge.invoice_id).filter(
+            Charge.charge_type == charge_type,
+            Charge.is_active == True
+        ).distinct().subquery()
+        query = query.filter(Invoice.id.in_(invoice_ids_with_charge_type))
+        print(f"[DEBUG] Added charge_type filter: {charge_type}")
+    
+    # Log the final query for debugging
+    print(f"[DEBUG] Final query prepared, executing now...")
+    
+    results = query.order_by(Invoice.invoice_date.desc()).all()
+    print(f"[DEBUG] Query returned {len(results)} invoices")
+    
+    return results
+
+
+def create_consolidated_receipt(
+    db: Session,
+    patient_id: int,
+    invoice_ids: List[int],
+    generated_by_id: int,
+    payment_method: str,
+    transaction_reference: Optional[str] = None
+) -> ConsolidatedReceipt:
+    """
+    Create a consolidated receipt from multiple invoices.
+    Links invoices, their charges, and payments.
+    """
+    from app.models.billing_models import (
+        Invoice, Payment, Charge, ConsolidatedReceipt,
+        ConsolidatedReceiptInvoice, ConsolidatedReceiptCharge,
+        ConsolidatedReceiptPayment, ConsolidatedReceiptStatus
+    )
+    
+    # Get all invoices
+    invoices = db.query(Invoice).options(
+        joinedload(Invoice.charges),
+        joinedload(Invoice.payments)
+    ).filter(
+        Invoice.id.in_(invoice_ids),
+        Invoice.is_active == True
+    ).all()
+    
+    if not invoices:
+        raise ValueError("No valid invoices found")
+    
+    # Verify all invoices belong to the same patient
+    patient_ids = set(inv.patient_id for inv in invoices)
+    if len(patient_ids) > 1:
+        raise ValueError("All invoices must belong to the same patient")
+    
+    # Verify patient_id matches
+    invoice_patient_id = next(iter(patient_ids)) if patient_ids else None
+    if invoice_patient_id and invoice_patient_id != patient_id:
+        raise ValueError("Patient ID does not match invoices")
+    
+    # Calculate totals
+    total_amount = Decimal('0.00')
+    total_paid = Decimal('0.00')
+    total_discount = Decimal('0.00')
+    total_balance = Decimal('0.00')
+    
+    # Get all payments for these invoices
+    all_payments = []
+    for invoice in invoices:
+        total_amount += invoice.total_amount or Decimal('0.00')
+        total_paid += invoice.paid_amount or Decimal('0.00')
+        total_discount += invoice.discount_amount or Decimal('0.00')
+        total_balance += invoice.balance or Decimal('0.00')
+        all_payments.extend(invoice.payments)
+    
+    # Create consolidated receipt
+    receipt_number = generate_consolidated_receipt_number(db)
+    
+    # Determine primary payment method
+    primary_payment_method = payment_method
+    
+    consolidated_receipt = ConsolidatedReceipt(
+        receipt_number=receipt_number,
+        patient_id=patient_id,
+        generated_by_id=generated_by_id,
+        status=ConsolidatedReceiptStatus.DRAFT.value,
+        total_invoices=len(invoices),
+        total_amount=total_amount,
+        total_paid=total_paid,
+        total_discount=total_discount,
+        total_balance=total_balance,
+        primary_payment_method=primary_payment_method
+    )
+    
+    db.add(consolidated_receipt)
+    db.flush()  # Get the ID
+    
+    # Add invoice links with charges
+    for invoice in invoices:
+        # Get primary charge type from invoice charges
+        primary_charge_type = None
+        if invoice.charges:
+            primary_charge_type = invoice.charges[0].charge_type.value if hasattr(invoice.charges[0].charge_type, 'value') else str(invoice.charges[0].charge_type)
+        
+        receipt_invoice = ConsolidatedReceiptInvoice(
+            receipt_id=consolidated_receipt.id,
+            invoice_id=invoice.id,
+            invoice_number=invoice.invoice_number,
+            invoice_date=invoice.invoice_date,
+            subtotal=invoice.subtotal or Decimal('0.00'),
+            discount_amount=invoice.discount_amount or Decimal('0.00'),
+            total_amount=invoice.total_amount or Decimal('0.00'),
+            paid_amount=invoice.paid_amount or Decimal('0.00'),
+            balance=invoice.balance or Decimal('0.00'),
+            status=invoice.status.value if hasattr(invoice.status, 'value') else str(invoice.status),
+            charge_type=primary_charge_type
+        )
+        db.add(receipt_invoice)
+        db.flush()
+        
+        # Add charges for each invoice
+        for charge in invoice.charges:
+            receipt_charge = ConsolidatedReceiptCharge(
+                receipt_invoice_id=receipt_invoice.id,
+                charge_id=charge.id,
+                description=charge.description,
+                charge_type=charge.charge_type.value if hasattr(charge.charge_type, 'value') else str(charge.charge_type),
+                quantity=charge.quantity or 1,
+                unit_price=charge.unit_price or Decimal('0.00'),
+                discount=charge.discount or Decimal('0.00'),
+                tax_amount=charge.tax_amount or Decimal('0.00'),
+                total_amount=charge.total_amount or Decimal('0.00')
+            )
+            db.add(receipt_charge)
+    
+    # Add payments
+    for payment in all_payments:
+        if payment.status == PaymentStatus.COMPLETED.value:
+            receipt_payment = ConsolidatedReceiptPayment(
+                receipt_id=consolidated_receipt.id,
+                payment_id=payment.id,
+                amount=payment.amount or Decimal('0.00'),
+                payment_method=payment.payment_method.value if hasattr(payment.payment_method, 'value') else str(payment.payment_method),
+                transaction_reference=payment.transaction_reference,
+                payment_number=payment.payment_number,
+                payment_date=payment.payment_date
+            )
+            db.add(receipt_payment)
+    
+    db.commit()
+    db.refresh(consolidated_receipt)
+    
+    return consolidated_receipt
+
+
+def get_consolidated_receipt(db: Session, receipt_id: int) -> Optional[ConsolidatedReceipt]:
+    """Get a consolidated receipt by ID with all relationships"""
+    from sqlalchemy.orm import joinedload
+    
+    return db.query(ConsolidatedReceipt).options(
+        joinedload(ConsolidatedReceipt.patient),
+        joinedload(ConsolidatedReceipt.generated_by),
+        joinedload(ConsolidatedReceipt.invoices).joinedload(ConsolidatedReceiptInvoice.charges),
+        joinedload(ConsolidatedReceipt.payments)
+    ).filter(
+        ConsolidatedReceipt.id == receipt_id,
+        ConsolidatedReceipt.is_active == True
+    ).first()
+
+
+def get_consolidated_receipt_by_number(db: Session, receipt_number: str) -> Optional[ConsolidatedReceipt]:
+    """Get a consolidated receipt by receipt number"""
+    from sqlalchemy.orm import joinedload
+    
+    return db.query(ConsolidatedReceipt).options(
+        joinedload(ConsolidatedReceipt.patient),
+        joinedload(ConsolidatedReceipt.generated_by),
+        joinedload(ConsolidatedReceipt.invoices).joinedload(ConsolidatedReceiptInvoice.charges),
+        joinedload(ConsolidatedReceipt.payments)
+    ).filter(
+        ConsolidatedReceipt.receipt_number == receipt_number,
+        ConsolidatedReceipt.is_active == True
+    ).first()
+
+
+def get_consolidated_receipts(
+    db: Session,
+    patient_id: Optional[int] = None,
+    status: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = 100
+) -> List[ConsolidatedReceipt]:
+    """Get consolidated receipts with optional filters"""
+    from sqlalchemy.orm import joinedload
+    
+    query = db.query(ConsolidatedReceipt).options(
+        joinedload(ConsolidatedReceipt.patient)
+    ).filter(
+        ConsolidatedReceipt.is_active == True
+    )
+    
+    if patient_id:
+        query = query.filter(ConsolidatedReceipt.patient_id == patient_id)
+    
+    if status:
+        query = query.filter(ConsolidatedReceipt.status == status)
+    
+    if start_date:
+        query = query.filter(ConsolidatedReceipt.generated_at >= start_date)
+    
+    if end_date:
+        query = query.filter(ConsolidatedReceipt.generated_at <= end_date)
+    
+    return query.order_by(ConsolidatedReceipt.generated_at.desc()).limit(limit).all()
+
+
+def mark_consolidated_receipt_printed(
+    db: Session,
+    receipt_id: int,
+    user_id: int,
+    printer_name: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None
+) -> ConsolidatedReceipt:
+    """Mark a consolidated receipt as printed and create audit log"""
+    from app.models.billing_models import (
+        ConsolidatedReceiptPrintLog, ConsolidatedReceiptStatus,
+        ConsolidatedReceiptPrintAction
+    )
+    
+    receipt = db.query(ConsolidatedReceipt).filter(
+        ConsolidatedReceipt.id == receipt_id
+    ).first()
+    
+    if not receipt:
+        raise ValueError("Consolidated receipt not found")
+    
+    # Update status
+    receipt.status = ConsolidatedReceiptStatus.PRINTED.value
+    receipt.printed_at = datetime.now()
+    
+    # Create print log
+    print_log = ConsolidatedReceiptPrintLog(
+        receipt_id=receipt_id,
+        user_id=user_id,
+        action=ConsolidatedReceiptPrintAction.PRINT.value,
+        status="success",
+        printer_name=printer_name,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    db.add(print_log)
+    
+    db.commit()
+    db.refresh(receipt)
+    
+    return receipt
+
+
+def create_reprint_log(
+    db: Session,
+    receipt_id: int,
+    user_id: int,
+    authorized_by_id: int,
+    reason: str,
+    printer_name: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None
+) -> ConsolidatedReceiptPrintLog:
+    """Create a reprint log entry with authorization"""
+    from app.models.billing_models import ConsolidatedReceiptPrintLog, ConsolidatedReceiptPrintAction
+    
+    print_log = ConsolidatedReceiptPrintLog(
+        receipt_id=receipt_id,
+        user_id=user_id,
+        action=ConsolidatedReceiptPrintAction.REPRINT.value,
+        status="success",
+        printer_name=printer_name,
+        authorized_by_id=authorized_by_id,
+        reason=reason,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    db.add(print_log)
+    db.commit()
+    db.refresh(print_log)
+    
+    return print_log
+
+
+def get_print_logs(
+    db: Session,
+    receipt_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    limit: int = 100
+) -> List[ConsolidatedReceiptPrintLog]:
+    """Get print audit logs with optional filters"""
+    from sqlalchemy.orm import joinedload
+    
+    query = db.query(ConsolidatedReceiptPrintLog).options(
+        joinedload(ConsolidatedReceiptPrintLog.user),
+        joinedload(ConsolidatedReceiptPrintLog.authorized_by)
+    )
+    
+    if receipt_id:
+        query = query.filter(ConsolidatedReceiptPrintLog.receipt_id == receipt_id)
+    
+    if user_id:
+        query = query.filter(ConsolidatedReceiptPrintLog.user_id == user_id)
+    
+    return query.order_by(ConsolidatedReceiptPrintLog.created_at.desc()).limit(limit).all()
+
 

@@ -14,7 +14,7 @@ from app.core.deps import get_current_user, role_required
 from app.models.billing_models import Invoice, Payment, InvoiceStatus, PaymentMethod, ChargeType, RefundStatus
 from app.models.patient_models import Patient
 from app.crud import billing_crud
-from app.schemas.billing_schemas import InvoiceCreate, PaymentCreate, RefundCreate, RefundUpdate, RefundApprove, RefundReject, RefundProcess, RefundPolicyCreate, RefundPolicyUpdate
+from app.schemas.billing_schemas import InvoiceCreate, PaymentCreate, RefundCreate, RefundUpdate, RefundApprove, RefundReject, RefundProcess, RefundCancel, RefundPolicyCreate, RefundPolicyUpdate
 
 router = APIRouter(tags=["Billing"])
 # Register the age filter
@@ -449,6 +449,25 @@ def create_invoice_page(
     # Load all active service pricing for service selection
     all_services = service_pricing_crud.get_all_service_pricing(db, skip=0, limit=1000, include_inactive=False)
     from app.utils.charge_types_utils import get_charge_types
+    from app.models.service_pricing_models import ServicePricing
+    
+    # Group service pricing by charge type
+    service_pricing_by_charge_type = {}
+    all_service_pricing = db.query(ServicePricing).filter(
+        ServicePricing.is_active == True
+    ).order_by(ServicePricing.charge_type, ServicePricing.service_name).all()
+    
+    for service in all_service_pricing:
+        ct = service.charge_type
+        if ct not in service_pricing_by_charge_type:
+            service_pricing_by_charge_type[ct] = []
+        service_pricing_by_charge_type[ct].append({
+            "id": service.id,
+            "service_name": service.service_name,
+            "service_code": service.service_code,
+            "unit_price": float(service.unit_price) if service.unit_price else 0,
+            "description": service.description or service.service_name
+        })
     
     context = {
         "request": request,
@@ -457,9 +476,10 @@ def create_invoice_page(
         "user_role": current_user.role.name,
         "patient": patient,
         "encounter": encounter,
-        "charge_types": get_charge_types(db),
+        "charge_types": [ct for ct in get_charge_types(db) if ct not in ['lab_test', 'pharmacy', 'other']],
         "payment_methods": [pm.value for pm in PaymentMethod],
-        "services": all_services  # All services for dropdown
+        "services": all_services,  # All services for dropdown
+        "service_pricing_by_charge_type": service_pricing_by_charge_type
     }
     return templates.TemplateResponse("billing/create_invoice.html", context)
 
@@ -573,8 +593,10 @@ def view_invoice(
     View a specific invoice.
     """
     from app.models.billing_models import ChargePayment, Charge
-    from app.crud import hospital_settings_crud
+    from app.crud import hospital_settings_crud, service_pricing_crud
     from app.models.procedure_catalog_models import ProcedureCatalog
+    from app.models.service_pricing_models import ServicePricing
+    from app.utils.charge_types_utils import get_charge_types
     
     invoice = db.query(Invoice).options(
         joinedload(Invoice.charges).joinedload(Charge.charge_payments),
@@ -605,6 +627,29 @@ def view_invoice(
         for p in procedure_catalogs
     ]
     
+    # Get charge types for the Add Charge modal dropdown
+    # Filter out lab_test, pharmacy, and other as they are handled by specific services
+    all_charge_types = get_charge_types(db)
+    charge_types = [ct for ct in all_charge_types if ct not in ['lab_test', 'pharmacy', 'other']]
+    
+    # Get active service pricing grouped by charge type for the Add Charge modal
+    all_service_pricing = db.query(ServicePricing).filter(
+        ServicePricing.is_active == True
+    ).order_by(ServicePricing.charge_type, ServicePricing.service_name).all()
+    
+    service_pricing_by_charge_type = {}
+    for service in all_service_pricing:
+        ct = service.charge_type
+        if ct not in service_pricing_by_charge_type:
+            service_pricing_by_charge_type[ct] = []
+        service_pricing_by_charge_type[ct].append({
+            "id": service.id,
+            "service_name": service.service_name,
+            "service_code": service.service_code,
+            "unit_price": float(service.unit_price) if service.unit_price else 0,
+            "description": service.description or service.service_name
+        })
+    
     context = {
         "request": request,
         "title": f"Invoice {invoice.invoice_number}",
@@ -614,7 +659,9 @@ def view_invoice(
         "patient": invoice.patient,
         "hospital_settings": hospital_settings,
         "now": datetime.now(),
-        "procedure_catalogs": procedure_catalog_list
+        "procedure_catalogs": procedure_catalog_list,
+        "service_pricing_by_charge_type": service_pricing_by_charge_type,
+        "charge_types": charge_types
     }
     return templates.TemplateResponse("billing/invoice_detail.html", context)
 
@@ -635,7 +682,7 @@ def add_charge(
     lab_order_id: Optional[int] = Form(None),
     radiology_order_id: Optional[int] = Form(None),
     prescription_id: Optional[int] = Form(None),
-    procedure_catalog_id: Optional[int] = Form(None)
+    procedure_catalog_id: Optional[str] = Form(None)
 ):
     """
     Add a charge to an invoice.
@@ -655,12 +702,19 @@ def add_charge(
     # For procedure charges, enforce procedure catalog pricing
     final_unit_price = Decimal(unit_price)
     final_description = description
-    final_procedure_catalog_id = procedure_catalog_id
     
-    if charge_type == "procedure" and procedure_catalog_id:
+    # Convert procedure_catalog_id from string to int if not empty
+    final_procedure_catalog_id = None
+    if procedure_catalog_id and procedure_catalog_id.strip():
+        try:
+            final_procedure_catalog_id = int(procedure_catalog_id.strip())
+        except ValueError:
+            final_procedure_catalog_id = None
+    
+    if charge_type == "procedure" and final_procedure_catalog_id:
         # Fetch price from procedure catalog
         catalog = db.query(ProcedureCatalog).filter(
-            ProcedureCatalog.id == procedure_catalog_id
+            ProcedureCatalog.id == final_procedure_catalog_id
         ).first()
         
         if catalog:
@@ -680,8 +734,15 @@ def add_charge(
             # Procedure catalog not found, use the provided price but log warning
             pass
     
+    # Get charge type enum, handling custom charge types
+    try:
+        charge_type_enum = ChargeType(charge_type)
+    except ValueError:
+        # For custom charge types not in enum, use OTHER
+        charge_type_enum = ChargeType.OTHER
+    
     charge_data = ChargeCreate(
-        charge_type=ChargeType(charge_type),
+        charge_type=charge_type_enum,
         description=final_description,
         quantity=quantity,
         unit_price=final_unit_price,
@@ -879,6 +940,53 @@ def print_receipt(
     return templates.TemplateResponse("billing/receipt.html", context)
 
 
+@router.post("/billing/invoices/{invoice_id}/discount", name="apply_invoice_discount", status_code=status.HTTP_302_FOUND)
+def apply_invoice_discount(
+    request: Request,
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Accountant", "Billing Staff"])),
+    discount_amount: float = Form(...),
+    discount_reason: str = Form(...),
+    notes: Optional[str] = Form(None)
+):
+    """
+    Apply a discount to an invoice.
+    """
+    from app.models.billing_models import Invoice, InvoiceStatus
+    from decimal import Decimal
+    
+    # Get invoice
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Validate discount amount
+    if discount_amount <= 0:
+        raise HTTPException(status_code=400, detail="Discount amount must be greater than 0")
+    
+    if discount_amount > float(invoice.balance):
+        raise HTTPException(status_code=400, detail=f"Discount cannot exceed invoice balance of GHS {invoice.balance}")
+    
+    # Apply discount
+    current_discount = float(invoice.discount_amount) if invoice.discount_amount else 0
+    invoice.discount_amount = Decimal(str(current_discount + discount_amount))
+    invoice.balance = invoice.total_amount - invoice.paid_amount - invoice.discount_amount
+    
+    # Update status
+    if invoice.balance <= 0:
+        invoice.status = InvoiceStatus.PAID
+    
+    db.commit()
+    db.refresh(invoice)
+    
+    # Redirect back to invoice
+    return RedirectResponse(
+        url=str(request.url_for('view_invoice', invoice_id=invoice_id)) + "?status=discount_applied",
+        status_code=status.HTTP_302_FOUND
+    )
+
+
 @router.get("/billing/receipts/{receipt_number}", name="view_receipt")
 def view_receipt(
     request: Request,
@@ -980,7 +1088,7 @@ def encounter_invoice(
         "encounter": encounter,
         "patient": encounter.patient,
         "invoices": invoices,
-        "charge_types": get_charge_types(db),
+        "charge_types": [ct for ct in get_charge_types(db) if ct not in ['lab_test', 'pharmacy', 'other']],
         "payment_methods": [pm.value for pm in PaymentMethod]
     }
     return templates.TemplateResponse("billing/encounter_invoice.html", context)
@@ -1105,7 +1213,7 @@ def update_refund_policy(
 
 # ==================== Refund API Endpoints ====================
 
-@router.post("/refunds", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post("/billing/refunds", response_model=dict, status_code=status.HTTP_201_CREATED)
 def create_refund(
     refund_data: RefundCreate,
     db: Session = Depends(get_db),
@@ -1126,7 +1234,7 @@ def create_refund(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/refunds", response_model=List[dict])
+@router.get("/billing/refunds", response_model=List[dict])
 def get_refunds(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -1154,7 +1262,48 @@ def get_refunds(
     ]
 
 
-@router.get("/refunds/{refund_id}", response_model=dict)
+# Refund Statistics Endpoint - MUST be BEFORE /{refund_id} route
+@router.get("/billing/refunds/statistics", response_model=dict)
+def get_refund_statistics(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Get refund statistics for dashboard"""
+    from sqlalchemy import func
+    from app.models.billing_models import Refund, RefundStatus
+    
+    # Total counts by status - use Refund.status column, not the enum directly
+    stats = db.query(
+        Refund.status,
+        func.count(Refund.id).label('count'),
+        func.coalesce(func.sum(Refund.amount), 0).label('total_amount')
+    ).group_by(Refund.status).all()
+    
+    status_breakdown = {}
+    for status, count, total in stats:
+        status_breakdown[status.value if hasattr(status, 'value') else str(status)] = {
+            "count": count,
+            "total_amount": float(total)
+        }
+    
+    # Overall totals
+    total_refunds = db.query(func.count(Refund.id)).scalar() or 0
+    total_amount = db.query(func.coalesce(func.sum(Refund.amount), 0)).scalar() or 0
+    
+    # Pending count for urgent attention
+    pending_count = db.query(func.count(Refund.id)).filter(
+        Refund.status == RefundStatus.PENDING
+    ).scalar() or 0
+    
+    return {
+        "total_refunds": total_refunds,
+        "total_amount": float(total_amount),
+        "pending_count": pending_count,
+        "status_breakdown": status_breakdown
+    }
+
+
+@router.get("/billing/refunds/{refund_id}", response_model=dict)
 def get_refund(
     refund_id: int,
     db: Session = Depends(get_db),
@@ -1235,7 +1384,89 @@ def get_invoice_refunds(
     ]
 
 
-@router.patch("/refunds/{refund_id}/approve", response_model=dict)
+@router.delete("/billing/invoices/by-number/{invoice_number}", response_model=dict)
+def delete_invoice_by_number(
+    invoice_number: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance"]))
+):
+    """
+    Delete (void) an invoice by invoice number (e.g., INV-20260304-0007).
+    Only allows deletion of invoices that are not fully paid.
+    """
+    # Find the invoice by invoice number
+    db_invoice = db.query(Invoice).filter(Invoice.invoice_number == invoice_number).first()
+    if not db_invoice:
+        raise HTTPException(status_code=404, detail=f"Invoice {invoice_number} not found")
+    
+    # Check if invoice has payments - if so, cannot delete
+    if db_invoice.payments and len(db_invoice.payments) > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete invoice with payments. Please process a refund first."
+        )
+    
+    # Check if invoice is PAID - if so, cannot delete
+    if db_invoice.status == InvoiceStatus.PAID:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete a paid invoice. Please process a refund first."
+        )
+    
+    # Use the CRUD function to soft delete
+    success = billing_crud.delete_invoice(db, db_invoice.id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete invoice")
+    
+    return {
+        "message": f"Invoice {invoice_number} deleted successfully",
+        "invoice_id": db_invoice.id,
+        "invoice_number": invoice_number
+    }
+
+
+@router.delete("/billing/invoices/{invoice_id}", response_model=dict)
+def delete_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(role_required(["Admin", "Finance"]))
+):
+    """
+    Delete (void) an invoice by ID.
+    Only allows deletion of invoices that are not fully paid.
+    """
+    # First, find the invoice by ID
+    db_invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not db_invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Check if invoice has payments - if so, cannot delete
+    if db_invoice.payments and len(db_invoice.payments) > 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete invoice with payments. Please process a refund first."
+        )
+    
+    # Check if invoice is PAID - if so, cannot delete
+    if db_invoice.status == InvoiceStatus.PAID:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete a paid invoice. Please process a refund first."
+        )
+    
+    # Use the CRUD function to soft delete
+    success = billing_crud.delete_invoice(db, invoice_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete invoice")
+    
+    return {
+        "message": f"Invoice {db_invoice.invoice_number} deleted successfully",
+        "invoice_id": invoice_id,
+        "invoice_number": db_invoice.invoice_number
+    }
+
+
+@router.patch("/billing/refunds/{refund_id}/approve", response_model=dict)
 def approve_refund(
     refund_id: int,
     data: RefundApprove,
@@ -1257,7 +1488,7 @@ def approve_refund(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.patch("/refunds/{refund_id}/reject", response_model=dict)
+@router.patch("/billing/refunds/{refund_id}/reject", response_model=dict)
 def reject_refund(
     refund_id: int,
     data: RefundReject,
@@ -1279,7 +1510,7 @@ def reject_refund(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.patch("/refunds/{refund_id}/process", response_model=dict)
+@router.patch("/billing/refunds/{refund_id}/process", response_model=dict)
 def process_refund(
     refund_id: int,
     data: RefundProcess,

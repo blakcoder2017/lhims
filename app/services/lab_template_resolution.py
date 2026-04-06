@@ -40,7 +40,8 @@ class TemplateResolutionError(Exception):
 def resolve_template_for_order(
     db: Session,
     lab_order: LabOrder,
-    persist: bool = True
+    persist: bool = True,
+    force_latest: bool = True
 ) -> ResolvedTemplate:
     """
     Resolve the template to use for a lab order result.
@@ -49,6 +50,8 @@ def resolve_template_for_order(
         db: Database session
         lab_order: The LabOrder to resolve template for
         persist: Whether to persist resolved template_id and version to LabOrder
+        force_latest: If True, always use the latest published version. If False, 
+                     use stored version for stable results (default behavior).
         
     Returns:
         ResolvedTemplate with template_id, version, and schema
@@ -56,14 +59,22 @@ def resolve_template_for_order(
     Raises:
         TemplateResolutionError: If template cannot be resolved
     """
-    # 1. If already has template_version_used, use it (stable results)
-    if lab_order.template_id and lab_order.template_version_used:
+    # 1. If already has template_version_used and not forcing latest, use it (stable results)
+    if lab_order.template_id and lab_order.template_version_used and not force_latest:
         version = _get_published_version(db, lab_order.template_id, lab_order.template_version_used)
         if version:
+            # Ensure schema_json is a dict, not a JSON string
+            schema_json = version.schema_json
+            if isinstance(schema_json, str):
+                import json
+                try:
+                    schema_json = json.loads(schema_json)
+                except json.JSONDecodeError:
+                    schema_json = {"meta": {"name": "Error"}, "fields": {}, "layout": {"sections": []}}
             return ResolvedTemplate(
                 template_id=lab_order.template_id,
                 template_version=lab_order.template_version_used,
-                schema_json=version.schema_json,
+                schema_json=schema_json,
                 is_persisted=True,
                 is_from_catalog=False
             )
@@ -89,14 +100,15 @@ def resolve_template_for_order(
         )
     
     # Get version from catalog or use latest published
-    if lab_test.template_version:
+    # When force_latest=True, ignore any catalog-level version pin and always use current
+    if lab_test.template_version and not force_latest:
         template_version = lab_test.template_version
     else:
         # Use latest published version
         template = db.query(LabTemplate).filter(LabTemplate.id == template_id).first()
         if not template:
             raise TemplateResolutionError(f"LabTemplate {template_id} not found")
-        
+
         if not template.current_version:
             raise TemplateResolutionError(
                 f"LabTemplate {template_id} has no published versions"
@@ -116,10 +128,19 @@ def resolve_template_for_order(
         lab_order.template_version_used = template_version
         # Don't commit here - let caller manage transaction
     
+    # Ensure schema_json is a dict, not a JSON string
+    schema_json = version.schema_json
+    if isinstance(schema_json, str):
+        import json
+        try:
+            schema_json = json.loads(schema_json)
+        except json.JSONDecodeError:
+            schema_json = {"meta": {"name": "Error"}, "fields": {}, "layout": {"sections": []}}
+    
     return ResolvedTemplate(
         template_id=template_id,
         template_version=template_version,
-        schema_json=version.schema_json,
+        schema_json=schema_json,
         is_persisted=persist,
         is_from_catalog=True
     )

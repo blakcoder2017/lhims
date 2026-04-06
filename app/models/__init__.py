@@ -65,6 +65,7 @@ from app.models.drug_administration_models import DrugAdministration
 from app.models.fluid_balance_models import FluidBalance
 from app.models.disease_models import Disease, EncounterDisease
 from app.models.antenatal_models import AntenatalVisit
+from app.models.baby_discharge_models import BabyDischarge
 from app.models.birth_models import BirthRecord, DeliveryType, BirthOutcome
 from app.models.pharmacy_models import (
     PharmacyDosageForm, PharmacyDrug, PharmacySupplier, PharmacyStore,
@@ -72,6 +73,7 @@ from app.models.pharmacy_models import (
     PharmacyDispenseAllocation, PharmacyDrugInteraction, PharmacyRolePolicy,
     PatientActiveMedication
 )
+from app.models.direct_service_registration_models import DirectServiceRegistration, DirectServiceRegistrationStatus
 from app.models.dhims2_models import (
     DHIMS2Instance,
     DHIMS2Mapping,

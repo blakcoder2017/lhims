@@ -33,17 +33,35 @@ router = APIRouter(
 def doctor_dashboard(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(role_required(["Doctor", "Clinician", "Admin"]))
+    current_user: User = Depends(role_required(["Doctor", "Clinician", "Admin"])),
+    start_date: Optional[str] = Query(None, description="Start date for filtering (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date for filtering (YYYY-MM-DD)")
 ):
-    """Doctor dashboard with patient queue and pending encounters"""
+    """Doctor dashboard with patient queue, pending encounters, lab results, and statistics"""
     from datetime import datetime, date
     from app.models.scheduled_appointment_models import ScheduledAppointmentStatus
-    from app.models.encounter_models import EncounterStatus
+    from app.models.encounter_models import EncounterStatus, OrderStatus
     from app.models.ipd_models import Admission, AdmissionStatus
+    from app.models.encounter_models import LabOrder, RadiologyOrder
+    from app.models.triage_models import TriageVitals
     
+    # Handle date range filtering
+    if start_date and end_date:
+        try:
+            filter_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            filter_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            filter_start = date.today()
+            filter_end = date.today()
+    else:
+        filter_start = date.today()
+        filter_end = date.today()
+    
+    filter_start_datetime = datetime.combine(filter_start, datetime.min.time())
+    filter_end_datetime = datetime.combine(filter_end, datetime.max.time())
     today = date.today()
-    today_start = datetime.combine(today, datetime.min.time())
-    today_end = datetime.combine(today, datetime.max.time())
+    today_start = filter_start_datetime
+    today_end = filter_end_datetime
     
     # Get all currently admitted patients - INCLUDING them in dashboard for doctors
     current_admissions = db.query(Admission).options(
@@ -127,6 +145,127 @@ def doctor_dashboard(
             "stay_days": stay_days
         })
     
+    # ==========================================
+    # NEW: Pending Lab Results for Doctor
+    # ==========================================
+    pending_lab_results = db.query(LabOrder).options(
+        joinedload(LabOrder.patient),
+        joinedload(LabOrder.ordered_by)
+    ).filter(
+        LabOrder.ordered_by_id == current_user.id,
+        LabOrder.status == OrderStatus.COMPLETED.value,
+        LabOrder.result_status.in_(['SUBMITTED', 'VERIFIED'])
+    ).order_by(LabOrder.completed_at.desc()).limit(10).all()
+    
+    pending_lab_count = db.query(LabOrder).filter(
+        LabOrder.ordered_by_id == current_user.id,
+        LabOrder.status == OrderStatus.COMPLETED.value,
+        LabOrder.result_status.in_(['SUBMITTED', 'VERIFIED'])
+    ).count()
+    
+    # ==========================================
+    # NEW: Recent Patient History
+    # ==========================================
+    recent_encounters = db.query(Encounter).options(
+        joinedload(Encounter.patient)
+    ).filter(
+        Encounter.clinician_id == current_user.id,
+        Encounter.is_active == True
+    ).order_by(Encounter.encounter_date.desc()).limit(5).all()
+    
+    recent_patients = []
+    seen_patient_ids = set()
+    for enc in recent_encounters:
+        if enc.patient_id not in seen_patient_ids:
+            seen_patient_ids.add(enc.patient_id)
+            recent_patients.append({
+                "encounter": enc,
+                "patient": enc.patient
+            })
+    
+    # ==========================================
+    # NEW: Patient Vitals Summary for Queue Patients
+    # ==========================================
+    # Get patient IDs from various sources
+    all_patient_ids = set()
+    for appt in assigned_appointments:
+        all_patient_ids.add(appt.patient_id)
+    for enc in pending_encounters:
+        all_patient_ids.add(enc.patient_id)
+    for appt in department_appointments:
+        all_patient_ids.add(appt.patient_id)
+    
+    # Get latest vitals for each patient
+    patient_vitals_map = {}
+    for pid in all_patient_ids:
+        latest_vitals = db.query(TriageVitals).filter(
+            TriageVitals.patient_id == pid
+        ).order_by(TriageVitals.recorded_at.desc()).first()
+        if latest_vitals:
+            patient_vitals_map[pid] = {
+                "blood_pressure": f"{latest_vitals.systolic_bp}/{latest_vitals.diastolic_bp}" if latest_vitals.systolic_bp and latest_vitals.diastolic_bp else None,
+                "heart_rate": latest_vitals.heart_rate,
+                "temperature": latest_vitals.temperature,
+                "respiratory_rate": latest_vitals.respiratory_rate,
+                "oxygen_saturation": latest_vitals.oxygen_saturation,
+                "triage_level": latest_vitals.triage_level,
+                "recorded_at": latest_vitals.recorded_at
+            }
+    
+    # ==========================================
+    # NEW: Weekly Statistics
+    # ==========================================
+    # Get last 7 days of encounter data
+    week_ago = today - timedelta(days=7)
+    weekly_encounters = db.query(
+        func.date(Encounter.encounter_date).label('date'),
+        func.count(Encounter.id).label('count')
+    ).filter(
+        Encounter.clinician_id == current_user.id,
+        Encounter.is_active == True,
+        func.date(Encounter.encounter_date) >= week_ago,
+        func.date(Encounter.encounter_date) <= today
+    ).group_by(func.date(Encounter.encounter_date)).all()
+    
+    # Format for chart
+    weekly_stats = {}
+    for i in range(7):
+        day = today - timedelta(days=6-i)
+        weekly_stats[day.strftime('%Y-%m-%d')] = 0
+    for date_obj, count in weekly_encounters:
+        if date_obj:
+            weekly_stats[date_obj.strftime('%Y-%m-%d')] = count
+    
+    # Calculate totals
+    total_encounters_week = sum(weekly_stats.values())
+    
+    # For new vs follow-up, we'll check if patient has previous encounters
+    # This is a simplified approach - checking if this is first encounter for each patient this week
+    new_patients_this_week = 0
+    followup_patients_this_week = 0
+    
+    # Get unique patients seen this week
+    patients_this_week = db.query(Encounter.patient_id).filter(
+        Encounter.clinician_id == current_user.id,
+        Encounter.is_active == True,
+        func.date(Encounter.encounter_date) >= week_ago,
+        func.date(Encounter.encounter_date) <= today
+    ).distinct().all()
+    
+    for (patient_id,) in patients_this_week:
+        # Check if patient has any previous encounters
+        previous_encounter = db.query(Encounter).filter(
+            Encounter.clinician_id == current_user.id,
+            Encounter.patient_id == patient_id,
+            Encounter.is_active == True,
+            func.date(Encounter.encounter_date) < week_ago
+        ).first()
+        
+        if previous_encounter:
+            followup_patients_this_week += 1
+        else:
+            new_patients_this_week += 1
+    
     context = {
         "request": request,
         "title": "Doctor Dashboard",
@@ -138,8 +277,19 @@ def doctor_dashboard(
         "completed_encounters_today": completed_encounters_today,
         "assigned_count": len(assigned_appointments),
         "pending_encounters_count": len(pending_encounters),
-        "current_admissions": admissions_with_stay_days,  # Include current admission cases
-        "admissions_count": len(current_admissions)
+        "current_admissions": admissions_with_stay_days,
+        "admissions_count": len(current_admissions),
+        # New data for enhanced dashboard
+        "pending_lab_results": pending_lab_results,
+        "pending_lab_count": pending_lab_count,
+        "recent_patients": recent_patients,
+        "patient_vitals_map": patient_vitals_map,
+        "weekly_stats": weekly_stats,
+        "total_encounters_week": total_encounters_week,
+        "new_patients_this_week": new_patients_this_week,
+        "followup_patients_this_week": followup_patients_this_week,
+        "filter_start": filter_start.strftime('%Y-%m-%d'),
+        "filter_end": filter_end.strftime('%Y-%m-%d')
     }
     return templates.TemplateResponse("doctor/dashboard.html", context)
 

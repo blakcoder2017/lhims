@@ -91,7 +91,8 @@ def get_opd_visits_by_patient(
     """Get all OPD visits for a patient"""
     query = db.query(OPDVisit).options(
         joinedload(OPDVisit.patient),
-        joinedload(OPDVisit.queue_entry)
+        joinedload(OPDVisit.queue_entry),
+        joinedload(OPDVisit.encounters)
     ).filter(
         OPDVisit.patient_id == patient_id,
         OPDVisit.is_active == True

@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator, Callable
 from contextlib import contextmanager
 from sqlalchemy.exc import InternalError
+from fastapi import HTTPException
 import logging
 
 from app.core.config import settings
@@ -33,6 +34,9 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    except HTTPException:
+        # Don't log HTTP exceptions (like 401 authentication errors) as database errors
+        raise
     except Exception as e:
         # Rollback the transaction on any exception
         db.rollback()

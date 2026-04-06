@@ -1,1 +1,0 @@
-id,patient_id,encounter_id,appointment_id,created_by_id,invoice_number,status,subtotal,discount_amount,tax_amount,total_amount,paid_amount,balance,payment_mechanism,nhis_number,insurance_provider,insurance_policy_number,invoice_date,due_date,paid_date,notes,created_at,updated_at,is_active,opd_visit_id,admission_id

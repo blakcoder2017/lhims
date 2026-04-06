@@ -135,7 +135,7 @@ def get_all_procedures(
 def procedure_catalog_dashboard(
     request: Request,
     db: Session = Depends(get_db),
-    current_user = Depends(role_required(["Admin", "Doctor"])),
+    current_user = Depends(role_required(["Admin", "Management", "Doctor"])),
     search: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     procedure_type: Optional[str] = Query(None),

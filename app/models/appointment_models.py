@@ -39,8 +39,8 @@ class OPDQueue(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Front office staff who created it
     
     # Queue Details
-    visit_type = Column(Enum(VisitType), nullable=False, default=VisitType.WALK_IN)
-    status = Column(Enum(QueueStatus), nullable=False, default=QueueStatus.WAITING)
+    visit_type = Column(Enum(VisitType, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=VisitType.WALK_IN)
+    status = Column(Enum(QueueStatus, native_enum=False, values_callable=lambda x: [e.value for e in x]), nullable=False, default=QueueStatus.WAITING)
     priority = Column(Integer, default=5)  # 1-10 scale, 1 being highest priority
     
     # Queue Management

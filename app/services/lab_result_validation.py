@@ -276,7 +276,8 @@ def compute_flags(
                 db, f"{field_code}_result", patient_gender, age_days, facility_id
             )
         
-        if not ref_range:
+        # Skip if no reference range OR if reference range has no numeric bounds defined
+        if not ref_range or (ref_range.low is None and ref_range.high is None):
             continue
         
         # Determine flag

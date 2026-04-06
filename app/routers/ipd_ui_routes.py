@@ -744,7 +744,6 @@ def create_admission(
     current_admission = ipd_crud.get_current_admission(db, patient_id)
     if current_admission:
         # Redirect back with warning message instead of raising error
-        from fastapi.responses import RedirectResponse
         warning_msg = f"Patient is already admitted (Admission #: {current_admission.admission_number}). Please discharge the patient before creating a new admission."
         return RedirectResponse(
             url=f"{request.url_for('ipd_admission_create_form')}?patient_id={patient_id}&warning={warning_msg}&admission_id={current_admission.id}",
@@ -963,11 +962,13 @@ def admission_detail(
     encounter_ids_for_orders = set()
     if admission.encounter_id:
         encounter_ids_for_orders.add(admission.encounter_id)
-    encounters_in_period = db.query(Encounter).filter(
+    encounters_in_period = db.query(Encounter).options(
+        joinedload(Encounter.clinician)
+    ).filter(
         Encounter.patient_id == admission.patient_id,
         func.date(Encounter.encounter_date) >= admission_start_date,
         func.date(Encounter.encounter_date) <= admission_end_date
-    ).all()
+    ).order_by(Encounter.encounter_date.desc()).all()
     for enc in encounters_in_period:
         encounter_ids_for_orders.add(enc.id)
     
@@ -1330,7 +1331,9 @@ def admission_detail(
     primary_encounter = None
     if admission.encounter_id:
         from app.models.encounter_models import Encounter
-        primary_encounter = db.query(Encounter).filter(Encounter.id == admission.encounter_id).first()
+        primary_encounter = db.query(Encounter).options(
+            joinedload(Encounter.clinician)
+        ).filter(Encounter.id == admission.encounter_id).first()
     
     if primary_encounter:
         encounter_allergies = primary_encounter.allergies
@@ -1343,6 +1346,9 @@ def admission_detail(
             encounter_allergies = latest_encounter.allergies
             encounter_past_medical_history = latest_encounter.past_medical_history
             encounter_current_medications = latest_encounter.medications
+            # Use fallback encounter for display if primary is not set
+            if not primary_encounter:
+                primary_encounter = latest_encounter
 
     context = {
         "request": request,
@@ -1390,6 +1396,7 @@ def admission_detail(
         "encounter_allergies": encounter_allergies,
         "encounter_past_medical_history": encounter_past_medical_history,
         "encounter_current_medications": encounter_current_medications,
+        "primary_encounter": primary_encounter,
     }
     return templates.TemplateResponse("ipd/admission_detail.html", context)
 

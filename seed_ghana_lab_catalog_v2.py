@@ -116,11 +116,11 @@ def get_lab_tests_definition():
         },
         {
             "test_code": "HB_ELECTRO",
-            "test_name": "Haemoglobin Electrophoresis (Hb Phenotype)",
+            "test_name": "HB ELECTROPHORESIS (HB PHENOTYPE)",
             "test_category": "Haematology",
             "test_type": "Qualitative",
             "specimen_type": "EDTA Blood",
-            "description": "Haemoglobin electrophoresis for phenotype determination (AA, AS, SS, SC)",
+            "description": "Haemoglobin electrophoresis for sickle cell screening and phenotype determination",
             "routine_tat": 24,
             "urgent_tat": 8,
             "cost": Decimal("35.00"),
@@ -1113,15 +1113,16 @@ def get_template_definitions():
         "HB_ELECTRO": {
             "discipline": "HEMATOLOGY",
             "fields": {
-                "hb_phenotype": {"label": "Hb Phenotype", "type": "choice",
+                "sickle_cell_screening": {"label": "Sickle Cell Screening", "type": "choice",
+                    "options": ["Negative", "Positive", "Not Done"]},
+                "hb_phenotype": {"label": "HB-Phenotype", "type": "choice",
                     "options": ["AA", "AS", "SS", "SC", "AC", "CC", "Other"]},
             }
         },
         "G6PD": {
             "discipline": "HEMATOLOGY",
             "fields": {
-                "g6pd_result": {"label": "G6PD Status", "type": "choice",
-                    "options": ["Normal", "Deficient", "Intermediate"]},
+                "g6pd_result": {"label": "G6PD Status", "type": "text"},
             }
         },
         "COOMBS": {
@@ -1967,9 +1968,9 @@ def get_reference_ranges_definition():
          "normal_min": Decimal("20"), "normal_max": Decimal("70"), "unit": "μmol/L"},
         # Uric Acid - μmol/L
         {"field_code": "uric_acid", "test_code": "RFT", "sex": "M", "age_min": 18, "age_max": 70,
-         "normal_min": Decimal("200"), "normal_max": Decimal("430"), "unit": "μmol/L"},
+         "normal_min": Decimal("142"), "normal_max": Decimal("339"), "unit": "μmol/L"},
         {"field_code": "uric_acid", "test_code": "RFT", "sex": "F", "age_min": 18, "age_max": 70,
-         "normal_min": Decimal("140"), "normal_max": Decimal("360"), "unit": "μmol/L"},
+         "normal_min": Decimal("202"), "normal_max": Decimal("416"), "unit": "μmol/L"},
         # eGFR - mL/min/1.73m²
         {"field_code": "egfr", "test_code": "RFT", "sex": "ANY", "age_min": 18, "age_max": 70,
          "normal_min": Decimal("90"), "normal_max": Decimal("120"), "unit": "mL/min/1.73m²"},
@@ -2027,9 +2028,9 @@ def get_reference_ranges_definition():
     # Uric Acid standalone - μmol/L
     ranges.extend([
         {"field_code": "uric_acid_value", "test_code": "URIC_ACID", "sex": "M", "age_min": 18, "age_max": 70,
-         "normal_min": Decimal("200"), "normal_max": Decimal("430"), "unit": "μmol/L"},
+         "normal_min": Decimal("142"), "normal_max": Decimal("339"), "unit": "μmol/L"},
         {"field_code": "uric_acid_value", "test_code": "URIC_ACID", "sex": "F", "age_min": 18, "age_max": 70,
-         "normal_min": Decimal("140"), "normal_max": Decimal("360"), "unit": "μmol/L"},
+         "normal_min": Decimal("202"), "normal_max": Decimal("416"), "unit": "μmol/L"},
     ])
     
     # Amylase - U/L
@@ -2180,10 +2181,19 @@ def get_reference_ranges_definition():
     
     # ========== INFLAMMATORY MARKERS ==========
     
-    # CRP - mg/L
+    # CRP - mg/L (CVD Risk Assessment - interpretation-based, no auto-flags)
+    # < 1.0 mg/L = Low CVD (no inflammation)
+    # 1.0-3.0 mg/L = Moderate CVD risk
+    # > 3.0 mg/L = High CVD risk
+    # > 10 mg/L = May indicate infection (bacterial/viral)
     ranges.extend([
         {"field_code": "crp_value", "test_code": "CRP", "sex": "ANY", "age_min": 0, "age_max": 100,
-         "normal_min": Decimal("0"), "normal_max": Decimal("5.0"), "unit": "mg/L"},
+         "normal_min": None, "normal_max": None, "unit": "mg/L",
+         "text_range": "< 1.0 mg/L Low CVD (no inflammation)\n1.0-3.0 mg/L Moderate CVD risk (No inflammation situation)\n> 3.0 mg/L High CVD risk (No inflammation situation)\n> 10 There may be other infections (bacteria infections or viral infections)"},
+        # Also add 'crp' field code for templates using that naming
+        {"field_code": "crp", "test_code": "CRP", "sex": "ANY", "age_min": 0, "age_max": 100,
+         "normal_min": None, "normal_max": None, "unit": "mg/L",
+         "text_range": "< 1.0 mg/L Low CVD (no inflammation)\n1.0-3.0 mg/L Moderate CVD risk (No inflammation situation)\n> 3.0 mg/L High CVD risk (No inflammation situation)\n> 10 There may be other infections (bacteria infections or viral infections)"},
     ])
     
     # ASO - IU/mL
@@ -2309,7 +2319,6 @@ def create_option_sets(db):
         ("RH_FACTOR", '["Positive", "Negative"]'),
         ("SICKLING_RESULT", '["Positive", "Negative"]'),
         ("HB_PHENOTYPE", '["AA", "AS", "SS", "SC", "AC", "CC", "Other"]'),
-        ("G6PD_RESULT", '["Normal", "Deficient", "Intermediate"]'),
         ("COOMBS_RESULT", '["Positive", "Negative"]'),
         ("MICROSCOPY_HPF", '["0-1", "1-5", "5-10", "10-20", ">20"]'),
         ("MICROSCOPY_LPF", '["0-1", "1-5", "5-10", "10-20", ">20"]'),
@@ -2837,9 +2846,9 @@ def create_lab_reference_ranges(db):
         
         # Uric Acid
         {"field_code": "uric_acid_value", "sex": "M", "age_min_days": 6570, "age_max_days": 25550,
-         "low": Decimal("200"), "high": Decimal("430"), "unit": "μmol/L"},
+         "low": Decimal("142"), "high": Decimal("339"), "unit": "μmol/L"},
         {"field_code": "uric_acid_value", "sex": "F", "age_min_days": 6570, "age_max_days": 25550,
-         "low": Decimal("140"), "high": Decimal("360"), "unit": "μmol/L"},
+         "low": Decimal("202"), "high": Decimal("416"), "unit": "μmol/L"},
         
         # GFR / eGFR
         {"field_code": "gfr_value", "sex": "ANY", "age_min_days": 6570, "age_max_days": 25550,
@@ -2849,9 +2858,18 @@ def create_lab_reference_ranges(db):
         {"field_code": "bnp_value", "sex": "ANY", "age_min_days": 6570, "age_max_days": 25550,
          "low": Decimal("0"), "high": Decimal("100"), "unit": "pg/mL"},
         
-        # CRP
+        # CRP - CVD Risk Assessment (interpretation-based, no auto-flags)
+        # < 1.0 mg/L = Low CVD (no inflammation)
+        # 1.0-3.0 mg/L = Moderate CVD risk
+        # > 3.0 mg/L = High CVD risk
+        # > 10 mg/L = May indicate infection (bacterial/viral)
         {"field_code": "crp_value", "sex": "ANY", "age_min_days": 0, "age_max_days": 36500,
-         "low": Decimal("0"), "high": Decimal("5.0"), "unit": "mg/L"},
+         "low": None, "high": None, "unit": "mg/L",
+         "text_range": "< 1.0 mg/L Low CVD (no inflammation)\n1.0-3.0 mg/L Moderate CVD risk (No inflammation situation)\n> 3.0 mg/L High CVD risk (No inflammation situation)\n> 10 There may be other infections (bacteria infections or viral infections)"},
+        # Also add 'crp' field code for templates using that naming
+        {"field_code": "crp", "sex": "ANY", "age_min_days": 0, "age_max_days": 36500,
+         "low": None, "high": None, "unit": "mg/L",
+         "text_range": "< 1.0 mg/L Low CVD (no inflammation)\n1.0-3.0 mg/L Moderate CVD risk (No inflammation situation)\n> 3.0 mg/L High CVD risk (No inflammation situation)\n> 10 There may be other infections (bacteria infections or viral infections)"},
         
         # ASO
         {"field_code": "aso_value", "sex": "ANY", "age_min_days": 0, "age_max_days": 36500,

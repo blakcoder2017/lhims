@@ -196,7 +196,23 @@ def validate_lab_result(
         )
     
     # Get patient information for age/gender-specific ranges
-    patient = lab_order.encounter.patient
+    # Check both encounter.patient and direct patient_id (for walk-in orders)
+    patient = None
+    if lab_order.encounter and lab_order.encounter.patient:
+        patient = lab_order.encounter.patient
+    elif lab_order.patient_id:
+        # For walk-in orders, get patient directly from lab_order.patient_id
+        from app.models.patient_models import Patient
+        patient = db.query(Patient).filter(Patient.id == lab_order.patient_id).first()
+    
+    if not patient:
+        # No patient found - skip age/gender specific validation
+        return ValidationResult(
+            is_valid=True,
+            status="normal",
+            message="Result recorded (no patient data for validation)"
+        )
+    
     patient_age_years = None
     if patient.date_of_birth:
         from datetime import date

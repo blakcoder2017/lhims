@@ -34,6 +34,16 @@ class LabTemplate(Base):
     discipline = Column(String(100), nullable=False)  # HEMATOLOGY, CHEMISTRY, MICROBIOLOGY, etc.
     status = Column(String(50), nullable=False, default="DRAFT")  # DRAFT, PUBLISHED, ARCHIVED
     current_version = Column(Integer, nullable=True)  # Latest published version number
+    
+    # Usage tracking
+    usage_count = Column(Integer, nullable=True, default=0)
+    last_used_at = Column(DateTime, nullable=True)
+    
+    # Soft delete
+    is_deleted = Column(Boolean, default=False)
+    deleted_at = Column(DateTime, nullable=True)
+    
+    # Metadata
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
@@ -81,8 +91,17 @@ class LabReferenceRange(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     field_code = Column(String(100), nullable=False, index=True)
     sex = Column(String(10), nullable=True, default="ANY")  # M, F, ANY
+    
+    # Postnatal age (days)
     age_min_days = Column(Integer, nullable=True)
     age_max_days = Column(Integer, nullable=True)
+    
+    # Gestational age (weeks) - for preterm neonates
+    gestational_age_min_weeks = Column(Integer, nullable=True)
+    gestational_age_max_weeks = Column(Integer, nullable=True)
+    is_gestational_age_based = Column(Boolean, default=False)
+    
+    # Reference values
     low = Column(Numeric(20, 6), nullable=True)
     high = Column(Numeric(20, 6), nullable=True)
     critical_low = Column(Numeric(20, 6), nullable=True)

@@ -351,12 +351,12 @@ def get_reference_ranges():
          "low": Decimal("10"), "high": Decimal("120"), "unit": "ng/mL"},
     ])
     
-    # Uric Acid
+    # Uric Acid (μmol/L)
     ranges.extend([
         {"field_code": "uric_acid", "sex": "M", "age_min_days": 6570, "age_max_days": 25550, 
-         "low": Decimal("3.5"), "high": Decimal("7.2"), "critical_high": Decimal("9.0"), "unit": "mg/dL"},
+         "low": Decimal("142"), "high": Decimal("339"), "critical_high": Decimal("450"), "unit": "μmol/L"},
         {"field_code": "uric_acid", "sex": "F", "age_min_days": 6570, "age_max_days": 25550, 
-         "low": Decimal("2.4"), "high": Decimal("6.0"), "critical_high": Decimal("8.0"), "unit": "mg/dL"},
+         "low": Decimal("202"), "high": Decimal("416"), "critical_high": Decimal("500"), "unit": "μmol/L"},
     ])
     
     # GFR (estimated)
@@ -621,10 +621,16 @@ def get_reference_ranges():
     
     # ==================== INFLAMMATORY MARKERS ====================
     
-    # C-Reactive Protein (CRP)
+    # C-Reactive Protein (CRP) - CVD Risk Assessment
+    # Interpretation-based range, no auto-flags
+    # < 1.0 mg/L = Low CVD (no inflammation)
+    # 1.0-3.0 mg/L = Moderate CVD risk
+    # > 3.0 mg/L = High CVD risk
+    # > 10 mg/L = May indicate infection (bacterial/viral)
     ranges.extend([
         {"field_code": "crp", "sex": "ANY", "age_min_days": 0, "age_max_days": 25550, 
-         "low": Decimal("0"), "high": Decimal("6.0"), "critical_high": Decimal("20.0"), "unit": "mg/L"},
+         "low": None, "high": None, "critical_high": None, "unit": "mg/L",
+         "text_range": "< 1.0 mg/L Low CVD (no inflammation)\n1.0-3.0 mg/L Moderate CVD risk (No inflammation situation)\n> 3.0 mg/L High CVD risk (No inflammation situation)\n> 10 There may be other infections (bacteria infections or viral infections)"},
     ])
     
     # ASO Titer
